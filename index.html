@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stahlbau Skizzen-Konverter · HSD Hamburg GmbH</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<header class="app-header">
+  <div class="brand">
+    <h1>HSD Hamburg GmbH</h1>
+    <span class="subtitle">Stahlbau Skizzen-Konverter</span>
+    <small>Skizze → Bauteilachsen → Profilbemessung nach DIN EN 1993-1-1</small>
+  </div>
+  <div class="header-contact">
+    Merckmannstraße 30 · 20539 Hamburg<br>
+    Tel. 040 18124794<br>
+    Bearbeiter: Oleksii Severyn, Betriebsleiter
+  </div>
+</header>
+
+<div class="project-bar">
+  <div class="field">
+    <label for="projectName">Projekt</label>
+    <input id="projectName" type="text" placeholder="z. B. Halle Süd, Achse A-D" value="">
+  </div>
+  <div class="field">
+    <label for="projectDate">Datum</label>
+    <input id="projectDate" type="date">
+  </div>
+  <div class="field">
+    <label for="steelGradeGlobal">Stahlgüte</label>
+    <select id="steelGradeGlobal">
+      <option value="S235" selected>S235</option>
+      <option value="S275">S275</option>
+      <option value="S355">S355</option>
+    </select>
+  </div>
+</div>
+
+<div class="main-grid">
+
+  <!-- Fenster 1: Skizze mit Linien -->
+  <div class="panel">
+    <div class="panel-header">
+      <h2><span class="badge-num">1</span> Skizze (Bauteilachsen)</h2>
+    </div>
+    <div class="toolbar">
+      <button class="tool-btn" id="btnDraw" title="Linie zeichnen: Start klicken, Ende klicken">✏️ Linie zeichnen</button>
+      <button class="tool-btn" id="btnCalibrate" title="Maßstab per Referenzlinie festlegen">📏 Maßstab kalibrieren</button>
+      <button class="tool-btn" id="btnGrid" title="Raster ein/aus">▦ Raster</button>
+      <button class="tool-btn" id="btnAngleSnap" title="Winkelfang 15° ein/aus">∠ Winkelfang</button>
+      <button class="tool-btn danger" id="btnClearAll" title="Skizze und Bauteile löschen">🗑 Alles löschen</button>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="sketchCanvas"></canvas>
+      <div class="hint" id="hintBox"></div>
+      <div class="scale-info" id="scaleInfo"></div>
+    </div>
+  </div>
+
+  <!-- Fenster 2: Passende Stahlform -->
+  <div class="panel">
+    <div class="panel-header">
+      <h2><span class="badge-num">2</span> Stahlbau-Ergebnis (Profilzuordnung)</h2>
+    </div>
+    <div class="result-panel-body">
+      <div class="empty-state" id="emptyState">Noch keine Linien gezeichnet. Zeichnen Sie links eine Bauteilachse (Stütze, Gurt, Strebe …) – die passende Stahlform erscheint hier automatisch.</div>
+      <table class="members-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Bauteiltyp</th>
+            <th>Länge [m]</th>
+            <th>Beanspr.</th>
+            <th>N/M [kN·kNm]</th>
+            <th>β</th>
+            <th>Profilfamilie</th>
+            <th>Gewähltes Profil</th>
+            <th>Ausl.</th>
+            <th>Gewicht</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="membersBody"></tbody>
+      </table>
+    </div>
+
+    <div class="summary-bar">
+      <div class="stat"><span class="label">Bauteile</span><span class="value" id="statMemberCount">0</span></div>
+      <div class="stat"><span class="label">Gesamtgewicht Stahl</span><span class="value" id="statTotalWeight">0.0 kg</span></div>
+    </div>
+
+    <div class="cost-section">
+      <div class="field">
+        <label>Material €/kg</label>
+        <input type="number" id="pricePerKg" step="0.05" value="1.80">
+      </div>
+      <div class="field">
+        <label>Bearbeitung €/kg</label>
+        <input type="number" id="processingPerKg" step="0.05" value="0.60">
+      </div>
+      <div class="field">
+        <label>Transport € (pauschal)</label>
+        <input type="number" id="transportFlat" step="10" value="150">
+      </div>
+      <div class="field">
+        <label>Lagerung €/kg</label>
+        <input type="number" id="storagePerKg" step="0.01" value="0.05">
+      </div>
+      <div class="stat"><span class="label">Material</span><span class="value" id="costMaterial">0.00 €</span></div>
+      <div class="stat"><span class="label">Bearbeitung</span><span class="value" id="costProcessing">0.00 €</span></div>
+      <div class="stat"><span class="label">Transport</span><span class="value" id="costTransport">0.00 €</span></div>
+      <div class="stat"><span class="label">Lagerung</span><span class="value" id="costStorage">0.00 €</span></div>
+      <div class="stat"><span class="label">Gesamt (Kostenschätzung)</span><span class="value" id="costTotal">0.00 €</span></div>
+    </div>
+
+    <div class="export-bar">
+      <button id="btnExportCsv">⬇ Als LV-Position (CSV) exportieren</button>
+      <button class="secondary" id="btnPrint">🖨 Drucken / PDF</button>
+    </div>
+  </div>
+
+</div>
+
+<div class="disclaimer">
+  Hinweis: Diese Anwendung dient der überschlägigen Vorbemessung in der Skizzenphase (Bauteilfindung nach DIN EN 1993-1-1,
+  vereinfachtes Biegeknicken um die schwache Achse, Zug- und Biegenachweis am Bruttoquerschnitt). Sie ersetzt nicht die
+  prüffähige Ausführungsstatik inkl. Anschlussnachweisen, Stabilität des Gesamtsystems, Brandschutz, Ausführungsklasse
+  und aktueller Lastannahmen nach den gültigen DIN-Normen und Nationalen Anhängen. Endgültige Freigabe durch einen
+  Tragwerksplaner erforderlich.
+</div>
+
+<script src="js/steel-database.js"></script>
+<script src="js/calculator.js"></script>
+<script src="js/canvas-editor.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
