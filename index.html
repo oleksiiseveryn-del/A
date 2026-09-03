@@ -250,6 +250,25 @@
       </table>
       <div class="empty-state" id="openingEmpty">Noch keine Öffnungen angelegt.</div>
 
+      <h3 class="section-title">Räume</h3>
+      <p class="view-note">Räume werden aus den Wandachsen erkannt. Die <strong>lichte Fläche</strong> entsteht durch Versatz
+        der Achsen um die halbe Wanddicke und ist die Grundlage der Flächenermittlung nach DIN 277. Abzüge für Nischen,
+        Schächte und Stützen sowie die Anrechnungsfaktoren nach WoFlV sind gesondert zu berücksichtigen.</p>
+      <table class="members-table" id="raumTable">
+        <thead>
+          <tr>
+            <th>Raum</th>
+            <th>Lichte Fläche [m²]</th>
+            <th>Achsfläche [m²]</th>
+            <th>Wandanteil [m²]</th>
+            <th>Umfang licht [m]</th>
+            <th>Begrenzende Wände</th>
+          </tr>
+        </thead>
+        <tbody id="raumBody"></tbody>
+      </table>
+      <div class="empty-state" id="raumEmpty">Kein geschlossener Raum erkannt – dafür müssen die Wände einen geschlossenen Umlauf bilden.</div>
+
       <h3 class="section-title">Materialaufstellung und Kosten</h3>
       <table class="members-table" id="archMaterialTable">
         <thead>

@@ -670,6 +670,7 @@
     });
 
     renderOpeningTable();
+    renderRaumTable();
     renderMaterialTable();
   }
 
@@ -1002,6 +1003,42 @@
     if (e.key === "ArrowLeft") zeichneAnsicht(sheetIndex - 1);
     if (e.key === "ArrowRight") zeichneAnsicht(sheetIndex + 1);
   });
+
+
+  /* ------------------------------------------------------------- Räume */
+
+  function raumListe() {
+    const waende = ansichtsWaende();
+    if (waende.length < 3) return [];
+    const dickeVon = (wand) => (wand ? bauteilGeometrie(wand).dicke : 0);
+    return findeRaeume(waende).map((raum) => ({ raum, licht: lichteRaumflaeche(raum, dickeVon) }));
+  }
+
+  function renderRaumTable() {
+    const body = document.getElementById("raumBody");
+    const empty = document.getElementById("raumEmpty");
+    body.innerHTML = "";
+    const liste = raumListe();
+    empty.hidden = liste.length > 0;
+
+    liste.forEach(({ raum, licht }, i) => {
+      // begrenzende Wände ohne Wiederholung auflisten
+      const namen = [];
+      raum.waende.forEach((w) => {
+        const name = w ? bauteilBezeichnung(w) : null;
+        if (name && namen.indexOf(name) === -1) namen.push(name);
+      });
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>R${i + 1}</td>
+        <td><strong>${licht.ok ? licht.flaeche.toFixed(2) : "–"}</strong></td>
+        <td>${raum.flaeche.toFixed(2)}</td>
+        <td>${licht.ok ? (raum.flaeche - licht.flaeche).toFixed(2) : "–"}</td>
+        <td>${licht.ok ? licht.umfang.toFixed(2) : "–"}</td>
+        <td class="cut-labels">${namen.join(", ")}</td>`;
+      body.appendChild(tr);
+    });
+  }
 
   /* ------------------------------------------------------------- Tabellen */
 
@@ -1611,6 +1648,27 @@
             (o.breite * o.hoehe * stueck).toFixed(2), oeffnungWert(o, "u"),
             oeffnungWert(o, "preis"), (oeffnungWert(o, "preis") * stueck).toFixed(2)]);
         });
+      }
+
+      const raeume = raumListe();
+      if (raeume.length) {
+        rows.push([]);
+        rows.push(["Räume (lichte Flächen nach Versatz um die halbe Wanddicke, Grundlage DIN 277)"]);
+        rows.push(["Raum", "Lichte Fläche [m²]", "Achsfläche [m²]", "Wandanteil [m²]", "Umfang licht [m]", "Begrenzende Wände"]);
+        let summeLicht = 0, summeAchs = 0;
+        raeume.forEach(({ raum, licht }, i) => {
+          summeLicht += licht.ok ? licht.flaeche : 0;
+          summeAchs += raum.flaeche;
+          const namen = [];
+          raum.waende.forEach((w) => {
+            const name = w ? bauteilBezeichnung(w) : null;
+            if (name && namen.indexOf(name) === -1) namen.push(name);
+          });
+          rows.push(["R" + (i + 1), licht.ok ? licht.flaeche.toFixed(2) : "-", raum.flaeche.toFixed(2),
+            licht.ok ? (raum.flaeche - licht.flaeche).toFixed(2) : "-",
+            licht.ok ? licht.umfang.toFixed(2) : "-", namen.join(" ")]);
+        });
+        rows.push(["Summe", summeLicht.toFixed(2), summeAchs.toFixed(2), "", "", ""]);
       }
 
       rows.push([]);

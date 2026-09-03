@@ -158,13 +158,19 @@ function findeRaeume(waende) {
     if (i !== start || zyklus.length < 3) return;
 
     const punkte = zyklus.map((h) => knoten[halbkanten[h].von]);
+    // Zu jeder Kante die ursprüngliche Wand merken (die Kanten sind geteilte
+    // Achsstücke und tragen die Ausgangswand in .wand), damit deren Dicke bekannt ist
+    const zugehoerigeWaende = zyklus.map((h) => {
+      const teil = kanten[Math.floor(h / 2)].wand;
+      return teil && teil.wand ? teil.wand : teil;
+    });
     let flaeche = 0;
     for (let k = 0; k < punkte.length; k++) {
       const p = punkte[k], q = punkte[(k + 1) % punkte.length];
       flaeche += p.x * q.z - q.x * p.z;
     }
     flaeche /= 2;
-    flaechen.push({ punkte, flaeche });
+    flaechen.push({ punkte, flaeche, waende: zugehoerigeWaende });
   });
 
   // Der Umlauf liefert Innenflächen mit positivem, die Außenkontur mit
@@ -172,8 +178,67 @@ function findeRaeume(waende) {
   // Raum nicht unterscheiden, da Innen- und Außenfläche dann gleich groß sind.
   return flaechen
     .filter((f) => f.flaeche > 0.5)
-    .map((f) => ({ punkte: f.punkte, flaeche: f.flaeche }))
+    .map((f) => ({ punkte: f.punkte, flaeche: f.flaeche, waende: f.waende }))
     .sort((a, b) => b.flaeche - a.flaeche);
+}
+
+
+/**
+ * Lichte Raumfläche: Das Achspolygon wird je Kante um die halbe Dicke der
+ * begrenzenden Wand nach innen versetzt. Die lichten Maße sind die Grundlage
+ * der Flächenermittlung nach DIN 277 bzw. der Wohnflächenverordnung.
+ *
+ * @param {Object} raum - { punkte, waende } aus findeRaeume
+ * @param {Function} dickeVon - liefert die Bauteildicke einer Wand in Metern
+ * @returns {Object} { punkte, flaeche, umfang, ok }
+ */
+function lichteRaumflaeche(raum, dickeVon) {
+  const n = raum.punkte.length;
+  if (n < 3) return { punkte: [], flaeche: 0, umfang: 0, ok: false };
+
+  // Jede Kante parallel nach innen verschieben
+  const linien = [];
+  for (let i = 0; i < n; i++) {
+    const p = raum.punkte[i];
+    const q = raum.punkte[(i + 1) % n];
+    const dx = q.x - p.x, dz = q.z - p.z;
+    const laenge = Math.hypot(dx, dz);
+    if (laenge < 1e-9) return { punkte: [], flaeche: 0, umfang: 0, ok: false };
+    // Innennormale: bei positiver Umlauffläche zeigt (-dz, dx) ins Rauminnere
+    const nx = -dz / laenge, nz = dx / laenge;
+    const versatz = (dickeVon(raum.waende[i]) || 0) / 2;
+    linien.push({
+      px: p.x + nx * versatz, pz: p.z + nz * versatz,
+      dx: dx / laenge, dz: dz / laenge,
+    });
+  }
+
+  // Schnittpunkte benachbarter Linien ergeben die lichten Ecken
+  const punkte = [];
+  for (let i = 0; i < n; i++) {
+    const a = linien[i];
+    const b = linien[(i + 1) % n];
+    const nenner = a.dx * b.dz - a.dz * b.dx;
+    if (Math.abs(nenner) < 1e-9) {
+      punkte.push({ x: a.px + a.dx * 0, z: a.pz + a.dz * 0 }); // parallel: Endpunkt übernehmen
+      continue;
+    }
+    const t = ((b.px - a.px) * b.dz - (b.pz - a.pz) * b.dx) / nenner;
+    punkte.push({ x: a.px + a.dx * t, z: a.pz + a.dz * t });
+  }
+
+  let flaeche = 0;
+  let umfang = 0;
+  for (let i = 0; i < punkte.length; i++) {
+    const p = punkte[i], q = punkte[(i + 1) % punkte.length];
+    flaeche += p.x * q.z - q.x * p.z;
+    umfang += Math.hypot(q.x - p.x, q.z - p.z);
+  }
+  flaeche /= 2;
+
+  // Bei zu dicken Wänden oder sehr schmalen Räumen kippt das Polygon um
+  const ok = flaeche > 0 && flaeche < raum.flaeche + 1e-6;
+  return { punkte, flaeche: ok ? flaeche : 0, umfang: ok ? umfang : 0, ok };
 }
 
 /** Schwerpunkt eines Polygons. */
@@ -226,13 +291,21 @@ function grundrissSVG(daten) {
   let svg = "";
 
   // Räume zuerst, damit die Wände darüber liegen
-  const raeume = findeRaeume(waende);
-  raeume.forEach((raum, i) => {
+  const dickeVon = (wand) => (wand ? geometrieVon(wand).dicke : 0);
+  const raeume = findeRaeume(waende).map((raum) => ({ raum, licht: lichteRaumflaeche(raum, dickeVon) }));
+
+  raeume.forEach(({ raum, licht }, i) => {
     const d = raum.punkte.map((p) => `${px(p.x).toFixed(2)},${pz(p.z).toFixed(2)}`).join(" ");
     svg += `<polygon points="${d}" class="raum"/>`;
+    if (licht.ok) {
+      // lichte Begrenzung gestrichelt einzeichnen
+      const dl = licht.punkte.map((p) => `${px(p.x).toFixed(2)},${pz(p.z).toFixed(2)}`).join(" ");
+      svg += `<polygon points="${dl}" class="raum-licht"/>`;
+    }
     const s = polygonSchwerpunkt(raum.punkte);
-    svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) - 1).toFixed(2)}" class="t-raum">R${i + 1}</text>`;
-    svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) + 3).toFixed(2)}" class="t-mass">${raum.flaeche.toFixed(2)} m²</text>`;
+    svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) - 2.4).toFixed(2)}" class="t-raum">R${i + 1}</text>`;
+    svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) + 1.2).toFixed(2)}" class="t-mass">${licht.ok ? licht.flaeche.toFixed(2) : raum.flaeche.toFixed(2)} m² licht</text>`;
+    svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) + 4.4).toFixed(2)}" class="t-mass-grau">${raum.flaeche.toFixed(2)} m² Achsmaß</text>`;
   });
 
   // Wände im Schnitt, zwischen den Öffnungen aufgeteilt
@@ -302,27 +375,35 @@ function grundrissSVG(daten) {
   // Raumaufstellung und Achsenzeiger rechts
   const xInfo = BLATT.breite - BLATT.randRechts - 68;
   let yInfo = BLATT.randOben + 8;
-  svg += `<text x="${xInfo}" y="${yInfo}" class="t-kopf">Räume (Achsflächen)</text>`;
-  yInfo += 5;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-kopf">Räume</text>`;
+  yInfo += 4.4;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Raum · licht · Achsmaß · Umfang</text>`;
+  yInfo += 4.4;
   let summe = 0;
-  raeume.forEach((raum, i) => {
+  let summeLicht = 0;
+  raeume.forEach(({ raum, licht }, i) => {
     summe += raum.flaeche;
-    svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">R${i + 1}   ${raum.flaeche.toFixed(2)} m²</text>`;
+    summeLicht += licht.ok ? licht.flaeche : 0;
+    svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">R${i + 1}   ${licht.ok ? licht.flaeche.toFixed(2) : "–"} m²   ${raum.flaeche.toFixed(2)} m²   ${licht.ok ? licht.umfang.toFixed(2) : "–"} m</text>`;
     yInfo += 4;
   });
   if (!raeume.length) {
     svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">kein geschlossener Raum erkannt</text>`;
     yInfo += 4;
   } else {
-    svg += `<text x="${xInfo}" y="${(yInfo + 1).toFixed(2)}" class="t-kopf">Summe ${summe.toFixed(2)} m²</text>`;
-    yInfo += 6;
+    svg += `<text x="${xInfo}" y="${(yInfo + 1).toFixed(2)}" class="t-kopf">Summe licht ${summeLicht.toFixed(2)} m²</text>`;
+    yInfo += 5;
+    svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Summe Achsmaß ${summe.toFixed(2)} m²</text>`;
+    yInfo += 5;
   }
   yInfo += 3;
-  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Achsflächen zwischen den Wandachsen –</text>`;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Lichte Fläche zwischen den Wandflächen,</text>`;
   yInfo += 3.6;
-  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">lichte Flächen und Wohnfläche nach</text>`;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Grundlage der Ermittlung nach DIN 277.</text>`;
   yInfo += 3.6;
-  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">DIN 277 bzw. WoFlV gesondert ermitteln.</text>`;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Abzüge für Nischen, Schächte, Stützen und</text>`;
+  yInfo += 3.6;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Anrechnungsfaktoren nach WoFlV gesondert.</text>`;
   yInfo += 8;
 
   // Achsenzeiger: x nach rechts, z nach unten (Modellkoordinaten)
@@ -355,6 +436,7 @@ function grundrissSVG(daten) {
 <style>
   .wand { fill: #b9c0c7; stroke: #1b2733; stroke-width: 0.5; }
   .raum { fill: #f6f3ec; stroke: none; }
+  .raum-licht { fill: none; stroke: #8a97a3; stroke-width: 0.18; stroke-dasharray: 1.6 1.2; }
   .laibung { stroke: #1b2733; stroke-width: 0.35; }
   .fenster-plan { fill: #dceaf5; stroke: #1b2733; stroke-width: 0.2; }
   .glas { stroke: #1b2733; stroke-width: 0.2; }
@@ -367,6 +449,7 @@ function grundrissSVG(daten) {
   .schriftfeld { fill: none; stroke: #1b2733; stroke-width: 0.35; }
   text { font-family: "IBM Plex Sans", Arial, sans-serif; fill: #1b2733; }
   .t-mass { font-size: 2.5px; text-anchor: middle; }
+  .t-mass-grau { font-size: 2.2px; text-anchor: middle; fill: #64707c; }
   .t-mass-gross { font-size: 3.2px; text-anchor: middle; font-weight: 600; }
   .t-raum { font-size: 3.4px; text-anchor: middle; font-weight: 600; }
   .t-wand { font-size: 2.3px; text-anchor: middle; fill: #46525e; }
