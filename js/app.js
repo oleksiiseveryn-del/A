@@ -401,9 +401,12 @@
         : "–";
 
       const load = model.loads[index];
+      const eg = selfWeightLoads[index] || 0;
       const tr = document.createElement("tr");
       tr.innerHTML = `
-        <td>K${index + 1}${load && load.fz ? ` <span class="node-load">↓${load.fz} kN</span>` : ""}</td>
+        <td>K${index + 1}${load && load.fz ? ` <span class="node-load">↓${load.fz} kN</span>` : ""}${
+          eg > 0.005 ? ` <span class="node-eg">EG ${eg.toFixed(2)}</span>` : ""
+        }</td>
         <td>${((node.x - originX) / ppm).toFixed(2)}</td>
         <td>${((originY - node.y) / ppm).toFixed(2)}</td>
         <td>${entries.length}</td>
@@ -440,49 +443,127 @@
     box.hidden = !text;
   }
 
+  const G_ERDBESCHLEUNIGUNG = 9.81; // m/s², für kg -> kN
+
+  // Eigengewichts-Knotenlasten der letzten Berechnung (je Knotenindex, in kN)
+  let selfWeightLoads = [];
+  let selfWeightTotal = 0;
+
   /**
-   * Stabkräfte aus der gezeichneten Geometrie ermitteln und in die
-   * Bauteiltabelle übernehmen (Druck/Zug wird automatisch gesetzt).
+   * Eigengewicht der aktuell gewählten Profile als Knotenlasten.
+   * Je Stab wird das Gewicht hälftig auf seine beiden Endknoten verteilt
+   * und mit dem Teilsicherheitsbeiwert γG beaufschlagt.
    */
-  function computeBarForces() {
-    const model = editor.buildModel();
-    const result = solveTruss(model.nodes, model.bars, model.supports, model.loads);
+  function computeSelfWeightLoads(model) {
+    const gammaG = parseFloat(document.getElementById("gammaG").value) || 1.35;
+    const nodal = model.nodes.map(() => 0);
+    let total = 0;
 
-    if (!result.ok) {
-      lastSolution = null;
-      editor.setBarForces(null);
-      renderNodeTable(null);
-      setStatus(result.message, "error");
-      return;
-    }
-    lastSolution = result;
-
-    let maxUtilNote = 0;
     model.bars.forEach((bar) => {
       const member = members.get(bar.id);
       if (!member) return;
-      const N = result.forces[bar.id];
-      // Sehr kleine Werte sind Nullstäbe (numerisches Rauschen abschneiden)
-      const value = Math.abs(N) < 0.05 ? 0 : N;
-      member.loadType = value >= 0 ? "Zug" : "Druck";
-      member.force = parseFloat(Math.abs(value).toFixed(1));
-      maxUtilNote = Math.max(maxUtilNote, Math.abs(value));
+      const profile = findSuitableProfile(member);
+      // kg/m * m * 9,81 m/s² -> kN, anschließend γG
+      const weightKN = (profile.weightPerMeter * member.length * G_ERDBESCHLEUNIGUNG) / 1000 * gammaG;
+      total += weightKN;
+      nodal[bar.a] += weightKN / 2;
+      nodal[bar.b] += weightKN / 2;
     });
 
+    return { nodal, total };
+  }
+
+  function combineLoads(userLoads, selfWeight) {
+    return userLoads.map((load, i) => {
+      const fz = (load ? load.fz || 0 : 0) + (selfWeight[i] || 0);
+      const fx = load ? load.fx || 0 : 0;
+      return fx || fz ? { fx, fz } : null;
+    });
+  }
+
+  function applySolutionToMembers(model, result) {
+    let maxForce = 0;
+    model.bars.forEach((bar) => {
+      const member = members.get(bar.id);
+      if (!member) return;
+      const N = result.forces[bar.id] || 0;
+      member.loadType = N >= 0 ? "Zug" : "Druck";
+      member.force = parseFloat(Math.abs(N).toFixed(1));
+      maxForce = Math.max(maxForce, Math.abs(N));
+    });
+    return maxForce;
+  }
+
+  /**
+   * Stabkräfte aus der gezeichneten Geometrie ermitteln und in die
+   * Bauteiltabelle übernehmen (Druck/Zug wird automatisch gesetzt).
+   *
+   * Mit Eigengewicht wird iteriert: Das Eigengewicht folgt aus den
+   * gewählten Profilen, diese wiederum aus den Stabkräften. Die Schleife
+   * endet, sobald sich die Knotenlasten nicht mehr nennenswert ändern.
+   */
+  function computeBarForces() {
+    const model = editor.buildModel();
+    const withSelfWeight = document.getElementById("chkSelfWeight").checked;
+
+    let currentSelfWeight = model.nodes.map(() => 0);
+    let total = 0;
+    let result = null;
+    let iterations = 0;
+
+    for (let pass = 0; pass < 8; pass++) {
+      result = solveTruss(model.nodes, model.bars, model.supports, combineLoads(model.loads, currentSelfWeight));
+      if (!result.ok) break;
+      applySolutionToMembers(model, result);
+      iterations = pass + 1;
+      if (!withSelfWeight) break;
+
+      const next = computeSelfWeightLoads(model);
+      const converged = next.nodal.every((v, i) => Math.abs(v - currentSelfWeight[i]) < 0.01);
+      currentSelfWeight = next.nodal;
+      total = next.total;
+      if (converged) break;
+    }
+
+    if (!result || !result.ok) {
+      lastSolution = null;
+      selfWeightLoads = [];
+      selfWeightTotal = 0;
+      editor.setBarForces(null);
+      renderNodeTable(null);
+      setStatus(result ? result.message : "Berechnung nicht möglich.", "error");
+      return;
+    }
+
+    lastSolution = result;
+    selfWeightLoads = withSelfWeight ? currentSelfWeight : [];
+    selfWeightTotal = withSelfWeight ? total : 0;
+
+    const maxForce = applySolutionToMembers(model, result);
     editor.setBarForces(result.forces);
     renderTable();
     renderNodeTable(result);
 
-    const vertical = result.reactions.filter((r) => r.dir === "y");
-    const reactionText = vertical
+    const reactionText = result.reactions
+      .filter((r) => r.dir === "y")
       .map((r) => `${Math.abs(r.value).toFixed(1)} kN`)
       .join(" / ");
+    const selfWeightText = withSelfWeight
+      ? ` · Eigengewicht ${selfWeightTotal.toFixed(1)} kN (γG = ${document.getElementById("gammaG").value}, ${iterations} ${iterations === 1 ? "Iteration" : "Iterationen"})`
+      : "";
     setStatus(
-      `Stabkräfte berechnet · größte Stabkraft ${maxUtilNote.toFixed(1)} kN · vertikale Auflagerkräfte ${reactionText}. ` +
+      `Stabkräfte berechnet · größte Stabkraft ${maxForce.toFixed(1)} kN · vertikale Auflagerkräfte ${reactionText}${selfWeightText}. ` +
       "Nullstäbe erscheinen mit 0 kN.",
       "ok"
     );
   }
+
+  document.getElementById("chkSelfWeight").addEventListener("change", () => {
+    if (members.size) computeBarForces();
+  });
+  document.getElementById("gammaG").addEventListener("change", () => {
+    if (members.size && document.getElementById("chkSelfWeight").checked) computeBarForces();
+  });
 
   document.getElementById("btnSolve").addEventListener("click", computeBarForces);
 
@@ -593,6 +674,10 @@
         transport: document.getElementById("transportFlat").value,
         lagerung: document.getElementById("storagePerKg").value,
       },
+      eigengewicht: {
+        aktiv: document.getElementById("chkSelfWeight").checked,
+        gammaG: document.getElementById("gammaG").value,
+      },
       massstab: editor.pixelsPerMeter,
       linien: editor.lines.map((l) => ({ id: l.id, x1: l.x1, y1: l.y1, x2: l.x2, y2: l.y2 })),
       auflager: Array.from(editor.supports.entries()),
@@ -629,7 +714,14 @@
       document.getElementById("storagePerKg").value = data.kosten.lagerung;
     }
 
+    if (data.eigengewicht) {
+      document.getElementById("chkSelfWeight").checked = !!data.eigengewicht.aktiv;
+      document.getElementById("gammaG").value = data.eigengewicht.gammaG || "1.35";
+    }
+
     lastSolution = null;
+    selfWeightLoads = [];
+    selfWeightTotal = 0;
     editor.setBarForces(null);
     updateScaleInfo();
     renderTable();
@@ -716,7 +808,7 @@
 
       rows.push([]);
       rows.push(["Anschlusskräfte je Knoten (+ Zug / − Druck)"]);
-      rows.push(["Knoten", "x [m]", "z [m]", "Auflager", "Knotenlast [kN]", "Anschlüsse", "max |N| [kN]"]);
+      rows.push(["Knoten", "x [m]", "z [m]", "Auflager", "Knotenlast [kN]", "Eigengewicht [kN]", "Anschlüsse", "max |N| [kN]"]);
 
       model.nodes.forEach((node, index) => {
         const attached = model.bars.filter((bar) => bar.a === index || bar.b === index);
@@ -738,6 +830,7 @@
           ((originY - node.y) / ppm).toFixed(2),
           support ? `${support === "pinned" ? "Festlager" : "Loslager"} ${reactions}` : "-",
           model.loads[index] ? model.loads[index].fz : 0,
+          (selfWeightLoads[index] || 0).toFixed(2),
           entries.join(" | "),
           maxN.toFixed(1),
         ]);

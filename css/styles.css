@@ -459,6 +459,39 @@ table.members-table input {
   font-size: 0.7rem;
 }
 
+.node-eg {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+}
+
+.tool-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 5px 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.tool-check .gamma-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-muted);
+}
+
+.tool-check input[type="number"] {
+  width: 58px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font-data);
+  font-size: 0.74rem;
+}
+
 #viewNodes table.members-table td:nth-child(2),
 #viewNodes table.members-table td:nth-child(3),
 #viewNodes table.members-table td:nth-child(4),

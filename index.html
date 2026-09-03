@@ -56,6 +56,12 @@
       <button class="tool-btn" id="btnSupport" title="Knoten anklicken: Festlager → Loslager → kein Lager">△ Auflager</button>
       <button class="tool-btn" id="btnLoad" title="Knoten anklicken und Knotenlast in kN eingeben">↓ Knotenlast</button>
       <button class="tool-btn primary" id="btnSolve" title="Stabkräfte aus Geometrie, Auflagern und Lasten berechnen">Σ Stabkräfte berechnen</button>
+      <label class="tool-check" title="Eigengewicht der gewählten Profile iterativ als Knotenlasten ansetzen">
+        <input type="checkbox" id="chkSelfWeight"> Eigengewicht
+        <span class="gamma-field">γ<sub>G</sub>
+          <input type="number" id="gammaG" step="0.05" min="1" max="1.5" value="1.35" title="Teilsicherheitsbeiwert für ständige Einwirkungen nach DIN EN 1990">
+        </span>
+      </label>
       <button class="tool-btn" id="btnExample" title="Beispiel-Fachwerkbinder laden">⌁ Beispiel laden</button>
       <button class="tool-btn danger" id="btnClearAll" title="Skizze und Bauteile löschen">🗑 Alles löschen</button>
     </div>
