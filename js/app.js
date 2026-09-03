@@ -662,6 +662,9 @@
         <td class="layer-cell">${schichten}<button class="layer-add" data-el="${element.id}">+ Schicht</button>
           ${a.uHinweis ? `<div class="cut-warning">${a.uHinweis}</div>` : ""}
           <div class="layer-note">flächenbezogene Masse ${a.flaechenmasse.toFixed(0)} kg/m²</div></td>
+        <td>${typ.form === "linie" && !typ.unterGelaende
+          ? `<button class="tool-btn plain" data-sheet="${element.id}" title="Maßstäbliche Ansicht dieser Wand">📐 Ansicht</button>`
+          : "–"}</td>
         <td><button class="row-remove" data-remove-el="${element.id}" title="Bauteil löschen">✕</button></td>`;
       body.appendChild(tr);
     });
@@ -886,6 +889,82 @@
   document.getElementById("openingBody").addEventListener("click", (e) => {
     const id = e.target.getAttribute("data-remove-op");
     if (id) { model.openings.delete(parseInt(id, 10)); refreshAll(); }
+  });
+
+
+  /* -------------------------------------------------- Ansichtszeichnungen */
+
+  let sheetIndex = 0;
+
+  /** Alle Bauteile, für die eine Wandansicht sinnvoll ist. */
+  function ansichtsWaende() {
+    return Array.from(model.elements.values()).filter((el) => {
+      const typ = BAUTEILTYPEN[el.kind];
+      return typ.form === "linie" && !typ.unterGelaende;
+    });
+  }
+
+  function zeichneAnsicht(index) {
+    const waende = ansichtsWaende();
+    if (!waende.length) return;
+    sheetIndex = (index + waende.length) % waende.length;
+    const element = waende[sheetIndex];
+    const geo = bauteilGeometrie(element);
+    const openings = oeffnungenVon(element.id);
+    const positionen = oeffnungsPositionen(openings, geo.laenge, geo.hoehe);
+
+    const svg = wandAnsichtSVG({
+      element,
+      felder: positionen.felder,
+      geo,
+      auswertung: auswertung(element),
+      bezeichnung: bauteilBezeichnung(element),
+      projekt: {
+        name: document.getElementById("projectName").value,
+        datum: document.getElementById("projectDate").value,
+        bearbeiter: "Oleksii Severyn",
+      },
+    });
+
+    document.getElementById("sheetBody").innerHTML = svg;
+    document.getElementById("sheetTitle").textContent =
+      `Ansicht ${bauteilBezeichnung(element)} · ${BAUTEILTYPEN[element.kind].name}`;
+    document.getElementById("sheetCounter").textContent = `${sheetIndex + 1} / ${waende.length}`;
+    document.getElementById("sheetOverlay").hidden = false;
+  }
+
+  document.getElementById("archBody").addEventListener("click", (e) => {
+    const id = e.target.getAttribute("data-sheet");
+    if (!id) return;
+    const waende = ansichtsWaende();
+    const pos = waende.findIndex((el) => el.id === parseInt(id, 10));
+    zeichneAnsicht(pos >= 0 ? pos : 0);
+  });
+
+  document.getElementById("sheetPrev").addEventListener("click", () => zeichneAnsicht(sheetIndex - 1));
+  document.getElementById("sheetNext").addEventListener("click", () => zeichneAnsicht(sheetIndex + 1));
+  document.getElementById("sheetClose").addEventListener("click", () => {
+    document.getElementById("sheetOverlay").hidden = true;
+  });
+  document.getElementById("sheetPrint").addEventListener("click", () => {
+    // nur das Blatt drucken: alles andere wird über die Druckvorlage ausgeblendet
+    document.body.classList.add("printing-sheet");
+    window.print();
+    window.setTimeout(() => document.body.classList.remove("printing-sheet"), 500);
+  });
+  document.getElementById("sheetSvg").addEventListener("click", () => {
+    const waende = ansichtsWaende();
+    const element = waende[sheetIndex];
+    if (!element) return;
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Ansicht_${name}_${bauteilBezeichnung(element)}.svg`,
+      document.getElementById("sheetBody").innerHTML, "image/svg+xml");
+  });
+  window.addEventListener("keydown", (e) => {
+    if (document.getElementById("sheetOverlay").hidden) return;
+    if (e.key === "Escape") document.getElementById("sheetOverlay").hidden = true;
+    if (e.key === "ArrowLeft") zeichneAnsicht(sheetIndex - 1);
+    if (e.key === "ArrowRight") zeichneAnsicht(sheetIndex + 1);
   });
 
   /* ------------------------------------------------------------- Tabellen */

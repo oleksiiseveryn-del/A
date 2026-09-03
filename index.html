@@ -208,6 +208,7 @@
             <th>U mittel</th>
             <th>Ziel</th>
             <th>Schichtaufbau (Material · Dicke [m])</th>
+            <th>Ansicht</th>
             <th></th>
           </tr>
         </thead>
@@ -356,6 +357,24 @@
 
 </div>
 
+<!-- Ansichtszeichnung einer Wand -->
+<div class="sheet-overlay" id="sheetOverlay" hidden>
+  <div class="sheet-box">
+    <div class="sheet-head">
+      <h3 id="sheetTitle">Wandansicht</h3>
+      <div class="sheet-actions">
+        <button class="tool-btn" id="sheetPrev" title="vorherige Wand">◀</button>
+        <span id="sheetCounter" class="sheet-counter"></span>
+        <button class="tool-btn" id="sheetNext" title="nächste Wand">▶</button>
+        <button class="tool-btn" id="sheetPrint">🖨 Drucken</button>
+        <button class="tool-btn" id="sheetSvg">⬇ SVG speichern</button>
+        <button class="tool-btn danger" id="sheetClose">Schließen</button>
+      </div>
+    </div>
+    <div class="sheet-body" id="sheetBody"></div>
+  </div>
+</div>
+
 <!-- Dialogfenster (ersetzt Browser-Popups, die in eingebetteten Umgebungen blockiert sind) -->
 <div class="modal-overlay" id="modalOverlay" hidden>
   <div class="modal-box">
@@ -438,6 +457,7 @@
 <script src="js/steel-database.js"></script>
 <script src="js/materials.js"></script>
 <script src="js/architecture.js"></script>
+<script src="js/elevation.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

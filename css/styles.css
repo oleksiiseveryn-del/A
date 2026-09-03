@@ -814,6 +814,57 @@ button.tool-btn.primary:hover {
 .status-box.ok { background: #e8f6ed; color: #1d6b3f; border-top-color: #b6e0c5; }
 .status-box.error { background: #fdeceb; color: #96271f; border-top-color: #f3c2be; }
 
+.sheet-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 36, 56, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 120;
+  padding: 18px;
+}
+
+.sheet-overlay[hidden] { display: none; }
+
+.sheet-box {
+  background: #fff;
+  border-radius: 6px;
+  width: min(1180px, 96vw);
+  max-height: 94vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 14px 48px rgba(0, 0, 0, 0.35);
+  border-top: 4px solid var(--accent);
+}
+
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.sheet-head h3 { margin: 0; font-size: 0.95rem; color: var(--hsd-blue); }
+.sheet-actions { display: flex; gap: 6px; align-items: center; }
+.sheet-counter { font-family: var(--font-data); font-size: 0.76rem; color: var(--text-muted); }
+
+.sheet-body {
+  padding: 14px 18px 18px;
+  overflow: auto;
+  background: #eef1f4;
+}
+
+.sheet-body svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -895,4 +946,23 @@ button.tool-btn.primary:hover {
   header.app-header, .toolbar, .export-bar, .canvas-wrap .hint { display: none !important; }
   .main-grid { grid-template-columns: 1fr; }
   body { background: #fff; }
+
+  /* Ansichtszeichnung allein auf das Blatt bringen */
+  body.printing-sheet > *:not(.sheet-overlay) { display: none !important; }
+  body.printing-sheet .sheet-overlay {
+    position: static;
+    padding: 0;
+    background: none;
+    display: block;
+  }
+  body.printing-sheet .sheet-box {
+    box-shadow: none;
+    border: none;
+    max-height: none;
+    width: 100%;
+  }
+  body.printing-sheet .sheet-head { display: none !important; }
+  body.printing-sheet .sheet-body { padding: 0; background: none; overflow: visible; }
+  body.printing-sheet .sheet-body svg { box-shadow: none; }
+  @page { size: A4 landscape; margin: 6mm; }
 }
