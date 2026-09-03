@@ -359,6 +359,32 @@
     loadExample();
   });
 
+  /**
+   * Datei-Download. In der eingebetteten Online-Version läuft der Download
+   * über die Plattform-Schnittstelle, lokal klassisch über einen Blob-Link.
+   */
+  let platformDownloads = null;
+  if (window.claude && typeof window.claude.use === "function") {
+    window.claude.use("downloads").then((api) => { platformDownloads = api; }).catch(() => {});
+  }
+
+  function saveFile(filename, content) {
+    if (platformDownloads) {
+      platformDownloads.save({ filename, data: content }).catch((err) => {
+        if (err && err.code === "declined") return; // Nutzer hat abgebrochen
+        window.console.warn("Download nicht möglich:", err);
+      });
+      return;
+    }
+    const blob = new Blob([content], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   // Export CSV (LV-Format)
   document.getElementById("btnExportCsv").addEventListener("click", () => {
     const rows = [["Pos", "Bauteil", "Typ", "Länge [m]", "Beanspruchung", "Kraft/Moment", "Profil", "Auslastung [%]", "Gewicht gesamt [kg]", "Status"]];
@@ -379,14 +405,8 @@
       ]);
     });
     const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\r\n");
-    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
     const projectName = document.getElementById("projectName").value || "Projekt";
-    a.href = url;
-    a.download = `LV_Stahlbau_${projectName.replace(/\s+/g, "_")}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    saveFile(`LV_Stahlbau_${projectName.replace(/\s+/g, "_")}.csv`, "﻿" + csv);
   });
 
   document.getElementById("btnPrint").addEventListener("click", () => window.print());
