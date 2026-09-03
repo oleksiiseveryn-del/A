@@ -16,13 +16,77 @@
     dateField.value = new Date().toISOString().slice(0, 10);
   }
 
+  // Eigene Dialogfenster statt window.prompt/confirm (in eingebetteten
+  // Umgebungen sind native Browser-Popups häufig blockiert).
+  const modal = {
+    overlay: document.getElementById("modalOverlay"),
+    title: document.getElementById("modalTitle"),
+    text: document.getElementById("modalText"),
+    input: document.getElementById("modalInput"),
+    ok: document.getElementById("modalOk"),
+    cancel: document.getElementById("modalCancel"),
+    resolve: null,
+  };
+  modal.overlay.hidden = true;
+
+  function closeModal(value) {
+    modal.overlay.hidden = true;
+    const resolve = modal.resolve;
+    modal.resolve = null;
+    if (resolve) resolve(value);
+  }
+
+  function askNumber(title, text, defaultValue) {
+    return new Promise((resolve) => {
+      modal.resolve = resolve;
+      modal.title.textContent = title;
+      modal.text.textContent = text;
+      modal.input.hidden = false;
+      modal.input.value = defaultValue;
+      modal.ok.textContent = "Übernehmen";
+      modal.overlay.hidden = false;
+      modal.input.focus();
+      modal.input.select();
+    });
+  }
+
+  function askConfirm(title, text) {
+    return new Promise((resolve) => {
+      modal.resolve = (v) => resolve(v !== null);
+      modal.title.textContent = title;
+      modal.text.textContent = text;
+      modal.input.hidden = true;
+      modal.ok.textContent = "Ja, löschen";
+      modal.overlay.hidden = false;
+      modal.ok.focus();
+    });
+  }
+
+  modal.ok.addEventListener("click", () => {
+    const raw = String(modal.input.value).replace(",", ".");
+    closeModal(modal.input.hidden ? true : parseFloat(raw));
+  });
+  modal.cancel.addEventListener("click", () => closeModal(null));
+  modal.input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") modal.ok.click();
+  });
+  modal.overlay.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeModal(null);
+  });
+
   const editor = new SketchEditor(canvas, {
     onLineAdded: (line, lengthM) => addMember(line, lengthM),
     onCalibration: (pixelDist, callback) => {
-      const val = window.prompt("Reale Länge der gezeichneten Referenzlinie in Metern eingeben:", "1.00");
-      const num = parseFloat((val || "").replace(",", "."));
-      callback(num);
-      updateScaleInfo();
+      askNumber(
+        "Maßstab kalibrieren",
+        "Reale Länge der gezeichneten Referenzlinie in Metern eingeben:",
+        "1.00"
+      ).then((num) => {
+        callback(num);
+        updateScaleInfo();
+        setActiveMode("draw"); // nach der Kalibrierung zurück in den Zeichenmodus
+        resyncLengthsFromSketch(); // bestehende Bauteillängen auf neuen Maßstab umrechnen
+      });
     },
   });
 
@@ -59,6 +123,15 @@
     };
     members.set(member.id, member);
     editor.setLineLabel(member.id, typeShortLabel(member.type) + member.id);
+    renderTable();
+  }
+
+  // Nach einer Maßstabsänderung alle Längen neu aus der Skizzengeometrie ableiten
+  function resyncLengthsFromSketch() {
+    editor.lines.forEach((line) => {
+      const member = members.get(line.id);
+      if (member) member.length = parseFloat(editor.lengthOf(line).toFixed(2));
+    });
     renderTable();
   }
 
@@ -233,10 +306,16 @@
     editor.toggleAngleSnap(on);
   });
   btnClearAll.addEventListener("click", () => {
-    if (members.size && !window.confirm("Alle Bauteile und die Skizze löschen?")) return;
-    members.clear();
-    editor.clearAll();
-    renderTable();
+    if (members.size === 0) {
+      editor.clearAll();
+      return;
+    }
+    askConfirm("Alles löschen", "Alle Bauteile und die gesamte Skizze wirklich löschen?").then((confirmed) => {
+      if (!confirmed) return;
+      members.clear();
+      editor.clearAll();
+      renderTable();
+    });
   });
 
   btnGrid.classList.add("active");

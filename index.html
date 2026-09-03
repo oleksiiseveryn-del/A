@@ -126,6 +126,19 @@
 
 </div>
 
+<!-- Dialogfenster (ersetzt Browser-Popups, die in eingebetteten Umgebungen blockiert sind) -->
+<div class="modal-overlay" id="modalOverlay" hidden>
+  <div class="modal-box">
+    <h3 id="modalTitle">Eingabe</h3>
+    <p id="modalText"></p>
+    <input type="number" id="modalInput" step="0.01" min="0.01">
+    <div class="modal-actions">
+      <button class="secondary" id="modalCancel">Abbrechen</button>
+      <button id="modalOk">Übernehmen</button>
+    </div>
+  </div>
+</div>
+
 <div class="disclaimer">
   Hinweis: Diese Anwendung dient der überschlägigen Vorbemessung in der Skizzenphase (Bauteilfindung nach DIN EN 1993-1-1,
   vereinfachtes Biegeknicken um die schwache Achse, Zug- und Biegenachweis am Bruttoquerschnitt). Sie ersetzt nicht die
