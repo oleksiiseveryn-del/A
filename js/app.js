@@ -183,12 +183,9 @@
         <td><input type="number" step="0.05" min="0.5" max="2.5" data-field="beta" data-id="${member.id}" value="${member.beta}" title="Knicklängenbeiwert β"></td>
         <td>
           <select data-field="family" data-id="${member.id}">
-            <option value="AUTO" ${member.family === "AUTO" ? "selected" : ""}>Automatisch</option>
-            <option value="HEA" ${member.family === "HEA" ? "selected" : ""}>HEA</option>
-            <option value="HEB" ${member.family === "HEB" ? "selected" : ""}>HEB</option>
-            <option value="IPE" ${member.family === "IPE" ? "selected" : ""}>IPE</option>
-            <option value="RHS" ${member.family === "RHS" ? "selected" : ""}>RHS (Vierkant)</option>
-            <option value="L" ${member.family === "L" ? "selected" : ""}>L (Winkel)</option>
+            ${Object.keys(FAMILY_LABELS).map((f) =>
+              `<option value="${f}" ${f === member.family ? "selected" : ""}>${FAMILY_LABELS[f]}</option>`
+            ).join("")}
           </select>
         </td>
         <td><strong>${result.profileName}</strong></td>
@@ -365,6 +362,77 @@
     });
   }
 
+  /**
+   * Knotentabelle mit den Anschlusskräften für die Werkstattzeichnung.
+   * Koordinatenursprung ist der linke untere Systemknoten, z zeigt nach oben.
+   */
+  function renderNodeTable(solution) {
+    const body = document.getElementById("nodesBody");
+    const empty = document.getElementById("nodesEmpty");
+    body.innerHTML = "";
+
+    const model = editor.buildModel();
+    if (!solution || !solution.ok || model.nodes.length === 0) {
+      empty.hidden = false;
+      return;
+    }
+    empty.hidden = true;
+
+    const originX = Math.min(...model.nodes.map((n) => n.x));
+    const originY = Math.max(...model.nodes.map((n) => n.y)); // y zeigt im Canvas nach unten
+    const ppm = editor.pixelsPerMeter;
+
+    model.nodes.forEach((node, index) => {
+      const attached = model.bars.filter((bar) => bar.a === index || bar.b === index);
+      const entries = attached.map((bar) => {
+        const member = members.get(bar.id);
+        const N = solution.forces[bar.id] || 0;
+        const label = member ? typeShortLabel(member.type) + bar.id : "#" + bar.id;
+        return { label, N };
+      });
+      const maxN = entries.reduce((max, e) => Math.max(max, Math.abs(e.N)), 0);
+
+      const support = model.supports[index];
+      const nodeReactions = solution.reactions.filter((r) => r.node === index);
+      const supportText = support
+        ? `${support === "pinned" ? "Festlager" : "Loslager"} (${nodeReactions
+            .map((r) => `${r.dir === "x" ? "H" : "V"} ${Math.abs(r.value).toFixed(1)} kN`)
+            .join(", ")})`
+        : "–";
+
+      const load = model.loads[index];
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>K${index + 1}${load && load.fz ? ` <span class="node-load">↓${load.fz} kN</span>` : ""}</td>
+        <td>${((node.x - originX) / ppm).toFixed(2)}</td>
+        <td>${((originY - node.y) / ppm).toFixed(2)}</td>
+        <td>${entries.length}</td>
+        <td>${entries.map((e) =>
+            `<span class="force-chip ${e.N >= 0 ? "zug" : "druck"}">${e.label} ${e.N >= 0 ? "+" : "−"}${Math.abs(e.N).toFixed(1)}</span>`
+          ).join(" ")}</td>
+        <td>${supportText}</td>
+        <td><strong>${maxN.toFixed(1)}</strong></td>
+      `;
+      body.appendChild(tr);
+    });
+  }
+
+  // Zuletzt berechnete Lösung, für Knotentabelle und Export vorgehalten
+  let lastSolution = null;
+
+  const tabMembers = document.getElementById("tabMembers");
+  const tabNodes = document.getElementById("tabNodes");
+  function showView(which) {
+    const isNodes = which === "nodes";
+    document.getElementById("viewMembers").hidden = isNodes;
+    document.getElementById("viewNodes").hidden = !isNodes;
+    tabMembers.classList.toggle("active", !isNodes);
+    tabNodes.classList.toggle("active", isNodes);
+    if (isNodes) renderNodeTable(lastSolution);
+  }
+  tabMembers.addEventListener("click", () => showView("members"));
+  tabNodes.addEventListener("click", () => showView("nodes"));
+
   function setStatus(text, kind) {
     const box = document.getElementById("statusBox");
     box.textContent = text;
@@ -381,10 +449,13 @@
     const result = solveTruss(model.nodes, model.bars, model.supports, model.loads);
 
     if (!result.ok) {
+      lastSolution = null;
       editor.setBarForces(null);
+      renderNodeTable(null);
       setStatus(result.message, "error");
       return;
     }
+    lastSolution = result;
 
     let maxUtilNote = 0;
     model.bars.forEach((bar) => {
@@ -400,6 +471,7 @@
 
     editor.setBarForces(result.forces);
     renderTable();
+    renderNodeTable(result);
 
     const vertical = result.reactions.filter((r) => r.dir === "y");
     const reactionText = vertical
@@ -502,6 +574,120 @@
     URL.revokeObjectURL(url);
   }
 
+  /* --- Projektverwaltung: speichern, laden, als Datei sichern/öffnen --- */
+
+  const STORAGE_KEY = "hsd-stahlbau-konverter-projekt";
+
+  function collectProject() {
+    return {
+      version: 1,
+      erzeugt: new Date().toISOString(),
+      projekt: {
+        name: document.getElementById("projectName").value,
+        datum: document.getElementById("projectDate").value,
+        stahlguete: document.getElementById("steelGradeGlobal").value,
+      },
+      kosten: {
+        material: document.getElementById("pricePerKg").value,
+        bearbeitung: document.getElementById("processingPerKg").value,
+        transport: document.getElementById("transportFlat").value,
+        lagerung: document.getElementById("storagePerKg").value,
+      },
+      massstab: editor.pixelsPerMeter,
+      linien: editor.lines.map((l) => ({ id: l.id, x1: l.x1, y1: l.y1, x2: l.x2, y2: l.y2 })),
+      auflager: Array.from(editor.supports.entries()),
+      lasten: Array.from(editor.loads.entries()),
+      bauteile: Array.from(members.values()),
+    };
+  }
+
+  function applyProject(data) {
+    if (!data || !Array.isArray(data.linien)) throw new Error("Ungültige Projektdatei");
+
+    members.clear();
+    editor.clearAll();
+
+    editor.pixelsPerMeter = data.massstab || 50;
+    data.linien.forEach((l) => {
+      const line = editor.addLine(l.x1, l.y1, l.x2, l.y2);
+      line.id = l.id; // ursprüngliche Nummerierung beibehalten
+    });
+    editor.nextId = Math.max(0, ...data.linien.map((l) => l.id)) + 1;
+    (data.auflager || []).forEach(([key, type]) => editor.supports.set(key, type));
+    (data.lasten || []).forEach(([key, load]) => editor.loads.set(key, load));
+    (data.bauteile || []).forEach((m) => members.set(m.id, m));
+
+    if (data.projekt) {
+      document.getElementById("projectName").value = data.projekt.name || "";
+      document.getElementById("projectDate").value = data.projekt.datum || "";
+      document.getElementById("steelGradeGlobal").value = data.projekt.stahlguete || "S235";
+    }
+    if (data.kosten) {
+      document.getElementById("pricePerKg").value = data.kosten.material;
+      document.getElementById("processingPerKg").value = data.kosten.bearbeitung;
+      document.getElementById("transportFlat").value = data.kosten.transport;
+      document.getElementById("storagePerKg").value = data.kosten.lagerung;
+    }
+
+    lastSolution = null;
+    editor.setBarForces(null);
+    updateScaleInfo();
+    renderTable();
+    renderNodeTable(null);
+  }
+
+  document.getElementById("btnSaveProject").addEventListener("click", () => {
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(collectProject()));
+      setStatus(`Projekt im Browser gesichert (${members.size} Bauteile, ${new Date().toLocaleString("de-DE")}).`, "ok");
+    } catch (err) {
+      setStatus("Speichern im Browser nicht möglich (Speicher gesperrt oder voll). Nutzen Sie „Projektdatei“.", "error");
+    }
+  });
+
+  document.getElementById("btnLoadProject").addEventListener("click", () => {
+    let raw = null;
+    try {
+      raw = window.localStorage.getItem(STORAGE_KEY);
+    } catch (err) {
+      setStatus("Zugriff auf den Browser-Speicher nicht möglich. Nutzen Sie „Datei öffnen“.", "error");
+      return;
+    }
+    if (!raw) {
+      setStatus("Kein gespeichertes Projekt gefunden.", "error");
+      return;
+    }
+    try {
+      applyProject(JSON.parse(raw));
+      setStatus("Gespeichertes Projekt geladen. Stabkräfte bei Bedarf neu berechnen.", "ok");
+    } catch (err) {
+      setStatus("Gespeichertes Projekt konnte nicht gelesen werden.", "error");
+    }
+  });
+
+  document.getElementById("btnExportProject").addEventListener("click", () => {
+    const name = document.getElementById("projectName").value || "Projekt";
+    saveFile(`Stahlbau_${name.replace(/\s+/g, "_")}.json`, JSON.stringify(collectProject(), null, 2));
+  });
+
+  const fileInput = document.getElementById("projectFileInput");
+  document.getElementById("btnImportProject").addEventListener("click", () => fileInput.click());
+  fileInput.addEventListener("change", () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        applyProject(JSON.parse(String(reader.result)));
+        setStatus(`Projektdatei „${file.name}“ geladen.`, "ok");
+      } catch (err) {
+        setStatus("Datei konnte nicht gelesen werden – bitte eine mit dieser App erzeugte Projektdatei wählen.", "error");
+      }
+      fileInput.value = "";
+    };
+    reader.readAsText(file);
+  });
+
   // Export CSV (LV-Format)
   document.getElementById("btnExportCsv").addEventListener("click", () => {
     const rows = [["Pos", "Bauteil", "Typ", "Länge [m]", "Beanspruchung", "Kraft/Moment", "Profil", "Auslastung [%]", "Gewicht gesamt [kg]", "Status"]];
@@ -521,6 +707,43 @@
         result.status,
       ]);
     });
+    // Anschlusskräfte je Knoten anhängen, sobald eine Lösung vorliegt
+    if (lastSolution && lastSolution.ok) {
+      const model = editor.buildModel();
+      const originX = Math.min(...model.nodes.map((n) => n.x));
+      const originY = Math.max(...model.nodes.map((n) => n.y));
+      const ppm = editor.pixelsPerMeter;
+
+      rows.push([]);
+      rows.push(["Anschlusskräfte je Knoten (+ Zug / − Druck)"]);
+      rows.push(["Knoten", "x [m]", "z [m]", "Auflager", "Knotenlast [kN]", "Anschlüsse", "max |N| [kN]"]);
+
+      model.nodes.forEach((node, index) => {
+        const attached = model.bars.filter((bar) => bar.a === index || bar.b === index);
+        const entries = attached.map((bar) => {
+          const member = members.get(bar.id);
+          const N = lastSolution.forces[bar.id] || 0;
+          const label = member ? typeShortLabel(member.type) + bar.id : "#" + bar.id;
+          return `${label} ${N >= 0 ? "+" : "-"}${Math.abs(N).toFixed(1)}`;
+        });
+        const maxN = attached.reduce((max, bar) => Math.max(max, Math.abs(lastSolution.forces[bar.id] || 0)), 0);
+        const support = model.supports[index];
+        const reactions = lastSolution.reactions
+          .filter((r) => r.node === index)
+          .map((r) => `${r.dir === "x" ? "H" : "V"} ${Math.abs(r.value).toFixed(1)} kN`)
+          .join(" / ");
+        rows.push([
+          "K" + (index + 1),
+          ((node.x - originX) / ppm).toFixed(2),
+          ((originY - node.y) / ppm).toFixed(2),
+          support ? `${support === "pinned" ? "Festlager" : "Loslager"} ${reactions}` : "-",
+          model.loads[index] ? model.loads[index].fz : 0,
+          entries.join(" | "),
+          maxN.toFixed(1),
+        ]);
+      });
+    }
+
     const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\r\n");
     const projectName = document.getElementById("projectName").value || "Projekt";
     saveFile(`LV_Stahlbau_${projectName.replace(/\s+/g, "_")}.csv`, "﻿" + csv);

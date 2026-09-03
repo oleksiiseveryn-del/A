@@ -71,8 +71,12 @@
   <div class="panel">
     <div class="panel-header">
       <h2><span class="badge-num">2</span> Stahlbau-Ergebnis (Profilzuordnung)</h2>
+      <div class="tab-switch">
+        <button class="tab-btn active" id="tabMembers">Bauteile</button>
+        <button class="tab-btn" id="tabNodes">Knoten / Anschlüsse</button>
+      </div>
     </div>
-    <div class="result-panel-body">
+    <div class="result-panel-body" id="viewMembers">
       <div class="empty-state" id="emptyState">Noch keine Linien gezeichnet. Zeichnen Sie links eine Bauteilachse (Stütze, Gurt, Strebe …) – die passende Stahlform erscheint hier automatisch.</div>
       <table class="members-table">
         <thead>
@@ -93,6 +97,25 @@
         </thead>
         <tbody id="membersBody"></tbody>
       </table>
+    </div>
+
+    <div class="result-panel-body" id="viewNodes" hidden>
+      <p class="view-note">Anschlusskräfte je Knoten für die Werkstattzeichnung. Koordinaten bezogen auf den linken unteren Knoten des Systems (x nach rechts, z nach oben). Vorzeichen: + Zug, − Druck.</p>
+      <table class="members-table">
+        <thead>
+          <tr>
+            <th>Knoten</th>
+            <th>x [m]</th>
+            <th>z [m]</th>
+            <th>Anschlüsse</th>
+            <th>Stabkräfte [kN]</th>
+            <th>Auflager</th>
+            <th>max |N| [kN]</th>
+          </tr>
+        </thead>
+        <tbody id="nodesBody"></tbody>
+      </table>
+      <div class="empty-state" id="nodesEmpty">Noch keine Stabkräfte berechnet – zuerst Auflager und Knotenlasten setzen und „Stabkräfte berechnen“ ausführen.</div>
     </div>
 
     <div class="summary-bar">
@@ -127,6 +150,11 @@
     <div class="export-bar">
       <button id="btnExportCsv">⬇ Als LV-Position (CSV) exportieren</button>
       <button class="secondary" id="btnPrint">🖨 Drucken / PDF</button>
+      <button class="secondary" id="btnSaveProject" title="Projekt im Browser dieses Rechners sichern">💾 Projekt speichern</button>
+      <button class="secondary" id="btnLoadProject" title="Zuletzt gespeichertes Projekt laden">📂 Projekt laden</button>
+      <button class="secondary" id="btnExportProject" title="Projekt als Datei sichern (zum Weitergeben oder Archivieren)">⤓ Projektdatei</button>
+      <button class="secondary" id="btnImportProject" title="Projektdatei öffnen">⤒ Datei öffnen</button>
+      <input type="file" id="projectFileInput" accept="application/json,.json" hidden>
     </div>
   </div>
 

@@ -75,6 +75,48 @@ const STEEL_DB = {
     { name: "RHS 180x180x8", A: 53.5, Iy: 2650, Wy: 294, iy: 7.03, Iz: 2650, iz: 7.03, G: 42.0 },
     { name: "RHS 200x200x8", A: 59.9, Iy: 3730, Wy: 373, iy: 7.89, Iz: 3730, iz: 7.89, G: 47.0 },
   ],
+  // U-Profile mit parallelen Flanschen (UPE)
+  UPE: [
+    { name: "UPE 80", A: 10.1, Iy: 107, Wy: 26.8, iy: 3.26, Iz: 25.5, iz: 1.59, G: 7.9 },
+    { name: "UPE 100", A: 12.5, Iy: 207, Wy: 41.4, iy: 4.07, Iz: 38.3, iz: 1.75, G: 9.8 },
+    { name: "UPE 120", A: 15.4, Iy: 364, Wy: 60.7, iy: 4.87, Iz: 55.5, iz: 1.90, G: 12.1 },
+    { name: "UPE 140", A: 18.4, Iy: 600, Wy: 85.6, iy: 5.71, Iz: 78.8, iz: 2.07, G: 14.5 },
+    { name: "UPE 160", A: 21.7, Iy: 911, Wy: 114, iy: 6.48, Iz: 107, iz: 2.22, G: 17.0 },
+    { name: "UPE 180", A: 25.1, Iy: 1350, Wy: 150, iy: 7.34, Iz: 144, iz: 2.40, G: 19.7 },
+    { name: "UPE 200", A: 29.0, Iy: 1910, Wy: 191, iy: 8.11, Iz: 187, iz: 2.54, G: 22.8 },
+    { name: "UPE 220", A: 33.9, Iy: 2680, Wy: 244, iy: 8.90, Iz: 250, iz: 2.72, G: 26.6 },
+    { name: "UPE 240", A: 38.5, Iy: 3600, Wy: 300, iy: 9.67, Iz: 311, iz: 2.84, G: 30.2 },
+    { name: "UPE 270", A: 44.8, Iy: 5250, Wy: 389, iy: 10.80, Iz: 401, iz: 2.99, G: 35.2 },
+    { name: "UPE 300", A: 56.6, Iy: 8030, Wy: 535, iy: 11.90, Iz: 538, iz: 3.08, G: 44.4 },
+  ],
+  // Nahtlose Stahlrohre, warmgefertigt (EN 10210) - iy = iz = i
+  ROHR: [
+    { name: "Rohr 48.3x3.2", A: 4.53, Iy: 11.6, Wy: 4.80, iy: 1.60, Iz: 11.6, iz: 1.60, G: 3.56 },
+    { name: "Rohr 60.3x4", A: 7.07, Iy: 28.2, Wy: 9.34, iy: 2.00, Iz: 28.2, iz: 2.00, G: 5.55 },
+    { name: "Rohr 76.1x4", A: 9.06, Iy: 59.1, Wy: 15.5, iy: 2.55, Iz: 59.1, iz: 2.55, G: 7.11 },
+    { name: "Rohr 88.9x5", A: 13.2, Iy: 116, Wy: 26.2, iy: 2.97, Iz: 116, iz: 2.97, G: 10.3 },
+    { name: "Rohr 101.6x5", A: 15.2, Iy: 177, Wy: 34.9, iy: 3.42, Iz: 177, iz: 3.42, G: 11.9 },
+    { name: "Rohr 114.3x5", A: 17.2, Iy: 257, Wy: 45.0, iy: 3.87, Iz: 257, iz: 3.87, G: 13.5 },
+    { name: "Rohr 139.7x6", A: 25.2, Iy: 564, Wy: 80.7, iy: 4.73, Iz: 564, iz: 4.73, G: 19.8 },
+    { name: "Rohr 168.3x6.3", A: 32.1, Iy: 1053, Wy: 125, iy: 5.73, Iz: 1053, iz: 5.73, G: 25.2 },
+    { name: "Rohr 193.7x8", A: 46.7, Iy: 2016, Wy: 208, iy: 6.57, Iz: 2016, iz: 6.57, G: 36.6 },
+    { name: "Rohr 219.1x8", A: 53.1, Iy: 2960, Wy: 270, iy: 7.47, Iz: 2960, iz: 7.47, G: 41.6 },
+  ],
+  /**
+   * Doppelwinkel Rücken an Rücken mit Futterblechen (typischer Fachwerkstab).
+   * Fläche und Gewicht doppelt; als maßgebender Trägheitsradius ist i_y des
+   * Einzelwinkels (Achse parallel zum Knotenblech) angesetzt - bei
+   * ausreichender Anzahl Bindebleche die maßgebende Knickachse.
+   */
+  "2L": [
+    { name: "2L 50x50x5", A: 9.60, Iy: 22.0, Wy: 6.0, iy: 1.51, Iz: 22.0, iz: 1.51, G: 7.54 },
+    { name: "2L 60x60x6", A: 13.8, Iy: 45.8, Wy: 9.0, iy: 1.82, Iz: 45.8, iz: 1.82, G: 10.8 },
+    { name: "2L 70x70x7", A: 18.8, Iy: 84.5, Wy: 12.6, iy: 2.12, Iz: 84.5, iz: 2.12, G: 14.8 },
+    { name: "2L 80x80x8", A: 24.6, Iy: 144, Wy: 16.6, iy: 2.42, Iz: 144, iz: 2.42, G: 19.3 },
+    { name: "2L 90x90x9", A: 31.0, Iy: 229, Wy: 21.4, iy: 2.72, Iz: 229, iz: 2.72, G: 24.4 },
+    { name: "2L 100x100x10", A: 38.4, Iy: 350, Wy: 26.4, iy: 3.02, Iz: 350, iz: 3.02, G: 30.2 },
+    { name: "2L 120x120x12", A: 54.6, Iy: 720, Wy: 38.0, iy: 3.63, Iz: 720, iz: 3.63, G: 42.8 },
+  ],
   // Gleichschenklige Winkel, warmgefertigt - iy = iz = i(min, v-v) für Knicknachweis
   L: [
     { name: "L 50x50x5", A: 4.80, Iy: 11.0, Wy: 3.0, iy: 0.98, Iz: 11.0, iz: 0.98, G: 3.77 },
@@ -89,13 +131,26 @@ const STEEL_DB = {
 
 // Bauteiltyp -> sinnvolle Voreinstellungen (Beanspruchung, Knicklängenbeiwert, bevorzugte Profilfamilien)
 const MEMBER_TYPE_DEFAULTS = {
-  "Stütze": { loadType: "Druck", beta: 1.0, families: ["HEB", "HEA", "RHS"] },
-  "Obergurt": { loadType: "Druck", beta: 1.0, families: ["RHS", "L", "HEA"] },
-  "Untergurt": { loadType: "Zug", beta: 1.0, families: ["RHS", "L", "HEA"] },
-  "Druckstrebe": { loadType: "Druck", beta: 1.0, families: ["RHS", "L"] },
-  "Zugstrebe": { loadType: "Zug", beta: 1.0, families: ["L", "RHS"] },
-  "Riegel/Pfette": { loadType: "Biegung", beta: 1.0, families: ["IPE"] },
-  "Sonstige": { loadType: "Druck", beta: 1.0, families: ["HEA", "HEB", "IPE", "RHS", "L"] },
+  "Stütze": { loadType: "Druck", beta: 1.0, families: ["HEB", "HEA", "RHS", "ROHR"] },
+  "Obergurt": { loadType: "Druck", beta: 1.0, families: ["RHS", "ROHR", "2L", "UPE", "HEA"] },
+  "Untergurt": { loadType: "Zug", beta: 1.0, families: ["RHS", "2L", "L", "UPE", "HEA"] },
+  "Druckstrebe": { loadType: "Druck", beta: 1.0, families: ["RHS", "ROHR", "2L", "L"] },
+  "Zugstrebe": { loadType: "Zug", beta: 1.0, families: ["L", "2L", "RHS"] },
+  "Riegel/Pfette": { loadType: "Biegung", beta: 1.0, families: ["IPE", "UPE"] },
+  "Sonstige": { loadType: "Druck", beta: 1.0, families: ["HEA", "HEB", "IPE", "UPE", "RHS", "ROHR", "2L", "L"] },
+};
+
+// Auswahlliste der Profilfamilien in der Bauteiltabelle
+const FAMILY_LABELS = {
+  AUTO: "Automatisch",
+  HEA: "HEA",
+  HEB: "HEB",
+  IPE: "IPE",
+  UPE: "UPE",
+  RHS: "RHS (Vierkant)",
+  ROHR: "Rohr",
+  "2L": "2L (Doppelwinkel)",
+  L: "L (Winkel)",
 };
 
 const FAMILY_BUCKLING_CURVE = {
@@ -103,6 +158,9 @@ const FAMILY_BUCKLING_CURVE = {
   HEA: 0.49, // Knicken um schwache Achse (Kurve c)
   HEB: 0.49,
   IPE: 0.49,
+  UPE: 0.49,
   RHS: 0.21, // warmgefertigte Hohlprofile (Kurve a)
+  ROHR: 0.21,
+  "2L": 0.34, // Doppelwinkel (Kurve b)
   L: 0.34,   // Winkelprofile (Kurve b)
 };

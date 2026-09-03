@@ -385,6 +385,15 @@ class SketchEditor {
     const { nodes, supports, loads } = this.buildModel();
 
     nodes.forEach((node, i) => {
+      // Knotennummer für den Abgleich mit der Anschlusstabelle
+      ctx.font = "10px 'IBM Plex Mono', Consolas, monospace";
+      ctx.fillStyle = "#8fb6d1";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.fillText("K" + (i + 1), node.x - 7, node.y - 5);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+
       const support = supports[i];
       if (support) {
         // Auflagerdreieck; beim Loslager zusätzlich die Rollenlinie

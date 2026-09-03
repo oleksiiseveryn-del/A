@@ -137,7 +137,8 @@ function solveTruss(nodes, bars, supports, loads) {
 
   const forces = {};
   bars.forEach((bar, j) => {
-    forces[bar.id] = x[j];
+    // Numerisches Rauschen abschneiden, damit Nullstäbe als glatte 0 erscheinen
+    forces[bar.id] = Math.abs(x[j]) < 0.05 ? 0 : x[j];
   });
 
   const reactions = reactionDofs.map((dof, k) => ({
