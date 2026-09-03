@@ -410,6 +410,30 @@ table.members-table input {
   border-top: 1px solid #f0dca0;
 }
 
+button.tool-btn.primary {
+  background: var(--hsd-blue);
+  color: #fff;
+  border-color: var(--hsd-blue);
+  font-weight: 600;
+}
+
+button.tool-btn.primary:hover {
+  background: var(--hsd-blue-light);
+  border-color: var(--hsd-blue-light);
+}
+
+.status-box {
+  padding: 8px 14px;
+  font-size: 0.78rem;
+  border-top: 1px solid var(--border);
+  line-height: 1.45;
+}
+
+.status-box[hidden] { display: none; }
+.status-box.info { background: #eef4f9; color: var(--hsd-blue); }
+.status-box.ok { background: #e8f6ed; color: #1d6b3f; border-top-color: #b6e0c5; }
+.status-box.error { background: #fdeceb; color: #96271f; border-top-color: #f3c2be; }
+
 .modal-overlay {
   position: fixed;
   inset: 0;

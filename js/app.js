@@ -76,6 +76,7 @@
 
   const editor = new SketchEditor(canvas, {
     onLineAdded: (line, lengthM) => addMember(line, lengthM),
+    onNodePick: (mode, node) => handleNodePick(mode, node),
     onCalibration: (pixelDist, callback) => {
       askNumber(
         "Maßstab kalibrieren",
@@ -284,17 +285,29 @@
   const btnAngleSnap = document.getElementById("btnAngleSnap");
   const btnClearAll = document.getElementById("btnClearAll");
 
+  const btnSupport = document.getElementById("btnSupport");
+  const btnLoad = document.getElementById("btnLoad");
+
+  const MODE_HINTS = {
+    draw: "Klicken Sie Start- und Endpunkt einer Bauteilachse (Winkelfang 15°, ESC zum Abbrechen).",
+    calibrate: "Kalibrierung: Ziehen Sie eine Referenzlinie bekannter Länge (z. B. 1 m).",
+    support: "Auflager: Knoten anklicken – Festlager → Loslager → kein Lager.",
+    load: "Knotenlast: Knoten anklicken und Last in kN eingeben (positiv = nach unten).",
+  };
+
   function setActiveMode(mode) {
     btnDraw.classList.toggle("active", mode === "draw");
     btnCalibrate.classList.toggle("active", mode === "calibrate");
+    btnSupport.classList.toggle("active", mode === "support");
+    btnLoad.classList.toggle("active", mode === "load");
     editor.setMode(mode);
-    hint.textContent = mode === "calibrate"
-      ? "Kalibrierung: Ziehen Sie eine Referenzlinie bekannter Länge (z. B. 1 m)."
-      : "Klicken Sie Start- und Endpunkt einer Bauteilachse (Winkelfang 15°, ESC zum Abbrechen).";
+    hint.textContent = MODE_HINTS[mode] || MODE_HINTS.draw;
   }
 
   btnDraw.addEventListener("click", () => setActiveMode("draw"));
   btnCalibrate.addEventListener("click", () => setActiveMode("calibrate"));
+  btnSupport.addEventListener("click", () => setActiveMode("support"));
+  btnLoad.addEventListener("click", () => setActiveMode("load"));
   btnGrid.addEventListener("click", () => {
     const on = !btnGrid.classList.contains("active");
     btnGrid.classList.toggle("active", on);
@@ -323,34 +336,138 @@
   setActiveMode("draw");
 
   /**
+   * Knotenklick in den Modi "Auflager" und "Knotenlast".
+   * Auflager schalten durch: kein Lager → Festlager → Loslager → kein Lager.
+   */
+  function handleNodePick(mode, node) {
+    if (mode === "support") {
+      const current = editor.getSupport(node.x, node.y);
+      const next = current === undefined ? "pinned" : current === "pinned" ? "roller" : undefined;
+      editor.setSupport(node.x, node.y, next);
+      setStatus(
+        next === "pinned" ? "Festlager gesetzt (horizontal und vertikal gehalten)."
+          : next === "roller" ? "Loslager gesetzt (nur vertikal gehalten)."
+          : "Auflager entfernt.",
+        "info"
+      );
+      return;
+    }
+
+    const current = editor.getLoad(node.x, node.y);
+    askNumber(
+      "Knotenlast",
+      "Vertikale Knotenlast in kN eingeben (positiv = nach unten, 0 = Last entfernen):",
+      current ? String(current.fz) : "20"
+    ).then((value) => {
+      if (value === null || Number.isNaN(value)) return;
+      editor.setLoad(node.x, node.y, { fx: 0, fz: value });
+      setStatus(value ? `Knotenlast ${value} kN gesetzt.` : "Knotenlast entfernt.", "info");
+    });
+  }
+
+  function setStatus(text, kind) {
+    const box = document.getElementById("statusBox");
+    box.textContent = text;
+    box.className = "status-box " + (kind || "info");
+    box.hidden = !text;
+  }
+
+  /**
+   * Stabkräfte aus der gezeichneten Geometrie ermitteln und in die
+   * Bauteiltabelle übernehmen (Druck/Zug wird automatisch gesetzt).
+   */
+  function computeBarForces() {
+    const model = editor.buildModel();
+    const result = solveTruss(model.nodes, model.bars, model.supports, model.loads);
+
+    if (!result.ok) {
+      editor.setBarForces(null);
+      setStatus(result.message, "error");
+      return;
+    }
+
+    let maxUtilNote = 0;
+    model.bars.forEach((bar) => {
+      const member = members.get(bar.id);
+      if (!member) return;
+      const N = result.forces[bar.id];
+      // Sehr kleine Werte sind Nullstäbe (numerisches Rauschen abschneiden)
+      const value = Math.abs(N) < 0.05 ? 0 : N;
+      member.loadType = value >= 0 ? "Zug" : "Druck";
+      member.force = parseFloat(Math.abs(value).toFixed(1));
+      maxUtilNote = Math.max(maxUtilNote, Math.abs(value));
+    });
+
+    editor.setBarForces(result.forces);
+    renderTable();
+
+    const vertical = result.reactions.filter((r) => r.dir === "y");
+    const reactionText = vertical
+      .map((r) => `${Math.abs(r.value).toFixed(1)} kN`)
+      .join(" / ");
+    setStatus(
+      `Stabkräfte berechnet · größte Stabkraft ${maxUtilNote.toFixed(1)} kN · vertikale Auflagerkräfte ${reactionText}. ` +
+      "Nullstäbe erscheinen mit 0 kN.",
+      "ok"
+    );
+  }
+
+  document.getElementById("btnSolve").addEventListener("click", computeBarForces);
+
+  /**
    * Startbeispiel: einfaches Fachwerkbinder-Feld mit realistischen Schnittgrößen,
    * damit die Zuordnung Skizze → Stahlprofil sofort sichtbar ist.
    * Werte sind Beispielwerte und ersetzen keine Systemberechnung.
    */
   function loadExample() {
-    const example = [
-      { x1: 90, y1: 330, x2: 90, y2: 130, type: "Stütze", loadType: "Druck", force: 240, beta: 2.0 },
-      { x1: 490, y1: 330, x2: 490, y2: 130, type: "Stütze", loadType: "Druck", force: 240, beta: 2.0 },
-      { x1: 90, y1: 130, x2: 490, y2: 130, type: "Obergurt", loadType: "Druck", force: 180, beta: 1.0 },
-      { x1: 90, y1: 330, x2: 490, y2: 330, type: "Untergurt", loadType: "Zug", force: 180, beta: 1.0 },
-      { x1: 90, y1: 330, x2: 290, y2: 130, type: "Druckstrebe", loadType: "Druck", force: 95, beta: 1.0 },
-      { x1: 490, y1: 330, x2: 290, y2: 130, type: "Zugstrebe", loadType: "Zug", force: 95, beta: 1.0 },
-    ];
+    // Parallelbinder (Pratt-Fachwerk): 10,00 m Stützweite, 1,50 m Systemhöhe,
+    // vier Felder à 2,50 m. 10 Knoten, 17 Stäbe, 3 Auflagerbindungen:
+    // m + r = 17 + 3 = 20 = 2n -> statisch bestimmt und unverschieblich.
+    const yU = 400; // Untergurt
+    const yO = 325; // Obergurt (75 px = 1,50 m bei 50 px/m)
+    const xs = [80, 205, 330, 455, 580];
+    const example = [];
+    for (let i = 0; i < 4; i++) {
+      example.push({ x1: xs[i], y1: yU, x2: xs[i + 1], y2: yU, type: "Untergurt", beta: 1.0 });
+      example.push({ x1: xs[i], y1: yO, x2: xs[i + 1], y2: yO, type: "Obergurt", beta: 1.0 });
+    }
+    xs.forEach((x) => example.push({ x1: x, y1: yU, x2: x, y2: yO, type: "Druckstrebe", beta: 1.0 }));
+    // Pratt-Anordnung: Diagonalen vom Obergurt außen zum Untergurt innen
+    // geneigt -> Diagonalen auf Zug, Pfosten auf Druck (wirtschaftlich,
+    // da die langen Zugstäbe nicht knickgefährdet sind)
+    example.push({ x1: xs[0], y1: yO, x2: xs[1], y2: yU, type: "Zugstrebe", beta: 1.0 });
+    example.push({ x1: xs[1], y1: yO, x2: xs[2], y2: yU, type: "Zugstrebe", beta: 1.0 });
+    example.push({ x1: xs[3], y1: yO, x2: xs[2], y2: yU, type: "Zugstrebe", beta: 1.0 });
+    example.push({ x1: xs[4], y1: yO, x2: xs[3], y2: yU, type: "Zugstrebe", beta: 1.0 });
     example.forEach((spec) => {
       const line = editor.addLine(spec.x1, spec.y1, spec.x2, spec.y2);
+      const defaults = MEMBER_TYPE_DEFAULTS[spec.type];
       members.set(line.id, {
         id: line.id,
         type: spec.type,
         length: parseFloat(editor.lengthOf(line).toFixed(2)),
-        loadType: spec.loadType,
-        force: spec.force,
+        loadType: defaults.loadType,
+        force: 0,
         moment: 5,
         beta: spec.beta,
         family: "AUTO",
         steelGrade: document.getElementById("steelGradeGlobal").value,
       });
     });
+
+    // Auflager: links Festlager, rechts Loslager
+    editor.setSupport(xs[0], yU, "pinned");
+    editor.setSupport(xs[4], yU, "roller");
+    // Knotenlasten am Obergurt (Dachlast über die Pfetten eingeleitet),
+    // Randknoten mit halber Einzugsfläche
+    editor.setLoad(xs[0], yO, { fx: 0, fz: 10 });
+    editor.setLoad(xs[1], yO, { fx: 0, fz: 20 });
+    editor.setLoad(xs[2], yO, { fx: 0, fz: 20 });
+    editor.setLoad(xs[3], yO, { fx: 0, fz: 20 });
+    editor.setLoad(xs[4], yO, { fx: 0, fz: 10 });
+
     renderTable();
+    computeBarForces();
   }
 
   document.getElementById("btnExample").addEventListener("click", () => {
