@@ -291,6 +291,66 @@ table.members-table input {
 .status-pill.knapp { background: var(--warn); }
 .status-pill.fehler { background: var(--err); }
 
+.warn-flag {
+  display: inline-block;
+  margin-left: 5px;
+  width: 15px;
+  height: 15px;
+  line-height: 15px;
+  text-align: center;
+  border-radius: 50%;
+  background: var(--warn);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: help;
+}
+
+.basis {
+  background: #fff;
+  border-top: 1px solid var(--border);
+  padding: 16px 24px 20px;
+}
+
+.basis h2 {
+  font-size: 0.95rem;
+  color: var(--hsd-blue);
+  margin: 0 0 10px;
+}
+
+.basis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 22px;
+}
+
+.basis-col h3 {
+  font-size: 0.8rem;
+  margin: 0 0 6px;
+  color: var(--hsd-blue);
+  padding-bottom: 4px;
+  border-bottom: 2px solid var(--border);
+}
+
+.basis-col ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.76rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.basis-col ul.basis-open li::marker { color: var(--err); }
+.basis-col ul li { margin-bottom: 4px; }
+
+.basis-note {
+  margin: 12px 0 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  max-width: 110ch;
+}
+
 .row-remove {
   cursor: pointer;
   color: var(--err);

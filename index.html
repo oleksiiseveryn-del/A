@@ -39,6 +39,17 @@
       <option value="S355">S355</option>
     </select>
   </div>
+  <div class="field">
+    <label for="naSelect">Teilsicherheitsbeiwerte</label>
+    <select id="naSelect" title="Nationaler Anhang: γM1 = 1,1 (Deutschland) bzw. 1,0 (EN-Empfehlung)">
+      <option value="DE" selected>DIN EN 1993-1-1/NA (γM1 = 1,10)</option>
+      <option value="EN">EN-Empfehlung (γM1 = 1,00)</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="netRatio">Nettoquerschnitt A<sub>net</sub>/A [%]</label>
+    <input type="number" id="netRatio" step="1" min="50" max="100" value="100" title="Lochabzug im Anschlussbereich; unter 100 % wird zusätzlich der Bruchnachweis nach Gl. (6.7) geführt">
+  </div>
 </div>
 
 <div class="main-grid">
@@ -228,6 +239,55 @@
     </div>
   </div>
 </div>
+
+<section class="basis">
+  <h2>Rechengrundlagen und Geltungsbereich</h2>
+  <div class="basis-grid">
+    <div class="basis-col">
+      <h3>Geführte Nachweise</h3>
+      <ul>
+        <li><strong>Biegeknicken</strong> um die schwache Achse nach DIN EN 1993-1-1, Abs. 6.3.1:
+          λ̄ = L<sub>cr</sub>/(i · λ<sub>1</sub>) mit λ<sub>1</sub> = π·√(E/f<sub>y</sub>),
+          χ = 1/(Φ + √(Φ² − λ̄²)) ≤ 1,0, N<sub>b,Rd</sub> = χ·A·f<sub>y</sub>/γ<sub>M1</sub></li>
+        <li><strong>Knicklinien</strong> nach Tab. 6.1/6.2: gewalzte I-Profile h/b > 1,2 → Kurve b (α = 0,34),
+          sonst Kurve c (α = 0,49); warmgefertigte Hohlprofile → Kurve a (α = 0,21);
+          Winkel und Doppelwinkel → Kurve b; U-Profile → Kurve c</li>
+        <li><strong>Zug</strong> nach Abs. 6.2.3: N<sub>pl,Rd</sub> = A·f<sub>y</sub>/γ<sub>M0</sub>; bei angegebenem
+          Lochabzug zusätzlich N<sub>u,Rd</sub> = 0,9·A<sub>net</sub>·f<sub>u</sub>/γ<sub>M2</sub></li>
+        <li><strong>Biegung</strong> elastisch nach Abs. 6.2.5: M<sub>el,Rd</sub> = W<sub>el,y</sub>·f<sub>y</sub>/γ<sub>M0</sub></li>
+        <li><strong>Stabkräfte</strong>: ebenes Fachwerk mit gelenkigen Knoten, Knotengleichgewicht,
+          Prüfung der statischen Bestimmtheit (m + r = 2n)</li>
+        <li><strong>Teilsicherheitsbeiwerte</strong> nach DIN EN 1993-1-1/NA: γ<sub>M0</sub> = 1,00,
+          γ<sub>M1</sub> = 1,10, γ<sub>M2</sub> = 1,25 (umschaltbar auf die EN-Empfehlung γ<sub>M1</sub> = 1,00)</li>
+      </ul>
+    </div>
+    <div class="basis-col">
+      <h3>Nicht geführte Nachweise – gesondert zu erbringen</h3>
+      <ul class="basis-open">
+        <li><strong>Querschnittsklassifizierung</strong> nach Abs. 5.5: Klasse 4 (beulgefährdet) wird nicht
+          erkannt; für schlanke Querschnitte sind wirksame Querschnittswerte anzusetzen (betrifft z. B.
+          Winkel in S355)</li>
+        <li><strong>Biegedrillknicken</strong> nach Abs. 6.3.2 – bei nicht seitlich gehaltenen Biegeträgern
+          regelmäßig maßgebend</li>
+        <li><strong>Interaktion</strong> N + M<sub>y</sub> + M<sub>z</sub> nach Abs. 6.3.3 sowie Querkraft und
+          Querkraftinteraktion</li>
+        <li><strong>Anschlüsse</strong> nach DIN EN 1993-1-8: Schweißnähte, Schrauben, Knotenbleche,
+          Blockversagen, Anschlussexzentrizitäten (Winkel einseitig angeschlossen)</li>
+        <li><strong>Gebrauchstauglichkeit</strong> nach Abs. 7: Durchbiegung, Schwingung, Überhöhung</li>
+        <li><strong>Lastannahmen</strong> nach DIN EN 1991 mit NA (Eigen-, Nutz-, Schnee- und Windlasten),
+          Kombinationsregeln nach DIN EN 1990 – die Eingabewerte sind vom Anwender bereitzustellen</li>
+        <li><strong>Weitere:</strong> Stabilität des Gesamtsystems und Imperfektionen nach Abs. 5,
+          Brandbemessung (EN 1993-1-2), Ermüdung (EN 1993-1-9), Ausführung und Toleranzen
+          (DIN EN 1090), Korrosionsschutz (DIN EN ISO 12944)</li>
+      </ul>
+    </div>
+  </div>
+  <p class="basis-note">Profilkennwerte sind gerundete Katalogwerte für die Vorbemessung; für die
+    Ausführungsstatik sind die Werte der gültigen Normtabellen (DIN EN 10365, DIN EN 10210, DIN EN 10056)
+    zu verwenden. Bei Doppelwinkeln ist als Knickachse i<sub>y</sub> des Einzelwinkels angesetzt, was
+    ausreichende Bindebleche voraussetzt. Ein einziger Knicklängenbeiwert β wirkt auf die schwache Achse;
+    abweichende Knicklängen in und aus der Fachwerkebene sind gesondert zu berücksichtigen.</p>
+</section>
 
 <div class="disclaimer">
   Hinweis: Diese Anwendung dient der überschlägigen Vorbemessung in der Skizzenphase (Bauteilfindung nach DIN EN 1993-1-1,

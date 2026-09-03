@@ -142,9 +142,29 @@
     renderTable();
   }
 
-  function recalcMember(member) {
-    return findSuitableProfile(member);
+  /** Nachweisparameter aus der Kopfzeile übernehmen (Nationaler Anhang, Lochabzug). */
+  function applyDesignParameters() {
+    const na = document.getElementById("naSelect").value;
+    PARTIAL_FACTORS.gammaM1 = na === "EN" ? 1.0 : 1.1;
+    PARTIAL_FACTORS.gammaM0 = 1.0;
+    PARTIAL_FACTORS.gammaM2 = 1.25;
   }
+
+  function currentNetRatio() {
+    const percent = parseFloat(document.getElementById("netRatio").value);
+    return Number.isFinite(percent) ? Math.min(Math.max(percent, 50), 100) / 100 : 1;
+  }
+
+  function recalcMember(member) {
+    return findSuitableProfile({ ...member, netRatio: currentNetRatio() });
+  }
+
+  document.getElementById("naSelect").addEventListener("change", () => {
+    applyDesignParameters();
+    renderTable();
+  });
+  document.getElementById("netRatio").addEventListener("change", () => renderTable());
+  applyDesignParameters();
 
   function renderTable() {
     tbody.innerHTML = "";
@@ -191,7 +211,11 @@
         <td><strong>${result.profileName}</strong></td>
         <td>${(result.utilization * 100).toFixed(0)}%</td>
         <td>${result.totalWeight.toFixed(1)} kg</td>
-        <td><span class="status-pill ${result.status}">${result.status === "ok" ? "OK" : result.status === "knapp" ? "Knapp" : "Fehler"}</span></td>
+        <td><span class="status-pill ${result.status}">${result.status === "ok" ? "OK" : result.status === "knapp" ? "Knapp" : "Fehler"}</span>${
+          (result.warnings && result.warnings.length)
+            ? `<span class="warn-flag" title="${result.warnings.join(" · ").replace(/"/g, "&quot;")}">!</span>`
+            : ""
+        }</td>
         <td><button class="row-remove" data-remove="${member.id}" title="Bauteil löschen">✕</button></td>
       `;
       tbody.appendChild(tr);
@@ -821,6 +845,8 @@
         name: document.getElementById("projectName").value,
         datum: document.getElementById("projectDate").value,
         stahlguete: document.getElementById("steelGradeGlobal").value,
+        nationalerAnhang: document.getElementById("naSelect").value,
+        nettoquerschnitt: document.getElementById("netRatio").value,
       },
       kosten: {
         material: document.getElementById("pricePerKg").value,
@@ -865,6 +891,9 @@
       document.getElementById("projectName").value = data.projekt.name || "";
       document.getElementById("projectDate").value = data.projekt.datum || "";
       document.getElementById("steelGradeGlobal").value = data.projekt.stahlguete || "S235";
+      document.getElementById("naSelect").value = data.projekt.nationalerAnhang || "DE";
+      document.getElementById("netRatio").value = data.projekt.nettoquerschnitt || "100";
+      applyDesignParameters();
     }
     if (data.kosten) {
       document.getElementById("pricePerKg").value = data.kosten.material;
