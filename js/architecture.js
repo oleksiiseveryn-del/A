@@ -176,3 +176,64 @@ function materialAufstellung(elements, preise, oeffnungenJeBauteil) {
     return { ...eintrag, preis, kosten: eintrag.volumen * preis };
   }).sort((a, b) => (a.gruppe === b.gruppe ? b.kosten - a.kosten : a.gruppe.localeCompare(b.gruppe)));
 }
+
+/**
+ * Lage der einzelnen Öffnungen in Wandkoordinaten.
+ *
+ * x0  Abstand vom Wandanfang bis zur linken Laibungskante [m]
+ * y0  Brüstungshöhe über der Wandunterkante [m]
+ *
+ * Ist kein Abstand gesetzt, werden die Stücke einer Position gleichmäßig
+ * über die Wandlänge verteilt. Andernfalls beginnt die erste Öffnung beim
+ * angegebenen Abstand, die weiteren folgen im Achsabstand.
+ *
+ * @returns {Object} { felder, warnungen }
+ */
+function oeffnungsPositionen(openings, wandLaenge, wandHoehe) {
+  const felder = [];
+  const warnungen = new Map();
+
+  const warne = (id, text) => {
+    if (!warnungen.has(id)) warnungen.set(id, []);
+    if (warnungen.get(id).indexOf(text) === -1) warnungen.get(id).push(text);
+  };
+
+  (openings || []).forEach((o) => {
+    const anzahl = Math.max(1, o.anzahl || 1);
+    const b = o.breite || 0;
+    const h = o.hoehe || 0;
+    const y0 = o.bruestung || 0;
+    const automatisch = o.abstand === null || o.abstand === undefined || o.abstand === "";
+    // Achsabstand: gesetzt, sonst Breite plus 1,00 m Pfeiler
+    const raster = o.raster && o.raster > 0 ? o.raster : b + 1.0;
+
+    for (let k = 0; k < anzahl; k++) {
+      const x0 = automatisch
+        ? (wandLaenge * (k + 0.5)) / anzahl - b / 2
+        : o.abstand + k * raster;
+      felder.push({ id: o.id, typ: o.typ, x0, y0, b, h, index: k, automatisch });
+
+      if (x0 < 0 || x0 + b > wandLaenge + 1e-6) {
+        warne(o.id, `Öffnung ${k + 1} liegt außerhalb der Wandlänge (${wandLaenge.toFixed(2)} m)`);
+      }
+      if (y0 < 0 || y0 + h > wandHoehe + 1e-6) {
+        warne(o.id, `Öffnung überschreitet die Wandhöhe (${wandHoehe.toFixed(2)} m)`);
+      }
+    }
+  });
+
+  // Überschneidungen paarweise prüfen
+  for (let i = 0; i < felder.length; i++) {
+    for (let j = i + 1; j < felder.length; j++) {
+      const a = felder[i], c = felder[j];
+      const xUeberlappt = a.x0 < c.x0 + c.b - 1e-6 && c.x0 < a.x0 + a.b - 1e-6;
+      const yUeberlappt = a.y0 < c.y0 + c.h - 1e-6 && c.y0 < a.y0 + a.h - 1e-6;
+      if (xUeberlappt && yUeberlappt) {
+        warne(a.id, "Öffnungen überschneiden sich");
+        warne(c.id, "Öffnungen überschneiden sich");
+      }
+    }
+  }
+
+  return { felder, warnungen };
+}

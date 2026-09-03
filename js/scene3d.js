@@ -477,31 +477,13 @@ function archElementColor(element) {
 }
 
 
-/**
- * Öffnungen gleichmäßig über die Wandlänge verteilen.
- * @returns {Array} [{ x0, y0, b, h, typ }] in Wandkoordinaten (x ab Anfang, y ab Sockel)
- */
-function verteileOeffnungen(openings, wandLaenge, wandHoehe) {
-  const einzeln = [];
-  openings.forEach((o) => {
-    const anzahl = Math.max(1, o.anzahl || 1);
-    const b = o.breite || 1;
-    const h = o.hoehe || 1;
-    const y0 = Math.min(Math.max(o.bruestung || 0, 0), Math.max(wandHoehe - h, 0));
-    for (let k = 0; k < anzahl; k++) {
-      // gleichmäßige Teilung: Mitte des k-ten Feldes
-      const mitte = (wandLaenge * (k + 0.5)) / anzahl;
-      const x0 = Math.min(Math.max(mitte - b / 2, 0.02), Math.max(wandLaenge - b - 0.02, 0.02));
-      if (b < wandLaenge && h < wandHoehe) einzeln.push({ x0, y0, b, h, typ: o.typ });
-    }
-  });
-  return einzeln;
-}
-
 /** Wandkörper mit ausgeschnittenen Öffnungen und eingesetzten Füllungen. */
 function buildWallWithOpenings(element, geo, material, openings, laenge, hoehe, dicke) {
   const gruppe = new THREE.Group();
-  const felder = verteileOeffnungen(openings, laenge, hoehe);
+  // Positionen kommen aus derselben Quelle wie die Tabelle
+  const alle = oeffnungsPositionen(openings, laenge, hoehe).felder;
+  // Nur Öffnungen zeichnen, die vollständig in der Wandfläche liegen
+  const felder = alle.filter((f) => f.x0 >= 0 && f.x0 + f.b <= laenge && f.y0 >= 0 && f.y0 + f.h <= hoehe && f.b > 0 && f.h > 0);
 
   const shape = new THREE.Shape();
   shape.moveTo(0, 0);

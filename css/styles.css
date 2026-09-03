@@ -673,7 +673,7 @@ table.members-table input {
 
 #archTable td:nth-child(5), #archTable td:nth-child(6), #archTable td:nth-child(7),
 #archTable td:nth-child(8), #archTable td:nth-child(9), #archTable td:nth-child(10),
-#openingTable td:nth-child(8), #openingTable td:nth-child(11),
+#openingTable td:nth-child(10), #openingTable td:nth-child(13),
 #archMaterialTable td:nth-child(3), #archMaterialTable td:nth-child(4),
 #archMaterialTable td:nth-child(5), #archMaterialTable td:nth-child(7) {
   font-family: var(--font-data);

@@ -770,6 +770,19 @@
     return 0;
   }
 
+  /** Positionswarnungen je Öffnung, gesammelt über alle Bauteile. */
+  function oeffnungsWarnungen() {
+    const alle = new Map();
+    model.elements.forEach((element) => {
+      const typ = BAUTEILTYPEN[element.kind];
+      if (typ.form !== "linie") return;
+      const geo = bauteilGeometrie(element);
+      const pos = oeffnungsPositionen(oeffnungenVon(element.id), geo.laenge, geo.hoehe);
+      pos.warnungen.forEach((texte, id) => alle.set(id, texte));
+    });
+    return alle;
+  }
+
   function renderOpeningTable() {
     const body = document.getElementById("openingBody");
     const empty = document.getElementById("openingEmpty");
@@ -777,6 +790,7 @@
     empty.hidden = model.openings.size > 0;
 
     const waende = Array.from(model.elements.values());
+    const warnungen = oeffnungsWarnungen();
     let pos = 1;
 
     model.openings.forEach((o) => {
@@ -801,11 +815,15 @@
         <td><input type="number" step="0.01" min="0.1" data-op="${o.id}" data-field="breite" value="${o.breite}"></td>
         <td><input type="number" step="0.01" min="0.1" data-op="${o.id}" data-field="hoehe" value="${o.hoehe}"></td>
         <td><input type="number" step="0.05" min="0" data-op="${o.id}" data-field="bruestung" value="${o.bruestung}"></td>
+        <td><input type="number" step="0.05" min="0" placeholder="auto" data-op="${o.id}" data-field="abstand" value="${o.abstand === null || o.abstand === undefined ? "" : o.abstand}" title="Abstand von der Wandanfangskante bis zur linken Laibung; leer = gleichmäßig verteilt"></td>
+        <td><input type="number" step="0.05" min="0" placeholder="auto" data-op="${o.id}" data-field="raster" value="${o.raster === null || o.raster === undefined ? "" : o.raster}" title="Achsabstand der Wiederholungen dieser Position"></td>
         <td><input type="number" step="1" min="1" data-op="${o.id}" data-field="anzahl" value="${o.anzahl}"></td>
         <td>${flaeche.toFixed(2)}</td>
         <td><input type="number" step="0.05" min="0.1" data-op="${o.id}" data-field="u" value="${oeffnungWert(o, "u")}"></td>
         <td><input type="number" step="10" min="0" data-op="${o.id}" data-field="preis" value="${oeffnungWert(o, "preis")}"></td>
-        <td><strong>${kosten.toFixed(2)}</strong></td>
+        <td><strong>${kosten.toFixed(2)}</strong>${
+          warnungen.has(o.id) ? `<span class="warn-flag" title="${warnungen.get(o.id).join(" · ").replace(/"/g, "&quot;")}">!</span>` : ""
+        }</td>
         <td><button class="row-remove" data-remove-op="${o.id}" title="Öffnung löschen">✕</button></td>`;
       body.appendChild(tr);
       pos++;
@@ -827,6 +845,8 @@
       breite: katalog.b,
       hoehe: katalog.h,
       bruestung: 0.9,
+      abstand: null,
+      raster: null,
       anzahl: 1,
       u: null,
       preis: null,
@@ -849,12 +869,12 @@
       o.breite = katalog.b;
       o.hoehe = katalog.h;
       o.u = null;
-      o.preis = null;
+      o.preis = null; // Position und Achsabstand bleiben erhalten
     } else if (field === "elementId") {
       o.elementId = parseInt(e.target.value, 10);
     } else if (field === "anzahl") {
       o.anzahl = Math.max(1, parseInt(e.target.value, 10) || 1);
-    } else if (field === "u" || field === "preis") {
+    } else if (field === "u" || field === "preis" || field === "abstand" || field === "raster") {
       const v = parseFloat(e.target.value);
       o[field] = Number.isFinite(v) ? v : null;
     } else {
@@ -1463,14 +1483,16 @@
       if (model.openings.size) {
         rows.push([]);
         rows.push(["Fenster und Türen (U-Werte nach Leistungserklärung DIN EN 14351-1)"]);
-        rows.push(["Pos", "Bauteil", "Typ", "Breite [m]", "Höhe [m]", "Brüstung [m]", "Stück", "Fläche [m²]", "U [W/m²K]", "Preis je Stück [€]", "Kosten [€]"]);
+        rows.push(["Pos", "Bauteil", "Typ", "Breite [m]", "Höhe [m]", "Brüstung [m]", "Abstand [m]", "Achsabstand [m]", "Stück", "Fläche [m²]", "U [W/m²K]", "Preis je Stück [€]", "Kosten [€]"]);
         model.openings.forEach((o) => {
           const element = model.elements.get(o.elementId);
           const faktor = element ? (element.anzahl || 1) : 1;
           const stueck = (o.anzahl || 1) * faktor;
           rows.push(["F" + o.id, element ? bauteilBezeichnung(element) : "-",
             OEFFNUNGSTYPEN[o.typ] ? OEFFNUNGSTYPEN[o.typ].name : o.typ,
-            o.breite.toFixed(2), o.hoehe.toFixed(2), o.bruestung.toFixed(2), stueck,
+            o.breite.toFixed(2), o.hoehe.toFixed(2), o.bruestung.toFixed(2),
+            o.abstand === null || o.abstand === undefined ? "gleichmäßig verteilt" : o.abstand.toFixed(2),
+            o.raster === null || o.raster === undefined ? "-" : o.raster.toFixed(2), stueck,
             (o.breite * o.hoehe * stueck).toFixed(2), oeffnungWert(o, "u"),
             oeffnungWert(o, "preis"), (oeffnungWert(o, "preis") * stueck).toFixed(2)]);
         });
