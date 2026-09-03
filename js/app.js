@@ -205,6 +205,10 @@
     members.forEach((member) => {
       editor.setLineLabel(member.id, typeShortLabel(member.type) + member.id);
     });
+
+    // Stückliste folgt der Profilwahl, daher bei sichtbarer Ansicht mitziehen
+    const cutView = document.getElementById("viewCutList");
+    if (cutView && !cutView.hidden) renderCutList();
   }
 
   function updateCost(totalWeight) {
@@ -420,21 +424,171 @@
     });
   }
 
+  /* --- Stückliste und Zuschnittplan für die Werkstatt --- */
+
+  /**
+   * Fasst gleiche Profile mit gleicher Zuschnittlänge zu Positionen zusammen.
+   * Zuschnittlänge = Systemlänge (Achsmaß) + Zugabe.
+   */
+  function buildCutList() {
+    const allowance = parseFloat(document.getElementById("cutAllowance").value) || 0;
+    const grade = document.getElementById("steelGradeGlobal").value;
+    const groups = new Map();
+
+    members.forEach((member) => {
+      const result = findSuitableProfile(member);
+      const cutLength = Math.round(member.length * 1000 + allowance);
+      if (cutLength <= 0) return;
+      const key = `${result.profileName}|${cutLength}`;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          profile: result.profileName,
+          weightPerMeter: result.weightPerMeter,
+          cutLength,
+          count: 0,
+          labels: [],
+          grade,
+        });
+      }
+      const group = groups.get(key);
+      group.count += 1;
+      group.labels.push(typeShortLabel(member.type) + member.id);
+    });
+
+    // Sortierung: nach Profil, innerhalb des Profils absteigende Länge
+    return Array.from(groups.values()).sort((a, b) =>
+      a.profile === b.profile ? b.cutLength - a.cutLength : a.profile.localeCompare(b.profile)
+    );
+  }
+
+  /**
+   * Verschnittoptimierung je Profil nach dem First-Fit-Decreasing-Verfahren:
+   * längste Stäbe zuerst, jeder Stab kommt auf die erste Stange, auf der er
+   * samt Sägeschnitt noch Platz findet.
+   */
+  function buildCutPlan(cutList) {
+    const stockMm = (parseFloat(document.getElementById("stockLength").value) || 6) * 1000;
+    const kerf = parseFloat(document.getElementById("sawKerf").value) || 0;
+    const byProfile = new Map();
+
+    cutList.forEach((group) => {
+      if (!byProfile.has(group.profile)) {
+        byProfile.set(group.profile, { profile: group.profile, weightPerMeter: group.weightPerMeter, pieces: [] });
+      }
+      const entry = byProfile.get(group.profile);
+      for (let i = 0; i < group.count; i++) entry.pieces.push(group.cutLength);
+    });
+
+    return Array.from(byProfile.values()).map((entry) => {
+      const pieces = entry.pieces.slice().sort((a, b) => b - a);
+      const bars = []; // je Stange: { rest, stuecke: [] }
+      const tooLong = [];
+
+      pieces.forEach((piece) => {
+        if (piece > stockMm) {
+          tooLong.push(piece); // passt auf keine Stange -> Stoß erforderlich
+          return;
+        }
+        let bar = bars.find((b) => b.rest >= piece + (b.stuecke.length ? kerf : 0));
+        if (!bar) {
+          bar = { rest: stockMm, stuecke: [] };
+          bars.push(bar);
+        }
+        bar.rest -= piece + (bar.stuecke.length ? kerf : 0);
+        bar.stuecke.push(piece);
+      });
+
+      const usedMm = pieces.filter((p) => p <= stockMm).reduce((s, p) => s + p, 0);
+      const stockUsedMm = bars.length * stockMm;
+      const wasteMm = stockUsedMm - usedMm;
+
+      return {
+        profile: entry.profile,
+        stockMm,
+        barCount: bars.length,
+        bars,
+        wasteMm,
+        wastePercent: stockUsedMm ? (wasteMm / stockUsedMm) * 100 : 0,
+        tooLong,
+      };
+    }).sort((a, b) => a.profile.localeCompare(b.profile));
+  }
+
+  function renderCutList() {
+    const listBody = document.getElementById("cutListBody");
+    const planBody = document.getElementById("cutPlanBody");
+    const empty = document.getElementById("cutListEmpty");
+    listBody.innerHTML = "";
+    planBody.innerHTML = "";
+
+    if (members.size === 0) {
+      empty.hidden = false;
+      return;
+    }
+    empty.hidden = true;
+
+    const cutList = buildCutList();
+    cutList.forEach((group, index) => {
+      const weightPerPiece = (group.weightPerMeter * group.cutLength) / 1000;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${index + 1}</td>
+        <td><strong>${group.profile}</strong></td>
+        <td>${group.grade}</td>
+        <td>${group.cutLength}</td>
+        <td>${group.count}</td>
+        <td>${weightPerPiece.toFixed(1)}</td>
+        <td>${(weightPerPiece * group.count).toFixed(1)}</td>
+        <td class="cut-labels">${group.labels.join(", ")}</td>
+      `;
+      listBody.appendChild(tr);
+    });
+
+    buildCutPlan(cutList).forEach((plan) => {
+      const belegung = plan.bars
+        .map((bar, i) => `<span class="bar-chip">St ${i + 1}: ${bar.stuecke.join(" + ")} <em>Rest ${Math.round(bar.rest)}</em></span>`)
+        .join(" ");
+      const hinweis = plan.tooLong.length
+        ? `<div class="cut-warning">${plan.tooLong.length} Stab/Stäbe länger als die Lagerlänge (${plan.tooLong.join(", ")} mm) – Stoß oder Sonderlänge erforderlich.</div>`
+        : "";
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><strong>${plan.profile}</strong></td>
+        <td>${plan.barCount} × ${(plan.stockMm / 1000).toFixed(2)} m</td>
+        <td>${(plan.wasteMm / 1000).toFixed(2)} m (${plan.wastePercent.toFixed(1)} %)</td>
+        <td>${belegung}${hinweis}</td>
+      `;
+      planBody.appendChild(tr);
+    });
+  }
+
+  ["cutAllowance", "stockLength", "sawKerf"].forEach((id) => {
+    document.getElementById(id).addEventListener("input", () => {
+      if (!document.getElementById("viewCutList").hidden) renderCutList();
+    });
+  });
+
   // Zuletzt berechnete Lösung, für Knotentabelle und Export vorgehalten
   let lastSolution = null;
 
-  const tabMembers = document.getElementById("tabMembers");
-  const tabNodes = document.getElementById("tabNodes");
+  const TABS = {
+    members: { button: document.getElementById("tabMembers"), view: document.getElementById("viewMembers") },
+    nodes: { button: document.getElementById("tabNodes"), view: document.getElementById("viewNodes") },
+    cutlist: { button: document.getElementById("tabCutList"), view: document.getElementById("viewCutList") },
+  };
+
   function showView(which) {
-    const isNodes = which === "nodes";
-    document.getElementById("viewMembers").hidden = isNodes;
-    document.getElementById("viewNodes").hidden = !isNodes;
-    tabMembers.classList.toggle("active", !isNodes);
-    tabNodes.classList.toggle("active", isNodes);
-    if (isNodes) renderNodeTable(lastSolution);
+    Object.keys(TABS).forEach((key) => {
+      TABS[key].view.hidden = key !== which;
+      TABS[key].button.classList.toggle("active", key === which);
+    });
+    if (which === "nodes") renderNodeTable(lastSolution);
+    if (which === "cutlist") renderCutList();
   }
-  tabMembers.addEventListener("click", () => showView("members"));
-  tabNodes.addEventListener("click", () => showView("nodes"));
+
+  Object.keys(TABS).forEach((key) => {
+    TABS[key].button.addEventListener("click", () => showView(key));
+  });
 
   function setStatus(text, kind) {
     const box = document.getElementById("statusBox");
@@ -674,6 +828,11 @@
         transport: document.getElementById("transportFlat").value,
         lagerung: document.getElementById("storagePerKg").value,
       },
+      werkstatt: {
+        zugabe: document.getElementById("cutAllowance").value,
+        lagerlaenge: document.getElementById("stockLength").value,
+        saegeschnitt: document.getElementById("sawKerf").value,
+      },
       eigengewicht: {
         aktiv: document.getElementById("chkSelfWeight").checked,
         gammaG: document.getElementById("gammaG").value,
@@ -714,6 +873,11 @@
       document.getElementById("storagePerKg").value = data.kosten.lagerung;
     }
 
+    if (data.werkstatt) {
+      document.getElementById("cutAllowance").value = data.werkstatt.zugabe;
+      document.getElementById("stockLength").value = data.werkstatt.lagerlaenge;
+      document.getElementById("sawKerf").value = data.werkstatt.saegeschnitt;
+    }
     if (data.eigengewicht) {
       document.getElementById("chkSelfWeight").checked = !!data.eigengewicht.aktiv;
       document.getElementById("gammaG").value = data.eigengewicht.gammaG || "1.35";
@@ -799,6 +963,41 @@
         result.status,
       ]);
     });
+    // Stückliste für die Werkstatt anhängen
+    const cutList = buildCutList();
+    if (cutList.length) {
+      const allowance = document.getElementById("cutAllowance").value;
+      rows.push([]);
+      rows.push([`Stückliste (Zuschnittlängen aus Systemlängen, Zugabe ${allowance} mm)`]);
+      rows.push(["Pos", "Profil", "Güte", "Zuschnittlänge [mm]", "Stück", "Gewicht/Stück [kg]", "Gewicht gesamt [kg]", "Bauteile"]);
+      cutList.forEach((group, i) => {
+        const weightPerPiece = (group.weightPerMeter * group.cutLength) / 1000;
+        rows.push([
+          i + 1,
+          group.profile,
+          group.grade,
+          group.cutLength,
+          group.count,
+          weightPerPiece.toFixed(1),
+          (weightPerPiece * group.count).toFixed(1),
+          group.labels.join(" "),
+        ]);
+      });
+
+      rows.push([]);
+      rows.push([`Zuschnittplan (Lagerlänge ${document.getElementById("stockLength").value} m, Sägeschnitt ${document.getElementById("sawKerf").value} mm)`]);
+      rows.push(["Profil", "Stangen", "Verschnitt [m]", "Verschnitt [%]", "Belegung [mm]"]);
+      buildCutPlan(cutList).forEach((plan) => {
+        rows.push([
+          plan.profile,
+          `${plan.barCount} x ${(plan.stockMm / 1000).toFixed(2)} m`,
+          (plan.wasteMm / 1000).toFixed(2),
+          plan.wastePercent.toFixed(1),
+          plan.bars.map((bar, i) => `St${i + 1}: ${bar.stuecke.join("+")} (Rest ${Math.round(bar.rest)})`).join(" | "),
+        ]);
+      });
+    }
+
     // Anschlusskräfte je Knoten anhängen, sobald eine Lösung vorliegt
     if (lastSolution && lastSolution.ok) {
       const model = editor.buildModel();

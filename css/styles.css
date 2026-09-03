@@ -99,7 +99,7 @@ header.app-header {
 
 .main-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 1px;
   background: var(--border);
   min-height: 640px;
@@ -221,6 +221,7 @@ button.tool-btn.danger:hover {
 .result-panel-body {
   flex: 1;
   overflow-y: auto;
+  overflow-x: auto;
   padding: 8px 12px;
 }
 
@@ -439,6 +440,91 @@ table.members-table input {
   font-size: 0.74rem;
   color: var(--text-muted);
   line-height: 1.45;
+}
+
+.cutlist-controls {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 8px 2px 4px;
+}
+
+.cutlist-controls .field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cutlist-controls label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  color: var(--text-muted);
+}
+
+.cutlist-controls input {
+  width: 108px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-data);
+  font-size: 0.8rem;
+}
+
+.section-title {
+  font-size: 0.8rem;
+  color: var(--hsd-blue);
+  margin: 14px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 2px solid var(--border);
+}
+
+#cutListTable td:nth-child(4),
+#cutListTable td:nth-child(5),
+#cutListTable td:nth-child(6),
+#cutListTable td:nth-child(7) {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+#cutListTable td:nth-child(1),
+#cutListTable td:nth-child(2),
+#cutPlanTable td:nth-child(1),
+#cutPlanTable td:nth-child(2),
+#cutPlanTable td:nth-child(3) {
+  font-family: var(--font-data);
+  white-space: nowrap;
+}
+
+.cut-labels {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.bar-chip {
+  display: inline-block;
+  background: #eef4f9;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 2px 7px;
+  margin: 2px 3px 2px 0;
+  font-family: var(--font-data);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.bar-chip em {
+  color: var(--text-muted);
+  font-style: normal;
+}
+
+.cut-warning {
+  margin-top: 4px;
+  color: var(--err);
+  font-size: 0.72rem;
 }
 
 .force-chip {
