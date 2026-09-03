@@ -19,6 +19,8 @@
     nextId: 1,
     elements: new Map(),  // id -> Architektur-Bauteil { id, kind, p1, p2, layers, hoehe, anzahl }
     nextElementId: 1,
+    openings: new Map(),  // id -> Öffnung { id, elementId, typ, breite, hoehe, bruestung, anzahl, u, preis }
+    nextOpeningId: 1,
   };
 
   // Baustoffpreise [€/m³], vom Anwender überschreibbar
@@ -184,6 +186,8 @@
     model.members.clear();
     model.elements.clear();
     model.nextElementId = 1;
+    model.openings.clear();
+    model.nextOpeningId = 1;
     pendingElementPoint = null;
     model.supports.clear();
     model.loads.clear();
@@ -547,6 +551,15 @@
 
   /* ------------------------------------------------- Architektur-Bauteile */
 
+  /** Öffnungen eines Bauteils. */
+  function oeffnungenVon(elementId) {
+    return Array.from(model.openings.values()).filter((o) => o.elementId === elementId);
+  }
+
+  function auswertung(element) {
+    return bauteilAuswertung(element, oeffnungenVon(element.id));
+  }
+
   function bauteilBezeichnung(element) {
     const kuerzel = {
       wand_aussen: "AW", wand_innen: "IW", decke: "DE", dach: "DA",
@@ -589,17 +602,19 @@
     };
     model.elements.set(element.id, element);
 
-    const auswertung = bauteilAuswertung(element);
-    setStatus(`${typ.name} ${bauteilBezeichnung(element)} angelegt: ${auswertung.flaecheGesamt.toFixed(2)} m², `
-      + `Dicke ${auswertung.geometrie.dicke.toFixed(3)} m, Masse ${(auswertung.masseGesamt / 1000).toFixed(2)} t`
-      + (auswertung.uWert ? `, U = ${auswertung.uWert.toFixed(3)} W/(m²·K)` : ""), "ok");
+    const a = auswertung(element);
+    setStatus(`${typ.name} ${bauteilBezeichnung(element)} angelegt: ${a.flaecheGesamt.toFixed(2)} m², `
+      + `Dicke ${a.geometrie.dicke.toFixed(3)} m, Masse ${(a.masseGesamt / 1000).toFixed(2)} t`
+      + (a.uWert ? `, U = ${a.uWert.toFixed(3)} W/(m²·K)` : ""), "ok");
     refreshAll();
   }
 
   function renderArchElements(scene, transparent) {
     model.elements.forEach((element) => {
       const geo = bauteilGeometrie(element);
-      scene.contentGroup.add(buildArchElement(element, geo, archElementColor(element), transparent ? 0.45 : 1));
+      scene.contentGroup.add(buildArchElement(
+        element, geo, archElementColor(element), transparent ? 0.45 : 1, oeffnungenVon(element.id)
+      ));
     });
   }
 
@@ -610,7 +625,7 @@
     empty.hidden = model.elements.size > 0;
 
     model.elements.forEach((element) => {
-      const a = bauteilAuswertung(element);
+      const a = auswertung(element);
       const typ = BAUTEILTYPEN[element.kind];
       const geoText = typ.form === "linie"
         ? `L ${a.geometrie.laenge.toFixed(2)} × H ${a.geometrie.hoehe.toFixed(2)} m`
@@ -627,7 +642,8 @@
 
       const uText = a.uWert === null ? "–" : a.uWert.toFixed(3);
       const zielU = element.zielU === null || element.zielU === undefined ? "" : element.zielU;
-      const uKlasse = a.uWert !== null && element.zielU ? (a.uWert <= element.zielU ? "u-ok" : "u-fail") : "";
+      const uVergleich = a.uMittel !== null ? a.uMittel : a.uWert;
+      const uKlasse = uVergleich !== null && element.zielU ? (uVergleich <= element.zielU ? "u-ok" : "u-fail") : "";
 
       const tr = document.createElement("tr");
       tr.innerHTML = `
@@ -635,10 +651,13 @@
         <td>${a.typName}</td>
         <td>${geoText}</td>
         <td><input type="number" step="1" min="1" data-el="${element.id}" data-field="anzahl" value="${element.anzahl}"></td>
+        <td>${a.flaecheBrutto.toFixed(2)}</td>
+        <td>${a.oeffnungsFlaeche > 0 ? "−" + a.oeffnungsFlaeche.toFixed(2) : "–"}</td>
         <td>${a.flaecheGesamt.toFixed(2)}</td>
         <td>${a.geometrie.dicke.toFixed(3)}</td>
         <td>${a.masseGesamt.toFixed(0)}</td>
-        <td class="${uKlasse}">${uText}</td>
+        <td>${uText}</td>
+        <td class="${uKlasse}">${a.uMittel === null ? "–" : a.uMittel.toFixed(3)}</td>
         <td><input type="number" step="0.01" min="0" placeholder="–" data-el="${element.id}" data-field="zielU" value="${zielU}" title="Zielwert des U-Werts nach GEG bzw. Bauherrenvorgabe"></td>
         <td class="layer-cell">${schichten}<button class="layer-add" data-el="${element.id}">+ Schicht</button>
           ${a.uHinweis ? `<div class="cut-warning">${a.uHinweis}</div>` : ""}
@@ -647,13 +666,14 @@
       body.appendChild(tr);
     });
 
+    renderOpeningTable();
     renderMaterialTable();
   }
 
   function renderMaterialTable() {
     const body = document.getElementById("archMaterialBody");
     body.innerHTML = "";
-    const aufstellung = materialAufstellung(Array.from(model.elements.values()), materialPreise);
+    const aufstellung = materialAufstellung(Array.from(model.elements.values()), materialPreise, oeffnungenVon);
 
     aufstellung.forEach((eintrag) => {
       const tr = document.createElement("tr");
@@ -670,8 +690,20 @@
   }
 
   function architekturKosten() {
-    return materialAufstellung(Array.from(model.elements.values()), materialPreise)
+    return materialAufstellung(Array.from(model.elements.values()), materialPreise, oeffnungenVon)
       .reduce((sum, e) => sum + e.kosten, 0);
+  }
+
+  function oeffnungsKosten() {
+    let summe = 0;
+    model.openings.forEach((o) => {
+      const katalog = OEFFNUNGSTYPEN[o.typ];
+      const preis = o.preis !== undefined && o.preis !== null ? o.preis : (katalog ? katalog.preis : 0);
+      const element = model.elements.get(o.elementId);
+      const faktor = element ? (element.anzahl || 1) : 1;
+      summe += preis * (o.anzahl || 1) * faktor;
+    });
+    return summe;
   }
 
   document.getElementById("archBody").addEventListener("change", (e) => {
@@ -726,6 +758,114 @@
   document.getElementById("btnBauteil").addEventListener("click", () => setMode("bauteil"));
   document.getElementById("bauteilTyp").addEventListener("change", () => {
     if (mode === "bauteil") setMode("bauteil");
+  });
+
+
+  /* ------------------------------------------------------ Fenster und Türen */
+
+  function oeffnungWert(o, feld) {
+    const katalog = OEFFNUNGSTYPEN[o.typ] || {};
+    if (feld === "u") return o.u !== undefined && o.u !== null ? o.u : (katalog.uw || 1.3);
+    if (feld === "preis") return o.preis !== undefined && o.preis !== null ? o.preis : (katalog.preis || 0);
+    return 0;
+  }
+
+  function renderOpeningTable() {
+    const body = document.getElementById("openingBody");
+    const empty = document.getElementById("openingEmpty");
+    body.innerHTML = "";
+    empty.hidden = model.openings.size > 0;
+
+    const waende = Array.from(model.elements.values());
+    let pos = 1;
+
+    model.openings.forEach((o) => {
+      const element = model.elements.get(o.elementId);
+      const faktor = element ? (element.anzahl || 1) : 1;
+      const flaeche = (o.breite || 0) * (o.hoehe || 0) * (o.anzahl || 1) * faktor;
+      const kosten = oeffnungWert(o, "preis") * (o.anzahl || 1) * faktor;
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>F${o.id}</td>
+        <td>
+          <select data-op="${o.id}" data-field="elementId">
+            ${waende.map((el) => `<option value="${el.id}" ${el.id === o.elementId ? "selected" : ""}>${bauteilBezeichnung(el)} · ${BAUTEILTYPEN[el.kind].name}</option>`).join("")}
+          </select>
+        </td>
+        <td>
+          <select data-op="${o.id}" data-field="typ">
+            ${Object.keys(OEFFNUNGSTYPEN).map((k) => `<option value="${k}" ${k === o.typ ? "selected" : ""}>${OEFFNUNGSTYPEN[k].name}</option>`).join("")}
+          </select>
+        </td>
+        <td><input type="number" step="0.01" min="0.1" data-op="${o.id}" data-field="breite" value="${o.breite}"></td>
+        <td><input type="number" step="0.01" min="0.1" data-op="${o.id}" data-field="hoehe" value="${o.hoehe}"></td>
+        <td><input type="number" step="0.05" min="0" data-op="${o.id}" data-field="bruestung" value="${o.bruestung}"></td>
+        <td><input type="number" step="1" min="1" data-op="${o.id}" data-field="anzahl" value="${o.anzahl}"></td>
+        <td>${flaeche.toFixed(2)}</td>
+        <td><input type="number" step="0.05" min="0.1" data-op="${o.id}" data-field="u" value="${oeffnungWert(o, "u")}"></td>
+        <td><input type="number" step="10" min="0" data-op="${o.id}" data-field="preis" value="${oeffnungWert(o, "preis")}"></td>
+        <td><strong>${kosten.toFixed(2)}</strong></td>
+        <td><button class="row-remove" data-remove-op="${o.id}" title="Öffnung löschen">✕</button></td>`;
+      body.appendChild(tr);
+      pos++;
+    });
+  }
+
+  document.getElementById("btnAddOpening").addEventListener("click", () => {
+    const waende = Array.from(model.elements.values()).filter((el) => BAUTEILTYPEN[el.kind].form === "linie" && !BAUTEILTYPEN[el.kind].unterGelaende);
+    const ziel = waende[0] || Array.from(model.elements.values())[0];
+    if (!ziel) {
+      setStatus("Zuerst eine Wand anlegen, dann die Öffnung zuordnen.", "error");
+      return;
+    }
+    const katalog = OEFFNUNGSTYPEN.fenster_3fach;
+    model.openings.set(model.nextOpeningId, {
+      id: model.nextOpeningId,
+      elementId: ziel.id,
+      typ: "fenster_3fach",
+      breite: katalog.b,
+      hoehe: katalog.h,
+      bruestung: 0.9,
+      anzahl: 1,
+      u: null,
+      preis: null,
+    });
+    model.nextOpeningId++;
+    refreshAll();
+  });
+
+  document.getElementById("openingBody").addEventListener("change", (e) => {
+    const id = parseInt(e.target.getAttribute("data-op"), 10);
+    if (!id) return;
+    const o = model.openings.get(id);
+    if (!o) return;
+    const field = e.target.getAttribute("data-field");
+
+    if (field === "typ") {
+      o.typ = e.target.value;
+      const katalog = OEFFNUNGSTYPEN[o.typ];
+      // Maße, U-Wert und Preis auf die Katalogwerte des neuen Typs zurücksetzen
+      o.breite = katalog.b;
+      o.hoehe = katalog.h;
+      o.u = null;
+      o.preis = null;
+    } else if (field === "elementId") {
+      o.elementId = parseInt(e.target.value, 10);
+    } else if (field === "anzahl") {
+      o.anzahl = Math.max(1, parseInt(e.target.value, 10) || 1);
+    } else if (field === "u" || field === "preis") {
+      const v = parseFloat(e.target.value);
+      o[field] = Number.isFinite(v) ? v : null;
+    } else {
+      o[field] = Math.max(0, parseFloat(e.target.value) || 0);
+    }
+    refreshAll();
+  });
+
+  document.getElementById("openingBody").addEventListener("click", (e) => {
+    const id = e.target.getAttribute("data-remove-op");
+    if (id) { model.openings.delete(parseInt(id, 10)); refreshAll(); }
   });
 
   /* ------------------------------------------------------------- Tabellen */
@@ -818,12 +958,14 @@
     const transport = value("transportFlat");
     const storage = totalWeight * value("storagePerKg");
     const arch = architekturKosten();
+    const fenster = oeffnungsKosten();
     document.getElementById("costArch").textContent = arch.toFixed(2) + " €";
+    document.getElementById("costOpenings").textContent = fenster.toFixed(2) + " €";
     document.getElementById("costMaterial").textContent = material.toFixed(2) + " €";
     document.getElementById("costProcessing").textContent = processing.toFixed(2) + " €";
     document.getElementById("costTransport").textContent = transport.toFixed(2) + " €";
     document.getElementById("costStorage").textContent = storage.toFixed(2) + " €";
-    document.getElementById("costTotal").textContent = (material + processing + transport + storage + arch).toFixed(2) + " €";
+    document.getElementById("costTotal").textContent = (material + processing + transport + storage + arch + fenster).toFixed(2) + " €";
   }
 
   ["pricePerKg", "processingPerKg", "transportFlat", "storagePerKg"].forEach((id) => {
@@ -1158,6 +1300,8 @@
       naechsteId: model.nextId,
       bauteile: Array.from(model.elements.values()),
       naechsteBauteilId: model.nextElementId,
+      oeffnungen: Array.from(model.openings.values()),
+      naechsteOeffnungId: model.nextOpeningId,
       baustoffpreise: materialPreise,
     };
   }
@@ -1174,6 +1318,8 @@
     model.nextId = data.naechsteId || (Math.max(0, ...data.staebe.map((m) => m.id)) + 1);
     (data.bauteile || []).forEach((el) => model.elements.set(el.id, el));
     model.nextElementId = data.naechsteBauteilId || (model.elements.size + 1);
+    (data.oeffnungen || []).forEach((o) => model.openings.set(o.id, o));
+    model.nextOpeningId = data.naechsteOeffnungId || (model.openings.size + 1);
     Object.keys(materialPreise).forEach((k) => delete materialPreise[k]);
     Object.assign(materialPreise, data.baustoffpreise || {});
 
@@ -1303,19 +1449,37 @@
     if (model.elements.size) {
       rows.push([]);
       rows.push(["Architektur-Bauteile (Mengen nach Geometrie, U-Wert nach DIN EN ISO 6946)"]);
-      rows.push(["Bauteil", "Typ", "Stück", "Fläche [m²]", "Dicke [m]", "Volumen [m³]", "Masse [kg]", "U [W/m²K]", "Zielwert", "flächenbez. Masse [kg/m²]", "Aufbau"]);
+      rows.push(["Bauteil", "Typ", "Stück", "Fläche brutto [m²]", "Öffnungen [m²]", "Fläche netto [m²]", "Dicke [m]", "Volumen [m³]", "Masse [kg]", "U Bauteil [W/m²K]", "U mittel [W/m²K]", "Zielwert", "flächenbez. Masse [kg/m²]", "Aufbau"]);
       model.elements.forEach((element) => {
-        const a = bauteilAuswertung(element);
-        rows.push([bauteilBezeichnung(element), a.typName, element.anzahl, a.flaecheGesamt.toFixed(2),
+        const a = auswertung(element);
+        rows.push([bauteilBezeichnung(element), a.typName, element.anzahl, a.flaecheBrutto.toFixed(2),
+          a.oeffnungsFlaeche.toFixed(2), a.flaecheGesamt.toFixed(2),
           a.geometrie.dicke.toFixed(3), a.volumenGesamt.toFixed(2), a.masseGesamt.toFixed(0),
-          a.uWert === null ? "-" : a.uWert.toFixed(3), element.zielU || "-", a.flaechenmasse.toFixed(0),
+          a.uWert === null ? "-" : a.uWert.toFixed(3), a.uMittel === null ? "-" : a.uMittel.toFixed(3),
+          element.zielU || "-", a.flaechenmasse.toFixed(0),
           a.schichten.map((l) => `${l.name} ${(l.d * 1000).toFixed(0)} mm`).join(" | ")]);
       });
+
+      if (model.openings.size) {
+        rows.push([]);
+        rows.push(["Fenster und Türen (U-Werte nach Leistungserklärung DIN EN 14351-1)"]);
+        rows.push(["Pos", "Bauteil", "Typ", "Breite [m]", "Höhe [m]", "Brüstung [m]", "Stück", "Fläche [m²]", "U [W/m²K]", "Preis je Stück [€]", "Kosten [€]"]);
+        model.openings.forEach((o) => {
+          const element = model.elements.get(o.elementId);
+          const faktor = element ? (element.anzahl || 1) : 1;
+          const stueck = (o.anzahl || 1) * faktor;
+          rows.push(["F" + o.id, element ? bauteilBezeichnung(element) : "-",
+            OEFFNUNGSTYPEN[o.typ] ? OEFFNUNGSTYPEN[o.typ].name : o.typ,
+            o.breite.toFixed(2), o.hoehe.toFixed(2), o.bruestung.toFixed(2), stueck,
+            (o.breite * o.hoehe * stueck).toFixed(2), oeffnungWert(o, "u"),
+            oeffnungWert(o, "preis"), (oeffnungWert(o, "preis") * stueck).toFixed(2)]);
+        });
+      }
 
       rows.push([]);
       rows.push(["Materialaufstellung Architektur"]);
       rows.push(["Gruppe", "Baustoff", "Rohdichte [kg/m³]", "Volumen [m³]", "Masse [t]", "Preis [€/m³]", "Kosten [€]"]);
-      materialAufstellung(Array.from(model.elements.values()), materialPreise).forEach((e) => {
+      materialAufstellung(Array.from(model.elements.values()), materialPreise, oeffnungenVon).forEach((e) => {
         rows.push([e.gruppe, e.name, e.rho, e.volumen.toFixed(2), (e.masse / 1000).toFixed(2), e.preis, e.kosten.toFixed(2)]);
       });
     }

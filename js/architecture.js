@@ -78,18 +78,43 @@ function bauteilGeometrie(element) {
   return { laenge, breite, hoehe: dicke, flaeche: laenge * breite, dicke, volumen: laenge * breite * dicke };
 }
 
+/** Summe der Öffnungsflächen eines Bauteils [m²] je Einzelbauteil. */
+function oeffnungsFlaeche(openings) {
+  return (openings || []).reduce((s, o) => s + (o.breite || 0) * (o.hoehe || 0) * (o.anzahl || 1), 0);
+}
+
 /**
- * Vollständige Auswertung eines Bauteils inklusive Anzahl.
- * @returns {Object} Geometrie, Massen, U-Wert und Schichtmengen
+ * Mittlerer Wärmedurchgangskoeffizient einer Fläche mit Öffnungen:
+ * U_m = (A_netto · U_Bauteil + Σ A_Öffnung · U_Öffnung) / A_brutto
  */
-function bauteilAuswertung(element) {
+function mittlererUWert(uBauteil, flaecheBrutto, openings) {
+  if (uBauteil === null || flaecheBrutto <= 0) return null;
+  const aOeffnung = oeffnungsFlaeche(openings);
+  if (aOeffnung <= 0) return uBauteil;
+  const aNetto = Math.max(flaecheBrutto - aOeffnung, 0);
+  const summe = (openings || []).reduce((s, o) => {
+    const u = o.u !== undefined && o.u !== null ? o.u : (OEFFNUNGSTYPEN[o.typ] ? OEFFNUNGSTYPEN[o.typ].uw : 1.3);
+    return s + (o.breite || 0) * (o.hoehe || 0) * (o.anzahl || 1) * u;
+  }, 0);
+  return (aNetto * uBauteil + summe) / flaecheBrutto;
+}
+
+/**
+ * Vollständige Auswertung eines Bauteils inklusive Anzahl und Öffnungen.
+ * Massen und Volumen beziehen sich auf die Nettofläche.
+ * @returns {Object} Geometrie, Massen, U-Werte und Schichtmengen
+ */
+function bauteilAuswertung(element, openings) {
   const typ = BAUTEILTYPEN[element.kind];
   const geo = bauteilGeometrie(element);
   const anzahl = element.anzahl || 1;
 
+  const aOeffnungEinzel = oeffnungsFlaeche(openings);
+  const flaecheNettoEinzel = Math.max(geo.flaeche - aOeffnungEinzel, 0);
+
   const schichten = element.layers.map((layer) => {
     const stoff = BAUSTOFFE[layer.material];
-    const volumen = geo.flaeche * (layer.d || 0) * anzahl;
+    const volumen = flaecheNettoEinzel * (layer.d || 0) * anzahl;
     return {
       material: layer.material,
       name: stoff ? stoff.name : layer.material,
@@ -101,12 +126,16 @@ function bauteilAuswertung(element) {
   });
 
   const u = berechneUWert(element.layers, typ);
+  const uMittel = mittlererUWert(u.U, geo.flaeche, openings);
   return {
     typName: typ.name,
     geometrie: geo,
     anzahl,
-    flaecheGesamt: geo.flaeche * anzahl,
-    volumenGesamt: geo.volumen * anzahl,
+    flaecheBrutto: geo.flaeche * anzahl,
+    oeffnungsFlaeche: aOeffnungEinzel * anzahl,
+    flaecheGesamt: flaecheNettoEinzel * anzahl,
+    volumenGesamt: flaecheNettoEinzel * geo.dicke * anzahl,
+    uMittel,
     masseGesamt: schichten.reduce((s, l) => s + l.masse, 0),
     kostenGesamt: schichten.reduce((s, l) => s + l.kosten, 0),
     schichten,
@@ -118,10 +147,11 @@ function bauteilAuswertung(element) {
 }
 
 /** Materialaufstellung über alle Bauteile, gruppiert nach Baustoff. */
-function materialAufstellung(elements, preise) {
+function materialAufstellung(elements, preise, oeffnungenJeBauteil) {
   const summe = new Map();
   elements.forEach((element) => {
-    bauteilAuswertung(element).schichten.forEach((schicht) => {
+    const openings = oeffnungenJeBauteil ? oeffnungenJeBauteil(element.id) : [];
+    bauteilAuswertung(element, openings).schichten.forEach((schicht) => {
       if (!summe.has(schicht.material)) {
         const stoff = BAUSTOFFE[schicht.material];
         summe.set(schicht.material, {

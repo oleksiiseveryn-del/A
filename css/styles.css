@@ -672,7 +672,8 @@ table.members-table input {
 .layer-note { font-size: 0.68rem; color: var(--text-muted); margin-top: 3px; }
 
 #archTable td:nth-child(5), #archTable td:nth-child(6), #archTable td:nth-child(7),
-#archTable td:nth-child(8),
+#archTable td:nth-child(8), #archTable td:nth-child(9), #archTable td:nth-child(10),
+#openingTable td:nth-child(8), #openingTable td:nth-child(11),
 #archMaterialTable td:nth-child(3), #archMaterialTable td:nth-child(4),
 #archMaterialTable td:nth-child(5), #archMaterialTable td:nth-child(7) {
   font-family: var(--font-data);
@@ -685,7 +686,10 @@ table.members-table input {
 #archTable td.u-fail { color: var(--err); font-weight: 700; }
 #archTable td:nth-child(1), #archMaterialTable td:nth-child(2) { white-space: nowrap; }
 #archMaterialTable td:nth-child(6) input { width: 78px; font-family: var(--font-data); }
-#archTable td:nth-child(4) input, #archTable td:nth-child(9) input { width: 62px; font-family: var(--font-data); }
+#archTable td:nth-child(4) input, #archTable td:nth-child(11) input { width: 62px; font-family: var(--font-data); }
+#openingTable input { width: 70px; font-family: var(--font-data); }
+#openingTable select { min-width: 130px; }
+#openingTable td:nth-child(1) { font-family: var(--font-data); white-space: nowrap; }
 
 button.tool-btn.plain { border: none; padding: 3px 4px; background: none; }
 button.tool-btn.plain:hover { background: #eef4f9; }

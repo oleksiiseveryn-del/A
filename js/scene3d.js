@@ -422,7 +422,7 @@ function buildLabel(text, position, color) {
  *  - flaeche: Platte über dem aufgezogenen Rechteck
  *  - punkt:   Einzelfundament unter dem Punkt
  */
-function buildArchElement(element, geo, color, opacity) {
+function buildArchElement(element, geo, color, opacity, openings) {
   const typ = BAUTEILTYPEN[element.kind];
   const material = new THREE.MeshStandardMaterial({
     color, roughness: 0.85, metalness: 0.05,
@@ -436,6 +436,11 @@ function buildArchElement(element, geo, color, opacity) {
     const laenge = Math.hypot(dx, dz) || Math.hypot(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
     const hoehe = geo.hoehe;
     const dicke = geo.dicke;
+
+    // Wand mit Öffnungen: Umriss als Fläche mit Aussparungen extrudieren
+    if (openings && openings.length && !typ.unterGelaende) {
+      return buildWallWithOpenings(element, geo, material, openings, laenge, hoehe, dicke);
+    }
 
     const box = new THREE.BoxGeometry(laenge, hoehe, dicke);
     const mesh = new THREE.Mesh(box, material);
@@ -469,4 +474,79 @@ function archElementColor(element) {
   element.layers.forEach((l) => { if (!dickste || l.d > dickste.d) dickste = l; });
   const stoff = dickste ? BAUSTOFFE[dickste.material] : null;
   return stoff ? (GRUPPEN_FARBE[stoff.gruppe] || 0x9aa5ad) : 0x9aa5ad;
+}
+
+
+/**
+ * Öffnungen gleichmäßig über die Wandlänge verteilen.
+ * @returns {Array} [{ x0, y0, b, h, typ }] in Wandkoordinaten (x ab Anfang, y ab Sockel)
+ */
+function verteileOeffnungen(openings, wandLaenge, wandHoehe) {
+  const einzeln = [];
+  openings.forEach((o) => {
+    const anzahl = Math.max(1, o.anzahl || 1);
+    const b = o.breite || 1;
+    const h = o.hoehe || 1;
+    const y0 = Math.min(Math.max(o.bruestung || 0, 0), Math.max(wandHoehe - h, 0));
+    for (let k = 0; k < anzahl; k++) {
+      // gleichmäßige Teilung: Mitte des k-ten Feldes
+      const mitte = (wandLaenge * (k + 0.5)) / anzahl;
+      const x0 = Math.min(Math.max(mitte - b / 2, 0.02), Math.max(wandLaenge - b - 0.02, 0.02));
+      if (b < wandLaenge && h < wandHoehe) einzeln.push({ x0, y0, b, h, typ: o.typ });
+    }
+  });
+  return einzeln;
+}
+
+/** Wandkörper mit ausgeschnittenen Öffnungen und eingesetzten Füllungen. */
+function buildWallWithOpenings(element, geo, material, openings, laenge, hoehe, dicke) {
+  const gruppe = new THREE.Group();
+  const felder = verteileOeffnungen(openings, laenge, hoehe);
+
+  const shape = new THREE.Shape();
+  shape.moveTo(0, 0);
+  shape.lineTo(laenge, 0);
+  shape.lineTo(laenge, hoehe);
+  shape.lineTo(0, hoehe);
+  shape.closePath();
+
+  felder.forEach((f) => {
+    const loch = new THREE.Path();
+    loch.moveTo(f.x0, f.y0);
+    loch.lineTo(f.x0 + f.b, f.y0);
+    loch.lineTo(f.x0 + f.b, f.y0 + f.h);
+    loch.lineTo(f.x0, f.y0 + f.h);
+    loch.closePath();
+    shape.holes.push(loch);
+  });
+
+  gruppe.add(new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: dicke, bevelEnabled: false }), material));
+
+  // Füllungen: Glas bläulich, Türen und Tore in Holz-/Metallton
+  felder.forEach((f) => {
+    const art = OEFFNUNGSTYPEN[f.typ] ? OEFFNUNGSTYPEN[f.typ].art : "Fenster";
+    const fuellung = new THREE.MeshStandardMaterial({
+      color: art === "Fenster" ? 0x8fd3f4 : art === "Tür" ? 0x8a6b4a : 0xb7c2cb,
+      transparent: art === "Fenster",
+      opacity: art === "Fenster" ? 0.45 : 1,
+      roughness: art === "Fenster" ? 0.1 : 0.7,
+      metalness: art === "Fenster" ? 0.2 : 0.3,
+    });
+    const pane = new THREE.Mesh(new THREE.BoxGeometry(f.b, f.h, 0.04), fuellung);
+    pane.position.set(f.x0 + f.b / 2, f.y0 + f.h / 2, dicke / 2);
+    gruppe.add(pane);
+  });
+
+  // Wandkoordinaten in die Modellkoordinaten drehen
+  const p1 = element.p1, p2 = element.p2;
+  let dir = new THREE.Vector3(p2.x - p1.x, 0, p2.z - p1.z);
+  if (dir.lengthSq() < 1e-9) dir = new THREE.Vector3(1, 0, 0);
+  dir.normalize();
+  const up = new THREE.Vector3(0, 1, 0);
+  const normal = new THREE.Vector3().crossVectors(dir, up).normalize();
+
+  const matrix = new THREE.Matrix4().makeBasis(dir, up, normal);
+  matrix.setPosition(p1.x - normal.x * dicke / 2, p1.y, p1.z - normal.z * dicke / 2);
+  gruppe.applyMatrix4(matrix);
+  return gruppe;
 }

@@ -199,10 +199,13 @@
             <th>Typ</th>
             <th>Geometrie</th>
             <th>Stück</th>
-            <th>Fläche [m²]</th>
+            <th>Fläche brutto [m²]</th>
+            <th>Öffnungen [m²]</th>
+            <th>Fläche netto [m²]</th>
             <th>Dicke [m]</th>
             <th>Masse [kg]</th>
-            <th>U [W/m²K]</th>
+            <th>U Bauteil</th>
+            <th>U mittel</th>
             <th>Ziel</th>
             <th>Schichtaufbau (Material · Dicke [m])</th>
             <th></th>
@@ -211,6 +214,32 @@
         <tbody id="archBody"></tbody>
       </table>
       <div class="empty-state" id="archEmpty">Noch keine Bauteile. Wählen Sie oben links einen Bauteiltyp, klicken Sie „Bauteil“ und ziehen Sie ihn auf der Arbeitsebene auf.</div>
+
+      <h3 class="section-title">Fenster und Türen</h3>
+      <p class="view-note">Öffnungen werden von der Wandfläche abgezogen; Massen und Kosten beziehen sich auf die Nettofläche.
+        Der mittlere U-Wert der Wand folgt aus U<sub>m</sub> = (A<sub>netto</sub>·U<sub>Wand</sub> + Σ A<sub>Öffnung</sub>·U<sub>Öffnung</sub>) / A<sub>brutto</sub>.
+        Die U-Werte sind Richtwerte marktüblicher Produkte – maßgebend ist die Leistungserklärung nach DIN EN 14351-1.</p>
+      <button class="tool-btn" id="btnAddOpening" style="margin-bottom:8px">+ Fenster / Tür hinzufügen</button>
+      <table class="members-table" id="openingTable">
+        <thead>
+          <tr>
+            <th>Pos</th>
+            <th>Bauteil</th>
+            <th>Typ</th>
+            <th>Breite [m]</th>
+            <th>Höhe [m]</th>
+            <th>Brüstung [m]</th>
+            <th>Stück</th>
+            <th>Fläche [m²]</th>
+            <th>U [W/m²K]</th>
+            <th>€/Stück</th>
+            <th>Kosten [€]</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="openingBody"></tbody>
+      </table>
+      <div class="empty-state" id="openingEmpty">Noch keine Öffnungen angelegt.</div>
 
       <h3 class="section-title">Materialaufstellung und Kosten</h3>
       <table class="members-table" id="archMaterialTable">
@@ -305,6 +334,7 @@
       <div class="stat"><span class="label">Transport</span><span class="value" id="costTransport">0.00 €</span></div>
       <div class="stat"><span class="label">Lagerung</span><span class="value" id="costStorage">0.00 €</span></div>
       <div class="stat"><span class="label">Architektur (Material)</span><span class="value" id="costArch">0.00 €</span></div>
+      <div class="stat"><span class="label">Fenster und Türen</span><span class="value" id="costOpenings">0.00 €</span></div>
       <div class="stat"><span class="label">Gesamt (Kostenschätzung)</span><span class="value" id="costTotal">0.00 €</span></div>
     </div>
 

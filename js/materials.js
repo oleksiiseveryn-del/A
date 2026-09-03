@@ -117,3 +117,24 @@ const GRUPPEN_FARBE = {
   "Metall": 0x8fa3b5,
   "Schüttung": 0x8d8577,
 };
+
+/**
+ * Fenster- und Türtypen für den Abzug von der Wandfläche.
+ *
+ * uw   Wärmedurchgangskoeffizient des Bauteils [W/(m²·K)] - Richtwerte
+ *      marktüblicher Produkte; maßgebend ist die Herstellererklärung nach
+ *      DIN EN 14351-1 (Leistungserklärung / CE-Kennzeichnung).
+ * preis  Richtwert je Stück [€] einschließlich Einbau - anzupassen.
+ * b, h   übliche Rohbaumaße [m] als Vorbelegung
+ */
+const OEFFNUNGSTYPEN = {
+  fenster_2fach:   { name: "Fenster 2-fach verglast", uw: 1.30, b: 1.26, h: 1.38, preis: 750, art: "Fenster" },
+  fenster_3fach:   { name: "Fenster 3-fach verglast", uw: 0.90, b: 1.26, h: 1.38, preis: 950, art: "Fenster" },
+  fenster_passiv:  { name: "Fenster 3-fach Passivhaus", uw: 0.75, b: 1.26, h: 1.38, preis: 1250, art: "Fenster" },
+  fenstertuer:     { name: "Fenstertür 3-fach", uw: 1.00, b: 1.01, h: 2.26, preis: 1450, art: "Fenster" },
+  dachfenster:     { name: "Dachflächenfenster", uw: 1.40, b: 0.78, h: 1.18, preis: 1100, art: "Fenster" },
+  haustuer:        { name: "Haustür gedämmt", uw: 1.30, b: 1.01, h: 2.13, preis: 2200, art: "Tür" },
+  innentuer:       { name: "Innentür", uw: 2.00, b: 0.885, h: 2.01, preis: 450, art: "Tür" },
+  sektionaltor:    { name: "Sektionaltor gedämmt", uw: 1.50, b: 3.00, h: 3.00, preis: 4200, art: "Tor" },
+  rolltor:         { name: "Rolltor Industrie", uw: 5.50, b: 4.00, h: 4.00, preis: 5600, art: "Tor" },
+};
