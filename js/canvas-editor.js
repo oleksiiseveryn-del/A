@@ -69,6 +69,14 @@ class SketchEditor {
     this._render();
   }
 
+  // Linie programmgesteuert anlegen (z. B. für das Startbeispiel)
+  addLine(x1, y1, x2, y2) {
+    const line = { id: this.nextId++, x1, y1, x2, y2 };
+    this.lines.push(line);
+    this._render();
+    return line;
+  }
+
   lengthOf(line) {
     const dx = line.x2 - line.x1;
     const dy = line.y2 - line.y1;
@@ -218,13 +226,26 @@ class SketchEditor {
         ctx.fill();
       });
 
-      // Länge beschriften
-      const midX = (line.x1 + line.x2) / 2;
-      const midY = (line.y1 + line.y2) / 2;
-      const length = this.lengthOf(line).toFixed(2);
+      // Länge beschriften - senkrecht zur Stabachse versetzt, damit sich
+      // Beschriftungen sich kreuzender Stäbe nicht überlagern
+      const dx = line.x2 - line.x1;
+      const dy = line.y2 - line.y1;
+      const len = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
+      const offset = 14;
+      const midX = (line.x1 + line.x2) / 2 + (-dy / len) * offset;
+      const midY = (line.y1 + line.y2) / 2 + (dx / len) * offset;
+      const label = `${line.__label || "#" + line.id} · ${this.lengthOf(line).toFixed(2)} m`;
+
+      ctx.font = "12px 'IBM Plex Mono', Consolas, monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const textWidth = ctx.measureText(label).width;
+      ctx.fillStyle = "rgba(15, 36, 56, 0.82)";
+      ctx.fillRect(midX - textWidth / 2 - 4, midY - 9, textWidth + 8, 18);
       ctx.fillStyle = "#e8f4fc";
-      ctx.font = "12px 'Segoe UI', Arial, sans-serif";
-      ctx.fillText(`${line.__label || "#" + line.id} · ${length} m`, midX + 6, midY - 6);
+      ctx.fillText(label, midX, midY);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
     });
 
     // Aktuelle Rubberband-Linie

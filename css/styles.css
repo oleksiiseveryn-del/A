@@ -11,13 +11,15 @@
   --border: #d7dee5;
   --text: #1b2733;
   --text-muted: #64707c;
+  --font-ui: "IBM Plex Sans", "Segoe UI", Arial, sans-serif;
+  --font-data: "IBM Plex Mono", "Consolas", "Courier New", monospace;
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: "Segoe UI", Arial, sans-serif;
+  font-family: var(--font-ui);
   background: var(--bg);
   color: var(--text);
 }
@@ -193,6 +195,7 @@ button.tool-btn.danger:hover {
 }
 
 .scale-info {
+  font-family: var(--font-data);
   position: absolute;
   bottom: 8px;
   left: 12px;
@@ -243,6 +246,26 @@ table.members-table td {
   border-bottom: 1px solid var(--border);
   vertical-align: middle;
 }
+
+/* Profil, Auslastung und Gewicht: technische Datenspalten */
+table.members-table td:nth-child(1),
+table.members-table td:nth-child(8),
+table.members-table td:nth-child(9),
+table.members-table td:nth-child(10) {
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+table.members-table td:nth-child(9),
+table.members-table td:nth-child(10) {
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Mindestbreiten, damit Eingabefelder bedienbar bleiben */
+table.members-table td:nth-child(3) { min-width: 66px; }
+table.members-table td:nth-child(5) { min-width: 72px; }
+table.members-table td:nth-child(6) { min-width: 56px; }
 
 table.members-table select,
 table.members-table input {
@@ -298,9 +321,11 @@ table.members-table input {
 }
 
 .summary-bar .stat span.value {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--hsd-blue);
   font-size: 0.95rem;
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
 }
 
 .cost-section {
@@ -333,9 +358,11 @@ table.members-table input {
 }
 
 .cost-section .stat span.value {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--hsd-blue);
   font-size: 0.95rem;
+  font-family: var(--font-data);
+  font-variant-numeric: tabular-nums;
 }
 
 .cost-section label {

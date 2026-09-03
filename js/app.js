@@ -322,6 +322,43 @@
   btnAngleSnap.classList.add("active");
   setActiveMode("draw");
 
+  /**
+   * Startbeispiel: einfaches Fachwerkbinder-Feld mit realistischen Schnittgrößen,
+   * damit die Zuordnung Skizze → Stahlprofil sofort sichtbar ist.
+   * Werte sind Beispielwerte und ersetzen keine Systemberechnung.
+   */
+  function loadExample() {
+    const example = [
+      { x1: 90, y1: 330, x2: 90, y2: 130, type: "Stütze", loadType: "Druck", force: 240, beta: 2.0 },
+      { x1: 490, y1: 330, x2: 490, y2: 130, type: "Stütze", loadType: "Druck", force: 240, beta: 2.0 },
+      { x1: 90, y1: 130, x2: 490, y2: 130, type: "Obergurt", loadType: "Druck", force: 180, beta: 1.0 },
+      { x1: 90, y1: 330, x2: 490, y2: 330, type: "Untergurt", loadType: "Zug", force: 180, beta: 1.0 },
+      { x1: 90, y1: 330, x2: 290, y2: 130, type: "Druckstrebe", loadType: "Druck", force: 95, beta: 1.0 },
+      { x1: 490, y1: 330, x2: 290, y2: 130, type: "Zugstrebe", loadType: "Zug", force: 95, beta: 1.0 },
+    ];
+    example.forEach((spec) => {
+      const line = editor.addLine(spec.x1, spec.y1, spec.x2, spec.y2);
+      members.set(line.id, {
+        id: line.id,
+        type: spec.type,
+        length: parseFloat(editor.lengthOf(line).toFixed(2)),
+        loadType: spec.loadType,
+        force: spec.force,
+        moment: 5,
+        beta: spec.beta,
+        family: "AUTO",
+        steelGrade: document.getElementById("steelGradeGlobal").value,
+      });
+    });
+    renderTable();
+  }
+
+  document.getElementById("btnExample").addEventListener("click", () => {
+    members.clear();
+    editor.clearAll();
+    loadExample();
+  });
+
   // Export CSV (LV-Format)
   document.getElementById("btnExportCsv").addEventListener("click", () => {
     const rows = [["Pos", "Bauteil", "Typ", "Länge [m]", "Beanspruchung", "Kraft/Moment", "Profil", "Auslastung [%]", "Gewicht gesamt [kg]", "Status"]];
@@ -354,5 +391,5 @@
 
   document.getElementById("btnPrint").addEventListener("click", () => window.print());
 
-  renderTable();
+  loadExample();
 })();
