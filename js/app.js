@@ -21,6 +21,8 @@
     nextElementId: 1,
     openings: new Map(),  // id -> Öffnung { id, elementId, typ, breite, hoehe, bruestung, anzahl, u, preis }
     nextOpeningId: 1,
+    abzuege: new Map(),   // id -> Abzug/Nische { id, raum, typ, breite, tiefe, hoehe, anzahl, bisFussboden, bemerkung }
+    nextAbzugId: 1,
   };
 
   // Baustoffpreise [€/m³], vom Anwender überschreibbar
@@ -188,6 +190,8 @@
     model.nextElementId = 1;
     model.openings.clear();
     model.nextOpeningId = 1;
+    model.abzuege.clear();
+    model.nextAbzugId = 1;
     pendingElementPoint = null;
     model.supports.clear();
     model.loads.clear();
@@ -952,11 +956,15 @@
       setStatus("Für den Grundriss zuerst Wände anlegen.", "error");
       return;
     }
+    // Bilanzen in derselben Reihenfolge wie die Raumliste (nach Fläche sortiert)
+    const bilanzen = raumListe().map((e) => e.bilanz);
     const svg = grundrissSVG({
       waende,
       oeffnungenVon,
       geometrieVon: bauteilGeometrie,
       bezeichnungVon: bauteilBezeichnung,
+      bilanzVon: (i) => bilanzen[i] || null,
+      regelText: abzugRegelText(),
       projekt: {
         name: document.getElementById("projectName").value,
         datum: document.getElementById("projectDate").value,
@@ -1007,11 +1015,48 @@
 
   /* ------------------------------------------------------------- Räume */
 
+  /** Gewähltes Regelwerk der Flächenermittlung: "din277" oder "woflv". */
+  function abzugRegel() {
+    const feld = document.getElementById("abzugRegel");
+    return feld ? feld.value : "woflv";
+  }
+
+  function abzugRegelText() {
+    return abzugRegel() === "woflv"
+      ? "WoFlV § 3 Abs. 3 (mit Schwellenwerten)"
+      : "DIN 277-1 (jede Konstruktionsfläche)";
+  }
+
+  /** Schwellenwerte aus den Eingabefeldern; Voreinstellung nach WoFlV § 3 Abs. 3. */
+  function abzugGrenzen() {
+    const zahl = (id, fallback) => {
+      const feld = document.getElementById(id);
+      const v = feld ? parseFloat(feld.value) : NaN;
+      return Number.isFinite(v) && v >= 0 ? v : fallback;
+    };
+    return {
+      mindestFlaeche: zahl("grenzFlaeche", ABZUG_GRENZEN.mindestFlaeche),
+      mindestHoehe: zahl("grenzHoehe", ABZUG_GRENZEN.mindestHoehe),
+      mindestNischentiefe: zahl("grenzTiefe", ABZUG_GRENZEN.mindestNischentiefe),
+    };
+  }
+
+  /** Alle Positionen, die dem Raum mit der Nummer (1-basiert) zugeordnet sind. */
+  function abzuegeVon(raumNummer) {
+    return Array.from(model.abzuege.values()).filter((a) => a.raum === raumNummer);
+  }
+
   function raumListe() {
     const waende = ansichtsWaende();
     if (waende.length < 3) return [];
     const dickeVon = (wand) => (wand ? bauteilGeometrie(wand).dicke : 0);
-    return findeRaeume(waende).map((raum) => ({ raum, licht: lichteRaumflaeche(raum, dickeVon) }));
+    const regel = abzugRegel();
+    const grenzen = abzugGrenzen();
+    return findeRaeume(waende).map((raum, i) => {
+      const licht = lichteRaumflaeche(raum, dickeVon);
+      const bilanz = raumBilanz(licht.ok ? licht.flaeche : 0, abzuegeVon(i + 1), regel, grenzen);
+      return { raum, licht, bilanz };
+    });
   }
 
   function renderRaumTable() {
@@ -1021,7 +1066,7 @@
     const liste = raumListe();
     empty.hidden = liste.length > 0;
 
-    liste.forEach(({ raum, licht }, i) => {
+    liste.forEach(({ raum, licht, bilanz }, i) => {
       // begrenzende Wände ohne Wiederholung auflisten
       const namen = [];
       raum.waende.forEach((w) => {
@@ -1031,14 +1076,120 @@
       const tr = document.createElement("tr");
       tr.innerHTML = `
         <td>R${i + 1}</td>
-        <td><strong>${licht.ok ? licht.flaeche.toFixed(2) : "–"}</strong></td>
+        <td><strong>${licht.ok ? bilanz.netto.toFixed(2) : "–"}</strong>${
+          bilanz.ueberzogen ? `<span class="warn-flag" title="Die Abzüge übersteigen die lichte Fläche – Maße prüfen.">!</span>` : ""
+        }</td>
+        <td>${licht.ok ? licht.flaeche.toFixed(2) : "–"}</td>
+        <td>${bilanz.abzug > 0 ? "−" + bilanz.abzug.toFixed(2) : "–"}</td>
+        <td>${bilanz.zuschlag > 0 ? "+" + bilanz.zuschlag.toFixed(2) : "–"}</td>
         <td>${raum.flaeche.toFixed(2)}</td>
         <td>${licht.ok ? (raum.flaeche - licht.flaeche).toFixed(2) : "–"}</td>
         <td>${licht.ok ? licht.umfang.toFixed(2) : "–"}</td>
         <td class="cut-labels">${namen.join(", ")}</td>`;
       body.appendChild(tr);
     });
+
+    renderAbzugTable(liste.length);
   }
+
+  /** Abzüge und Nischen je Raum. */
+  function renderAbzugTable(raumAnzahl) {
+    const body = document.getElementById("abzugBody");
+    const empty = document.getElementById("abzugEmpty");
+    body.innerHTML = "";
+    empty.hidden = model.abzuege.size > 0;
+
+    const anzahlRaeume = raumAnzahl === undefined ? raumListe().length : raumAnzahl;
+    const regel = abzugRegel();
+    const grenzen = abzugGrenzen();
+    const nummern = [];
+    for (let i = 1; i <= Math.max(anzahlRaeume, 1); i++) nummern.push(i);
+
+    model.abzuege.forEach((a) => {
+      const w = abzugsWirkung(a, regel, grenzen);
+      const verwaist = a.raum > anzahlRaeume;
+      const wirkung = w.art === "abzug"
+        ? `<span class="wirk-abzug">− ${w.flaeche.toFixed(2)} m²</span>`
+        : w.art === "zuschlag"
+          ? `<span class="wirk-zuschlag">+ ${w.flaeche.toFixed(2)} m²</span>`
+          : `<span class="wirk-keine">ohne Wirkung</span>`;
+      const istNische = ABZUGSTYPEN[a.typ] && ABZUGSTYPEN[a.typ].wirkung === "zuschlag";
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>A${a.id}</td>
+        <td>
+          <select data-abz="${a.id}" data-field="raum">
+            ${nummern.map((n) => `<option value="${n}" ${n === a.raum ? "selected" : ""}>R${n}</option>`).join("")}
+          </select>${verwaist ? `<span class="warn-flag" title="Diesem Raum ist keine erkannte Raumfläche zugeordnet.">!</span>` : ""}
+        </td>
+        <td>
+          <select data-abz="${a.id}" data-field="typ">
+            ${Object.keys(ABZUGSTYPEN).map((k) => `<option value="${k}" ${k === a.typ ? "selected" : ""}>${ABZUGSTYPEN[k].name}</option>`).join("")}
+          </select>
+        </td>
+        <td><input type="number" step="0.01" min="0" data-abz="${a.id}" data-field="breite" value="${a.breite}"></td>
+        <td><input type="number" step="0.01" min="0" data-abz="${a.id}" data-field="tiefe" value="${a.tiefe}" title="Tiefe der Grundfläche, bei Nischen die Nischentiefe"></td>
+        <td><input type="number" step="0.05" min="0" data-abz="${a.id}" data-field="hoehe" value="${a.hoehe}" title="Höhe des Bauteils über dem Fußboden"></td>
+        <td><input type="number" step="1" min="1" data-abz="${a.id}" data-field="anzahl" value="${a.anzahl}"></td>
+        <td>${istNische
+          ? `<input type="checkbox" data-abz="${a.id}" data-field="bisFussboden" ${a.bisFussboden ? "checked" : ""} title="Nur Nischen bis zur Fußbodenoberkante liegen innerhalb der lichten Maße">`
+          : "–"}</td>
+        <td>${(w.einzelflaeche * Math.max(1, a.anzahl || 1)).toFixed(3)}</td>
+        <td>${wirkung}</td>
+        <td class="cut-labels">${w.hinweis}${a.bemerkung ? " · " + a.bemerkung : ""}</td>
+        <td><button class="row-remove" data-remove-abz="${a.id}" title="Position löschen">✕</button></td>`;
+      body.appendChild(tr);
+    });
+  }
+
+  document.getElementById("btnAddAbzug").addEventListener("click", () => {
+    model.abzuege.set(model.nextAbzugId, {
+      id: model.nextAbzugId,
+      raum: 1,
+      typ: "stuetze",
+      breite: 0.24,
+      tiefe: 0.24,
+      hoehe: 2.75,
+      anzahl: 1,
+      bisFussboden: true,
+      bemerkung: "",
+    });
+    model.nextAbzugId++;
+    refreshAll();
+  });
+
+  document.getElementById("abzugBody").addEventListener("change", (e) => {
+    const id = parseInt(e.target.getAttribute("data-abz"), 10);
+    if (!id) return;
+    const a = model.abzuege.get(id);
+    if (!a) return;
+    const field = e.target.getAttribute("data-field");
+
+    if (field === "typ") {
+      a.typ = e.target.value;
+      // Nischen werden über die Tiefe beurteilt, Stützen über Grundfläche und Höhe
+      if (ABZUGSTYPEN[a.typ] && ABZUGSTYPEN[a.typ].wirkung === "zuschlag" && a.bisFussboden === undefined) {
+        a.bisFussboden = true;
+      }
+    } else if (field === "raum" || field === "anzahl") {
+      a[field] = Math.max(1, parseInt(e.target.value, 10) || 1);
+    } else if (field === "bisFussboden") {
+      a.bisFussboden = e.target.checked;
+    } else {
+      a[field] = Math.max(0, parseFloat(e.target.value) || 0);
+    }
+    refreshAll();
+  });
+
+  document.getElementById("abzugBody").addEventListener("click", (e) => {
+    const id = e.target.getAttribute("data-remove-abz");
+    if (id) { model.abzuege.delete(parseInt(id, 10)); refreshAll(); }
+  });
+
+  ["abzugRegel", "grenzFlaeche", "grenzHoehe", "grenzTiefe"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", refreshAll);
+  });
 
   /* ------------------------------------------------------------- Tabellen */
 
@@ -1474,6 +1625,12 @@
       naechsteBauteilId: model.nextElementId,
       oeffnungen: Array.from(model.openings.values()),
       naechsteOeffnungId: model.nextOpeningId,
+      abzuege: Array.from(model.abzuege.values()),
+      naechsteAbzugId: model.nextAbzugId,
+      flaechenregel: {
+        regel: field("abzugRegel"), mindestFlaeche: field("grenzFlaeche"),
+        mindestHoehe: field("grenzHoehe"), mindestNischentiefe: field("grenzTiefe"),
+      },
       baustoffpreise: materialPreise,
     };
   }
@@ -1492,6 +1649,8 @@
     model.nextElementId = data.naechsteBauteilId || (model.elements.size + 1);
     (data.oeffnungen || []).forEach((o) => model.openings.set(o.id, o));
     model.nextOpeningId = data.naechsteOeffnungId || (model.openings.size + 1);
+    (data.abzuege || []).forEach((a) => model.abzuege.set(a.id, a));
+    model.nextAbzugId = data.naechsteAbzugId || (model.abzuege.size + 1);
     Object.keys(materialPreise).forEach((k) => delete materialPreise[k]);
     Object.assign(materialPreise, data.baustoffpreise || {});
 
@@ -1513,6 +1672,12 @@
       set("cutAllowance", data.werkstatt.zugabe);
       set("stockLength", data.werkstatt.lagerlaenge);
       set("sawKerf", data.werkstatt.saegeschnitt);
+    }
+    if (data.flaechenregel) {
+      set("abzugRegel", data.flaechenregel.regel, "woflv");
+      set("grenzFlaeche", data.flaechenregel.mindestFlaeche, "0.10");
+      set("grenzHoehe", data.flaechenregel.mindestHoehe, "1.50");
+      set("grenzTiefe", data.flaechenregel.mindestNischentiefe, "0.13");
     }
     if (data.eigengewicht) {
       document.getElementById("chkSelfWeight").checked = !!data.eigengewicht.aktiv;
@@ -1653,22 +1818,48 @@
       const raeume = raumListe();
       if (raeume.length) {
         rows.push([]);
-        rows.push(["Räume (lichte Flächen nach Versatz um die halbe Wanddicke, Grundlage DIN 277)"]);
-        rows.push(["Raum", "Lichte Fläche [m²]", "Achsfläche [m²]", "Wandanteil [m²]", "Umfang licht [m]", "Begrenzende Wände"]);
-        let summeLicht = 0, summeAchs = 0;
-        raeume.forEach(({ raum, licht }, i) => {
+        rows.push([`Räume (lichte Maße nach DIN 277-1, Netto-Raumfläche nach ${abzugRegelText()})`]);
+        rows.push(["Raum", "NRF [m²]", "Lichte Fläche [m²]", "Abzug [m²]", "Zuschlag [m²]", "Achsfläche [m²]",
+          "Wandanteil [m²]", "Umfang licht [m]", "Begrenzende Wände"]);
+        let summeNetto = 0, summeLicht = 0, summeAchs = 0, summeAbzug = 0, summeZuschlag = 0;
+        raeume.forEach(({ raum, licht, bilanz }, i) => {
+          summeNetto += licht.ok ? bilanz.netto : 0;
           summeLicht += licht.ok ? licht.flaeche : 0;
           summeAchs += raum.flaeche;
+          summeAbzug += bilanz.abzug;
+          summeZuschlag += bilanz.zuschlag;
           const namen = [];
           raum.waende.forEach((w) => {
             const name = w ? bauteilBezeichnung(w) : null;
             if (name && namen.indexOf(name) === -1) namen.push(name);
           });
-          rows.push(["R" + (i + 1), licht.ok ? licht.flaeche.toFixed(2) : "-", raum.flaeche.toFixed(2),
+          rows.push(["R" + (i + 1), licht.ok ? bilanz.netto.toFixed(2) : "-",
+            licht.ok ? licht.flaeche.toFixed(2) : "-",
+            bilanz.abzug.toFixed(2), bilanz.zuschlag.toFixed(2), raum.flaeche.toFixed(2),
             licht.ok ? (raum.flaeche - licht.flaeche).toFixed(2) : "-",
             licht.ok ? licht.umfang.toFixed(2) : "-", namen.join(" ")]);
         });
-        rows.push(["Summe", summeLicht.toFixed(2), summeAchs.toFixed(2), "", "", ""]);
+        rows.push(["Summe", summeNetto.toFixed(2), summeLicht.toFixed(2), summeAbzug.toFixed(2),
+          summeZuschlag.toFixed(2), summeAchs.toFixed(2), "", "", ""]);
+
+        if (model.abzuege.size) {
+          const regel = abzugRegel();
+          const grenzen = abzugGrenzen();
+          rows.push([]);
+          rows.push([`Abzüge und Nischen (Schwellenwerte: Grundfläche > ${grenzen.mindestFlaeche.toFixed(2)} m², Höhe > ${grenzen.mindestHoehe.toFixed(2)} m, Nischentiefe > ${grenzen.mindestNischentiefe.toFixed(2)} m)`]);
+          rows.push(["Pos", "Raum", "Art", "Breite [m]", "Tiefe [m]", "Höhe [m]", "Stück", "bis Fußboden",
+            "Fläche [m²]", "Wirkung", "Begründung", "Bemerkung"]);
+          model.abzuege.forEach((a) => {
+            const w = abzugsWirkung(a, regel, grenzen);
+            const istNische = ABZUGSTYPEN[a.typ] && ABZUGSTYPEN[a.typ].wirkung === "zuschlag";
+            rows.push(["A" + a.id, "R" + a.raum, ABZUGSTYPEN[a.typ] ? ABZUGSTYPEN[a.typ].name : a.typ,
+              (a.breite || 0).toFixed(2), (a.tiefe || 0).toFixed(2), (a.hoehe || 0).toFixed(2), a.anzahl,
+              istNische ? (a.bisFussboden ? "ja" : "nein") : "-",
+              (w.einzelflaeche * Math.max(1, a.anzahl || 1)).toFixed(3),
+              w.art === "abzug" ? "-" + w.flaeche.toFixed(2) : w.art === "zuschlag" ? "+" + w.flaeche.toFixed(2) : "ohne Wirkung",
+              w.hinweis, a.bemerkung || ""]);
+          });
+        }
       }
 
       rows.push([]);

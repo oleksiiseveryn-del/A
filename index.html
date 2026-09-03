@@ -252,13 +252,18 @@
 
       <h3 class="section-title">Räume</h3>
       <p class="view-note">Räume werden aus den Wandachsen erkannt. Die <strong>lichte Fläche</strong> entsteht durch Versatz
-        der Achsen um die halbe Wanddicke und ist die Grundlage der Flächenermittlung nach DIN 277. Abzüge für Nischen,
-        Schächte und Stützen sowie die Anrechnungsfaktoren nach WoFlV sind gesondert zu berücksichtigen.</p>
+        der Achsen um die halbe Wanddicke und ist die Grundlage der Flächenermittlung nach DIN 277-1 (lichte Maße in Höhe
+        der Fußbodenoberkante). Die <strong>Netto-Raumfläche NRF</strong> ergibt sich daraus abzüglich der
+        Konstruktionsflächen (Stützen, Pfeiler, Vorlagen, Schächte) und zuzüglich der anrechenbaren Nischen.
+        Lichte Raumhöhen und Anrechnungsfaktoren nach WoFlV § 4 sind gesondert zu berücksichtigen.</p>
       <table class="members-table" id="raumTable">
         <thead>
           <tr>
             <th>Raum</th>
+            <th>NRF [m²]</th>
             <th>Lichte Fläche [m²]</th>
+            <th>Abzug [m²]</th>
+            <th>Zuschlag [m²]</th>
             <th>Achsfläche [m²]</th>
             <th>Wandanteil [m²]</th>
             <th>Umfang licht [m]</th>
@@ -268,6 +273,55 @@
         <tbody id="raumBody"></tbody>
       </table>
       <div class="empty-state" id="raumEmpty">Kein geschlossener Raum erkannt – dafür müssen die Wände einen geschlossenen Umlauf bilden.</div>
+
+      <h3 class="section-title">Abzüge und Zuschläge nach DIN 277</h3>
+      <p class="view-note">Grundflächen aufgehender Bauteile im Raum zählen nach DIN 277-1 zur Konstruktions-Grundfläche
+        und mindern die Netto-Raumfläche. Nischen, die bis zum Fußboden herunterreichen, liegen innerhalb der lichten Maße
+        und werden zugerechnet. Nach <strong>WoFlV § 3 Abs. 3</strong> gelten dagegen Schwellenwerte – Pfeiler und Säulen
+        erst über 1,50 m Höhe und über 0,10 m² Grundfläche, Nischen erst über 0,13 m Tiefe, Türnischen nie. Regelwerk und
+        Schwellenwerte sind hier einstellbar; die Voreinstellung entspricht der WoFlV.</p>
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="abzugRegel">Regelwerk</label>
+          <select id="abzugRegel" title="DIN 277-1: jede Konstruktionsfläche wird abgezogen. WoFlV: nur oberhalb der Schwellenwerte.">
+            <option value="din277">DIN 277-1 – jede Konstruktionsfläche</option>
+            <option value="woflv" selected>WoFlV § 3 – mit Schwellenwerten</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="grenzFlaeche">Mindestgrundfläche [m²]</label>
+          <input type="number" id="grenzFlaeche" step="0.01" min="0" value="0.10" title="Pfeiler und Säulen werden erst oberhalb dieser Grundfläche abgezogen (WoFlV § 3 Abs. 3 Nr. 2)">
+        </div>
+        <div class="field">
+          <label for="grenzHoehe">Mindesthöhe [m]</label>
+          <input type="number" id="grenzHoehe" step="0.05" min="0" value="1.50" title="Pfeiler und Säulen werden erst oberhalb dieser Höhe abgezogen (WoFlV § 3 Abs. 3 Nr. 2)">
+        </div>
+        <div class="field">
+          <label for="grenzTiefe">Mindestnischentiefe [m]</label>
+          <input type="number" id="grenzTiefe" step="0.01" min="0" value="0.13" title="Nischen bis zum Fußboden werden erst oberhalb dieser Tiefe angerechnet (WoFlV § 3 Abs. 3 Nr. 4)">
+        </div>
+      </div>
+      <button class="tool-btn" id="btnAddAbzug" style="margin-bottom:8px">+ Abzug / Nische hinzufügen</button>
+      <table class="members-table" id="abzugTable">
+        <thead>
+          <tr>
+            <th>Pos</th>
+            <th>Raum</th>
+            <th>Art</th>
+            <th>Breite [m]</th>
+            <th>Tiefe [m]</th>
+            <th>Höhe [m]</th>
+            <th>Stück</th>
+            <th>bis Fußboden</th>
+            <th>Fläche [m²]</th>
+            <th>Wirkung</th>
+            <th>Bemerkung</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="abzugBody"></tbody>
+      </table>
+      <div class="empty-state" id="abzugEmpty">Keine Abzüge oder Nischen erfasst – die Netto-Raumfläche entspricht dann der lichten Fläche.</div>
 
       <h3 class="section-title">Materialaufstellung und Kosten</h3>
       <table class="members-table" id="archMaterialTable">
@@ -433,6 +487,11 @@
           Anhang A, Wärmeleitfähigkeiten nach DIN 4108-4; U-Wert nach DIN EN ISO 6946
           (U = 1/(R<sub>si</sub> + Σ d/λ + R<sub>se</sub>)) mit Wärmeübergangswiderständen nach Tab. 7;
           flächenbezogene Masse als Kennwert</li>
+        <li><strong>Raumflächen</strong> nach DIN 277-1: lichte Maße in Höhe der Fußbodenoberkante durch Versatz
+          der Wandachsen um die halbe Wanddicke; Netto-Raumfläche NRF = lichte Fläche − Konstruktionsflächen
+          (Stützen, Pfeiler, Vorlagen, Schächte, Schornsteine) + Nischen bis zum Fußboden. Wahlweise mit den
+          Schwellenwerten der WoFlV § 3 Abs. 3 (Grundfläche > 0,10 m² und Höhe > 1,50 m, Nischentiefe > 0,13 m,
+          Türnischen ohne Ansatz); die Schwellenwerte sind Eingabewerte</li>
       </ul>
     </div>
     <div class="basis-col">
@@ -454,6 +513,11 @@
           Holz (DIN EN 1995), Feuchteschutz nach DIN 4108-3, Schallschutznachweis nach DIN 4109, Brandschutz
           sowie die Gebäudebilanz und die Höchstwerte der U-Werte nach GEG – der Zielwert in der Tabelle dient
           nur dem Abgleich. Bauteile gegen Erdreich sind nach DIN EN ISO 13370 zu bewerten.</li>
+        <li><strong>Flächen und Rauminhalte:</strong> Zuordnung der Grundflächen zu den Bereichen a/b/c nach
+          DIN 277-1 (überdeckt, nicht überdeckt), Brutto-Rauminhalt, Zuordnung zu Nutzungsgruppen NUF 1–7 sowie
+          die Wohnfläche nach WoFlV § 4 mit den Anrechnungsfaktoren aus der lichten Raumhöhe (unter 1 m ohne
+          Ansatz, 1 m bis 2 m zur Hälfte, Balkone und Terrassen in der Regel zu einem Viertel) – dafür sind die
+          Raumhöhen und Dachschrägen einzugeben, die das Modell nicht führt</li>
         <li><strong>Weitere:</strong> Stabilität des Gesamtsystems und Imperfektionen nach Abs. 5,
           Brandbemessung (EN 1993-1-2), Ermüdung (EN 1993-1-9), Ausführung und Toleranzen
           (DIN EN 1090), Korrosionsschutz (DIN EN ISO 12944)</li>

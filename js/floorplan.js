@@ -6,9 +6,11 @@
  * Blatt und Aufschlagbogen. Maßeintragung nach DIN 406-11, Maßstäbe nach
  * DIN ISO 5455.
  *
- * Raumflächen werden aus den Wandachsen ermittelt (Achsflächen). Die
- * lichten Raumflächen und die Wohnflächenberechnung nach DIN 277 bzw.
- * WoFlV weichen davon ab und sind gesondert zu ermitteln.
+ * Raumflächen werden aus den Wandachsen ermittelt (Achsflächen). Daraus
+ * folgen die lichten Flächen durch Versatz um die halbe Wanddicke und – nach
+ * Abzug der Konstruktionsflächen und Zurechnung der Nischen – die
+ * Netto-Raumfläche nach DIN 277-1. Die Wohnflächenberechnung nach WoFlV
+ * (Anrechnungsfaktoren, lichte Raumhöhen) bleibt gesondert zu führen.
  */
 
 /** Wandachsen als Kantenmodell aufbereiten: Knoten verschmelzen, Kanten bilden. */
@@ -241,6 +243,115 @@ function lichteRaumflaeche(raum, dickeVon) {
   return { punkte, flaeche: ok ? flaeche : 0, umfang: ok ? umfang : 0, ok };
 }
 
+/* ------------------------------------------------ Abzüge nach DIN 277 */
+
+/**
+ * Bauteile und Nischen, die die Netto-Raumfläche verändern.
+ *
+ * DIN 277-1 ermittelt die Grundflächen aus den lichten Maßen in Höhe der
+ * Fußbodenoberkante. Die Grundflächen der aufgehenden Bauteile – Stützen,
+ * Pfeiler, Vormauerungen, Schächte und Schornsteine – zählen zur
+ * Konstruktions-Grundfläche (KGF) und gehören damit nicht zur
+ * Netto-Raumfläche (NRF). Nischen, die bis zum Fußboden herunterreichen,
+ * liegen dagegen innerhalb der lichten Maße und werden zugerechnet.
+ *
+ * Die Wohnflächenverordnung (WoFlV § 3 Abs. 3) rechnet enger: Sie zieht nur
+ * Pfeiler und Säulen ab, die höher als 1,50 m sind und deren Grundfläche
+ * mehr als 0,10 m² beträgt; Nischen bis zum Fußboden zählen erst ab einer
+ * Tiefe von mehr als 0,13 m, Türnischen bleiben stets unberücksichtigt.
+ * Beide Regelwerke sind deshalb umschaltbar, die Schwellenwerte sind
+ * Eingabewerte und keine fest verdrahteten Konstanten.
+ */
+const ABZUGSTYPEN = {
+  stuetze:    { name: "Stütze / Pfeiler (freistehend)", wirkung: "abzug" },
+  vorlage:    { name: "Wandvorlage / Vormauerung", wirkung: "abzug" },
+  schacht:    { name: "Schacht (Installation, Aufzug)", wirkung: "abzug" },
+  kamin:      { name: "Schornstein / Kamin", wirkung: "abzug" },
+  treppe:     { name: "Treppe (über drei Steigungen)", wirkung: "abzug" },
+  nische:     { name: "Wandnische", wirkung: "zuschlag" },
+  tuernische: { name: "Türnische", wirkung: "keine" },
+  frei:       { name: "Sonstiger Abzug (freie Fläche)", wirkung: "abzug" },
+};
+
+/** Voreinstellung der Schwellenwerte nach WoFlV § 3 Abs. 3; vom Anwender änderbar. */
+const ABZUG_GRENZEN = {
+  mindestFlaeche: 0.1,       // m²  Grundfläche eines Pfeilers/einer Säule
+  mindestHoehe: 1.5,         // m   Höhe eines Pfeilers/einer Säule
+  mindestNischentiefe: 0.13, // m   Tiefe einer Nische bis zum Fußboden
+};
+
+/**
+ * Wirkung einer einzelnen Position auf die Raumfläche.
+ *
+ * @param {Object} p - { typ, breite, tiefe, hoehe, anzahl, bisFussboden }
+ * @param {string} regel - "din277" (jede Konstruktionsfläche) oder "woflv" (Schwellenwerte)
+ * @param {Object} grenzen - Schwellenwerte, siehe ABZUG_GRENZEN
+ * @returns {Object} { art: "abzug"|"zuschlag"|"keine", flaeche, einzelflaeche, hinweis }
+ */
+function abzugsWirkung(p, regel, grenzen) {
+  const g = grenzen || ABZUG_GRENZEN;
+  const typ = ABZUGSTYPEN[p.typ];
+  const breite = Math.max(0, p.breite || 0);
+  const tiefe = Math.max(0, p.tiefe || 0);
+  const hoehe = Math.max(0, p.hoehe || 0);
+  const anzahl = Math.max(0, Math.round(p.anzahl || 0));
+  const einzel = breite * tiefe;
+  const gesamt = einzel * anzahl;
+  const leer = (hinweis) => ({ art: "keine", flaeche: 0, einzelflaeche: einzel, hinweis });
+
+  if (!typ) return leer("unbekannte Position");
+  if (typ.wirkung === "keine") {
+    return leer("Türnischen bleiben unberücksichtigt (WoFlV § 3 Abs. 3 Nr. 4)");
+  }
+
+  if (typ.wirkung === "abzug") {
+    if (regel === "woflv" && p.typ !== "treppe" && p.typ !== "frei") {
+      if (einzel <= g.mindestFlaeche) {
+        return leer(`Grundfläche ${einzel.toFixed(3)} m² ≤ ${g.mindestFlaeche.toFixed(2)} m² – nach WoFlV kein Abzug`);
+      }
+      if (hoehe <= g.mindestHoehe) {
+        return leer(`Höhe ${hoehe.toFixed(2)} m ≤ ${g.mindestHoehe.toFixed(2)} m – nach WoFlV kein Abzug`);
+      }
+    }
+    return {
+      art: "abzug", flaeche: gesamt, einzelflaeche: einzel,
+      hinweis: regel === "woflv" ? "Abzug nach WoFlV § 3 Abs. 3" : "Konstruktions-Grundfläche nach DIN 277-1",
+    };
+  }
+
+  // Nische: nur anrechenbar, wenn sie bis zum Fußboden herunterreicht
+  if (!p.bisFussboden) {
+    return leer("Nische reicht nicht bis zum Fußboden – liegt außerhalb der lichten Maße");
+  }
+  if (regel === "woflv" && tiefe <= g.mindestNischentiefe) {
+    return leer(`Nischentiefe ${tiefe.toFixed(3)} m ≤ ${g.mindestNischentiefe.toFixed(2)} m – nach WoFlV kein Zuschlag`);
+  }
+  return {
+    art: "zuschlag", flaeche: gesamt, einzelflaeche: einzel,
+    hinweis: regel === "woflv" ? "Zuschlag nach WoFlV § 3 Abs. 3 Nr. 4" : "innerhalb der lichten Maße nach DIN 277-1",
+  };
+}
+
+/**
+ * Flächenbilanz eines Raumes: lichte Fläche abzüglich der Konstruktions-
+ * flächen zuzüglich der anrechenbaren Nischen.
+ *
+ * @returns {Object} { abzug, zuschlag, netto, zeilen }
+ */
+function raumBilanz(lichteFlaeche, positionen, regel, grenzen) {
+  let abzug = 0;
+  let zuschlag = 0;
+  const zeilen = (positionen || []).map((p) => {
+    const w = abzugsWirkung(p, regel, grenzen);
+    if (w.art === "abzug") abzug += w.flaeche;
+    if (w.art === "zuschlag") zuschlag += w.flaeche;
+    return { position: p, art: w.art, flaeche: w.flaeche, einzelflaeche: w.einzelflaeche, hinweis: w.hinweis };
+  });
+  const roh = lichteFlaeche || 0;
+  const netto = Math.max(0, roh - abzug + zuschlag);
+  return { abzug, zuschlag, netto, zeilen, ueberzogen: abzug > roh + zuschlag + 1e-9 };
+}
+
 /** Schwerpunkt eines Polygons. */
 function polygonSchwerpunkt(punkte) {
   let x = 0, z = 0, a = 0;
@@ -262,6 +373,8 @@ function polygonSchwerpunkt(punkte) {
  */
 function grundrissSVG(daten) {
   const { waende, oeffnungenVon, geometrieVon, projekt } = daten;
+  // Abzüge/Zuschläge je Raum (Index wie in der Raumliste); ohne Angabe ohne Wirkung
+  const bilanzVon = daten.bilanzVon || (() => null);
   if (!waende.length) return "";
 
   // Ausdehnung über alle Wände einschließlich Dicke
@@ -303,9 +416,17 @@ function grundrissSVG(daten) {
       svg += `<polygon points="${dl}" class="raum-licht"/>`;
     }
     const s = polygonSchwerpunkt(raum.punkte);
-    svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) - 2.4).toFixed(2)}" class="t-raum">R${i + 1}</text>`;
-    svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) + 1.2).toFixed(2)}" class="t-mass">${licht.ok ? licht.flaeche.toFixed(2) : raum.flaeche.toFixed(2)} m² licht</text>`;
-    svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) + 4.4).toFixed(2)}" class="t-mass-grau">${raum.flaeche.toFixed(2)} m² Achsmaß</text>`;
+    const bil = bilanzVon(i);
+    const hatBilanz = bil && (bil.abzug > 0 || bil.zuschlag > 0);
+    svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) - 3.6).toFixed(2)}" class="t-raum">R${i + 1}</text>`;
+    if (hatBilanz && licht.ok) {
+      svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z)).toFixed(2)}" class="t-mass">${bil.netto.toFixed(2)} m² NRF</text>`;
+      svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) + 3.2).toFixed(2)}" class="t-mass-grau">${licht.flaeche.toFixed(2)} m² licht${bil.abzug > 0 ? ` − ${bil.abzug.toFixed(2)}` : ""}${bil.zuschlag > 0 ? ` + ${bil.zuschlag.toFixed(2)}` : ""}</text>`;
+      svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) + 6.2).toFixed(2)}" class="t-mass-grau">${raum.flaeche.toFixed(2)} m² Achsmaß</text>`;
+    } else {
+      svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z)).toFixed(2)}" class="t-mass">${licht.ok ? licht.flaeche.toFixed(2) : raum.flaeche.toFixed(2)} m² licht</text>`;
+      svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) + 3.2).toFixed(2)}" class="t-mass-grau">${raum.flaeche.toFixed(2)} m² Achsmaß</text>`;
+    }
   });
 
   // Wände im Schnitt, zwischen den Öffnungen aufgeteilt
@@ -377,33 +498,53 @@ function grundrissSVG(daten) {
   let yInfo = BLATT.randOben + 8;
   svg += `<text x="${xInfo}" y="${yInfo}" class="t-kopf">Räume</text>`;
   yInfo += 4.4;
-  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Raum · licht · Achsmaß · Umfang</text>`;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Raum · NRF · licht · Abzug · Zuschlag [m²]</text>`;
   yInfo += 4.4;
   let summe = 0;
   let summeLicht = 0;
+  let summeNetto = 0;
+  let summeAbzug = 0;
+  let summeZuschlag = 0;
   raeume.forEach(({ raum, licht }, i) => {
+    const bil = bilanzVon(i);
+    const netto = bil && licht.ok ? bil.netto : (licht.ok ? licht.flaeche : 0);
     summe += raum.flaeche;
     summeLicht += licht.ok ? licht.flaeche : 0;
-    svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">R${i + 1}   ${licht.ok ? licht.flaeche.toFixed(2) : "–"} m²   ${raum.flaeche.toFixed(2)} m²   ${licht.ok ? licht.umfang.toFixed(2) : "–"} m</text>`;
+    summeNetto += netto;
+    summeAbzug += bil ? bil.abzug : 0;
+    summeZuschlag += bil ? bil.zuschlag : 0;
+    // Mehrfache Leerzeichen werden im SVG zusammengezogen, daher Trennpunkte
+    const abzug = bil && bil.abzug > 0 ? "−" + bil.abzug.toFixed(2) : "–";
+    const zuschlag = bil && bil.zuschlag > 0 ? "+" + bil.zuschlag.toFixed(2) : "–";
+    svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">R${i + 1} · ${licht.ok ? netto.toFixed(2) : "–"} · ${licht.ok ? licht.flaeche.toFixed(2) : "–"} · ${abzug} · ${zuschlag}</text>`;
     yInfo += 4;
   });
   if (!raeume.length) {
     svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">kein geschlossener Raum erkannt</text>`;
     yInfo += 4;
   } else {
-    svg += `<text x="${xInfo}" y="${(yInfo + 1).toFixed(2)}" class="t-kopf">Summe licht ${summeLicht.toFixed(2)} m²</text>`;
+    svg += `<text x="${xInfo}" y="${(yInfo + 1).toFixed(2)}" class="t-kopf">Summe NRF ${summeNetto.toFixed(2)} m²</text>`;
     yInfo += 5;
-    svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Summe Achsmaß ${summe.toFixed(2)} m²</text>`;
-    yInfo += 5;
+    svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Summe licht ${summeLicht.toFixed(2)} m²  ·  Achsmaß ${summe.toFixed(2)} m²</text>`;
+    yInfo += 4;
+    if (summeAbzug > 0 || summeZuschlag > 0) {
+      svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Abzüge ${summeAbzug.toFixed(2)} m²  ·  Zuschläge ${summeZuschlag.toFixed(2)} m²</text>`;
+      yInfo += 4;
+    }
+    yInfo += 1;
   }
   yInfo += 3;
-  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Lichte Fläche zwischen den Wandflächen,</text>`;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Lichte Fläche zwischen den Wandflächen in Höhe</text>`;
   yInfo += 3.6;
-  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Grundlage der Ermittlung nach DIN 277.</text>`;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">der Fußbodenoberkante nach DIN 277-1.</text>`;
   yInfo += 3.6;
-  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Abzüge für Nischen, Schächte, Stützen und</text>`;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">NRF = licht − Konstruktionsflächen (Stützen,</text>`;
   yInfo += 3.6;
-  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Anrechnungsfaktoren nach WoFlV gesondert.</text>`;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Schächte, Vorlagen) + anrechenbare Nischen.</text>`;
+  yInfo += 3.6;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Regel: ${daten.regelText || "DIN 277-1"}. Lichte Raumhöhen</text>`;
+  yInfo += 3.6;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">und Anrechnungsfaktoren nach WoFlV § 4 gesondert.</text>`;
   yInfo += 8;
 
   // Achsenzeiger: x nach rechts, z nach unten (Modellkoordinaten)

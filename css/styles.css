@@ -717,6 +717,19 @@ button.tool-btn.plain.active { background: var(--hsd-blue); color: #fff; border-
   line-height: 1.4;
 }
 
+/* Wirkung einer Abzugsposition auf die Netto-Raumfläche */
+.wirk-abzug { color: #a3372d; font-weight: 600; white-space: nowrap; }
+.wirk-zuschlag { color: #1f6b3a; font-weight: 600; white-space: nowrap; }
+.wirk-keine { color: var(--text-muted); white-space: nowrap; }
+
+#abzugTable td:nth-child(9),
+#abzugTable td:nth-child(10) { text-align: right; }
+#abzugTable input[type="number"] { min-width: 58px; }
+#abzugTable select[data-field="raum"] { min-width: 56px; }
+#abzugTable select[data-field="typ"] { min-width: 200px; }
+#abzugTable td:nth-child(11) { min-width: 150px; }
+#raumTable td:nth-child(n+2):nth-child(-n+8) { text-align: right; white-space: nowrap; }
+
 .bar-chip {
   display: inline-block;
   background: #eef4f9;
