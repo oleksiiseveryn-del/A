@@ -415,3 +415,58 @@ function buildLabel(text, position, color) {
   sprite.scale.set(1.1, 0.28, 1);
   return sprite;
 }
+
+/**
+ * Architektur-Bauteil als Quader.
+ *  - linie:   Wand bzw. Streifenfundament entlang der Achse p1→p2
+ *  - flaeche: Platte über dem aufgezogenen Rechteck
+ *  - punkt:   Einzelfundament unter dem Punkt
+ */
+function buildArchElement(element, geo, color, opacity) {
+  const typ = BAUTEILTYPEN[element.kind];
+  const material = new THREE.MeshStandardMaterial({
+    color, roughness: 0.85, metalness: 0.05,
+    transparent: opacity !== undefined && opacity < 1,
+    opacity: opacity === undefined ? 1 : opacity,
+  });
+
+  if (typ.form === "linie") {
+    const p1 = element.p1, p2 = element.p2;
+    const dx = p2.x - p1.x, dz = p2.z - p1.z;
+    const laenge = Math.hypot(dx, dz) || Math.hypot(p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
+    const hoehe = geo.hoehe;
+    const dicke = geo.dicke;
+
+    const box = new THREE.BoxGeometry(laenge, hoehe, dicke);
+    const mesh = new THREE.Mesh(box, material);
+    // Fundamente liegen unter Gelände, Wände stehen auf der Ebene
+    const yMitte = typ.unterGelaende ? p1.y - hoehe / 2 : p1.y + hoehe / 2;
+    mesh.position.set((p1.x + p2.x) / 2, yMitte, (p1.z + p2.z) / 2);
+    mesh.rotation.y = -Math.atan2(dz, dx);
+    return mesh;
+  }
+
+  if (typ.form === "flaeche") {
+    const box = new THREE.BoxGeometry(geo.laenge, geo.dicke, geo.breite);
+    const mesh = new THREE.Mesh(box, material);
+    mesh.position.set(
+      (element.p1.x + element.p2.x) / 2,
+      element.p1.y - geo.dicke / 2, // Platte hängt unter der Arbeitsebene
+      (element.p1.z + element.p2.z) / 2
+    );
+    return mesh;
+  }
+
+  const box = new THREE.BoxGeometry(geo.laenge, geo.dicke, geo.breite);
+  const mesh = new THREE.Mesh(box, material);
+  mesh.position.set(element.p1.x, element.p1.y - geo.dicke / 2, element.p1.z);
+  return mesh;
+}
+
+/** Farbe eines Bauteils aus dem Baustoff der dicksten Schicht. */
+function archElementColor(element) {
+  let dickste = null;
+  element.layers.forEach((l) => { if (!dickste || l.d > dickste.d) dickste = l; });
+  const stoff = dickste ? BAUSTOFFE[dickste.material] : null;
+  return stoff ? (GRUPPEN_FARBE[stoff.gruppe] || 0x9aa5ad) : 0x9aa5ad;
+}

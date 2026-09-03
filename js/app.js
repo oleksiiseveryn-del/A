@@ -17,7 +17,14 @@
     supports: new Map(),  // Knotenindex -> "pinned" | "roller"
     loads: new Map(),     // Knotenindex -> { fx, fy, fz }
     nextId: 1,
+    elements: new Map(),  // id -> Architektur-Bauteil { id, kind, p1, p2, layers, hoehe, anzahl }
+    nextElementId: 1,
   };
+
+  // Baustoffpreise [€/m³], vom Anwender überschreibbar
+  const materialPreise = {};
+
+  let pendingElementPoint = null; // erster Eckpunkt beim Aufziehen eines Bauteils
 
   let lastSolution = null;
   let selfWeightLoads = [];
@@ -175,6 +182,9 @@
   function clearModel() {
     model.nodes = [];
     model.members.clear();
+    model.elements.clear();
+    model.nextElementId = 1;
+    pendingElementPoint = null;
     model.supports.clear();
     model.loads.clear();
     model.nextId = 1;
@@ -263,16 +273,18 @@
     orbit: "Navigieren: Ziehen dreht das Modell, Umschalt+Ziehen verschiebt, Mausrad zoomt.",
     support: "Auflager: Knoten anklicken – Festlager → Loslager → kein Lager.",
     load: "Knotenlast: Knoten anklicken und Last in kN eingeben (positiv = nach unten).",
+    bauteil: "Bauteil: zwei Punkte auf der Arbeitsebene anklicken (Wand: Achse, Platte: gegenüberliegende Ecken). Einzelfundament: ein Punkt.",
   };
 
   function setMode(next) {
     mode = next;
     pendingStart = null;
     sketch.mode = next === "orbit" ? "orbit" : "draw";
-    ["btnDraw", "btnOrbit", "btnSupport", "btnLoad"].forEach((id) => {
+    pendingElementPoint = null;
+    ["btnDraw", "btnOrbit", "btnSupport", "btnLoad", "btnBauteil"].forEach((id) => {
       document.getElementById(id).classList.remove("active");
     });
-    const button = { draw: "btnDraw", orbit: "btnOrbit", support: "btnSupport", load: "btnLoad" }[next];
+    const button = { draw: "btnDraw", orbit: "btnOrbit", support: "btnSupport", load: "btnLoad", bauteil: "btnBauteil" }[next];
     if (button) document.getElementById(button).classList.add("active");
     document.getElementById("hintBox").textContent = MODE_HINTS[next] || MODE_HINTS.draw;
     renderSketch();
@@ -302,6 +314,11 @@
         setStatus(value ? `Knotenlast ${value} kN gesetzt.` : "Knotenlast entfernt.", "info");
         refreshAll();
       });
+      return;
+    }
+
+    if (mode === "bauteil") {
+      handleBauteilPick(point);
       return;
     }
 
@@ -373,6 +390,12 @@
       }
     });
 
+    // Architektur-Bauteile halbtransparent, damit die Achsen sichtbar bleiben
+    renderArchElements(sketch, true);
+    if (pendingElementPoint) {
+      sketch.contentGroup.add(buildNodeMarker(pendingElementPoint, 0xffb020, 0.1));
+    }
+
     // Vorschaulinie zwischen gesetztem Anfangspunkt und Mauszeiger
     if (pendingStart !== null && previewPoint) {
       const from = model.nodes[pendingStart];
@@ -406,6 +429,8 @@
         buildProfileSolid(a, b, design.family, profile, utilizationColor(design.utilization, design.status), exaggeration)
       );
     });
+
+    renderArchElements(result, false);
 
     model.nodes.forEach((node, i) => {
       const support = model.supports.get(i);
@@ -519,6 +544,190 @@
     if (model.members.size && document.getElementById("chkSelfWeight").checked) computeBarForces();
   });
 
+
+  /* ------------------------------------------------- Architektur-Bauteile */
+
+  function bauteilBezeichnung(element) {
+    const kuerzel = {
+      wand_aussen: "AW", wand_innen: "IW", decke: "DE", dach: "DA",
+      bodenplatte: "BP", streifenfundament: "SF", einzelfundament: "EF",
+    }[element.kind] || "BT";
+    return kuerzel + element.id;
+  }
+
+  function handleBauteilPick(point) {
+    const kind = document.getElementById("bauteilTyp").value;
+    const typ = BAUTEILTYPEN[kind];
+
+    if (typ.form === "punkt") {
+      erzeugeBauteil(kind, point, null);
+      return;
+    }
+    if (!pendingElementPoint) {
+      pendingElementPoint = point;
+      setStatus(`${typ.name}: zweiten Punkt anklicken.`, "info");
+      renderSketch();
+      return;
+    }
+    erzeugeBauteil(kind, pendingElementPoint, point);
+    pendingElementPoint = null;
+  }
+
+  function erzeugeBauteil(kind, p1, p2) {
+    const typ = BAUTEILTYPEN[kind];
+    const element = {
+      id: model.nextElementId++,
+      kind,
+      p1: { ...p1 },
+      p2: p2 ? { ...p2 } : null,
+      layers: typ.standard.map((l) => ({ ...l })),
+      hoehe: parseFloat(document.getElementById("bauteilHoehe").value) || 2.75,
+      breite: typ.breite,
+      laenge: typ.laenge,
+      anzahl: 1,
+      zielU: null,
+    };
+    model.elements.set(element.id, element);
+
+    const auswertung = bauteilAuswertung(element);
+    setStatus(`${typ.name} ${bauteilBezeichnung(element)} angelegt: ${auswertung.flaecheGesamt.toFixed(2)} m², `
+      + `Dicke ${auswertung.geometrie.dicke.toFixed(3)} m, Masse ${(auswertung.masseGesamt / 1000).toFixed(2)} t`
+      + (auswertung.uWert ? `, U = ${auswertung.uWert.toFixed(3)} W/(m²·K)` : ""), "ok");
+    refreshAll();
+  }
+
+  function renderArchElements(scene, transparent) {
+    model.elements.forEach((element) => {
+      const geo = bauteilGeometrie(element);
+      scene.contentGroup.add(buildArchElement(element, geo, archElementColor(element), transparent ? 0.45 : 1));
+    });
+  }
+
+  function renderArchTable() {
+    const body = document.getElementById("archBody");
+    const empty = document.getElementById("archEmpty");
+    body.innerHTML = "";
+    empty.hidden = model.elements.size > 0;
+
+    model.elements.forEach((element) => {
+      const a = bauteilAuswertung(element);
+      const typ = BAUTEILTYPEN[element.kind];
+      const geoText = typ.form === "linie"
+        ? `L ${a.geometrie.laenge.toFixed(2)} × H ${a.geometrie.hoehe.toFixed(2)} m`
+        : `${a.geometrie.laenge.toFixed(2)} × ${a.geometrie.breite.toFixed(2)} m`;
+
+      const schichten = element.layers.map((layer, i) => `
+        <span class="layer-row">
+          <select data-el="${element.id}" data-layer="${i}" data-field="material">
+            ${Object.keys(BAUSTOFFE).map((k) => `<option value="${k}" ${k === layer.material ? "selected" : ""}>${BAUSTOFFE[k].name}</option>`).join("")}
+          </select>
+          <input type="number" step="0.005" min="0" data-el="${element.id}" data-layer="${i}" data-field="d" value="${layer.d}">
+          <button class="layer-remove" data-el="${element.id}" data-layer="${i}" title="Schicht entfernen">✕</button>
+        </span>`).join("");
+
+      const uText = a.uWert === null ? "–" : a.uWert.toFixed(3);
+      const zielU = element.zielU === null || element.zielU === undefined ? "" : element.zielU;
+      const uKlasse = a.uWert !== null && element.zielU ? (a.uWert <= element.zielU ? "u-ok" : "u-fail") : "";
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${bauteilBezeichnung(element)}</td>
+        <td>${a.typName}</td>
+        <td>${geoText}</td>
+        <td><input type="number" step="1" min="1" data-el="${element.id}" data-field="anzahl" value="${element.anzahl}"></td>
+        <td>${a.flaecheGesamt.toFixed(2)}</td>
+        <td>${a.geometrie.dicke.toFixed(3)}</td>
+        <td>${a.masseGesamt.toFixed(0)}</td>
+        <td class="${uKlasse}">${uText}</td>
+        <td><input type="number" step="0.01" min="0" placeholder="–" data-el="${element.id}" data-field="zielU" value="${zielU}" title="Zielwert des U-Werts nach GEG bzw. Bauherrenvorgabe"></td>
+        <td class="layer-cell">${schichten}<button class="layer-add" data-el="${element.id}">+ Schicht</button>
+          ${a.uHinweis ? `<div class="cut-warning">${a.uHinweis}</div>` : ""}
+          <div class="layer-note">flächenbezogene Masse ${a.flaechenmasse.toFixed(0)} kg/m²</div></td>
+        <td><button class="row-remove" data-remove-el="${element.id}" title="Bauteil löschen">✕</button></td>`;
+      body.appendChild(tr);
+    });
+
+    renderMaterialTable();
+  }
+
+  function renderMaterialTable() {
+    const body = document.getElementById("archMaterialBody");
+    body.innerHTML = "";
+    const aufstellung = materialAufstellung(Array.from(model.elements.values()), materialPreise);
+
+    aufstellung.forEach((eintrag) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${eintrag.gruppe}</td>
+        <td>${eintrag.name}</td>
+        <td>${eintrag.rho}</td>
+        <td>${eintrag.volumen.toFixed(2)}</td>
+        <td>${(eintrag.masse / 1000).toFixed(2)}</td>
+        <td><input type="number" step="5" min="0" data-preis="${eintrag.key}" value="${eintrag.preis}"></td>
+        <td><strong>${eintrag.kosten.toFixed(2)}</strong></td>`;
+      body.appendChild(tr);
+    });
+  }
+
+  function architekturKosten() {
+    return materialAufstellung(Array.from(model.elements.values()), materialPreise)
+      .reduce((sum, e) => sum + e.kosten, 0);
+  }
+
+  document.getElementById("archBody").addEventListener("change", (e) => {
+    const id = parseInt(e.target.getAttribute("data-el"), 10);
+    if (!id) return;
+    const element = model.elements.get(id);
+    if (!element) return;
+    const field = e.target.getAttribute("data-field");
+    const layerIndex = e.target.getAttribute("data-layer");
+
+    if (layerIndex !== null && layerIndex !== undefined) {
+      const layer = element.layers[parseInt(layerIndex, 10)];
+      if (!layer) return;
+      if (field === "material") layer.material = e.target.value;
+      if (field === "d") layer.d = Math.max(0, parseFloat(e.target.value) || 0);
+    } else if (field === "anzahl") {
+      element.anzahl = Math.max(1, parseInt(e.target.value, 10) || 1);
+    } else if (field === "zielU") {
+      const v = parseFloat(e.target.value);
+      element.zielU = Number.isFinite(v) && v > 0 ? v : null;
+    }
+    refreshAll();
+  });
+
+  document.getElementById("archBody").addEventListener("click", (e) => {
+    const removeEl = e.target.getAttribute("data-remove-el");
+    if (removeEl) { model.elements.delete(parseInt(removeEl, 10)); refreshAll(); return; }
+
+    const addTo = e.target.getAttribute("data-el");
+    if (addTo && e.target.classList.contains("layer-add")) {
+      const element = model.elements.get(parseInt(addTo, 10));
+      if (element) { element.layers.push({ material: "mineralwolle", d: 0.06 }); refreshAll(); }
+      return;
+    }
+    if (addTo && e.target.classList.contains("layer-remove")) {
+      const element = model.elements.get(parseInt(addTo, 10));
+      const index = parseInt(e.target.getAttribute("data-layer"), 10);
+      if (element && element.layers.length > 1) { element.layers.splice(index, 1); refreshAll(); }
+    }
+  });
+
+  document.getElementById("archMaterialBody").addEventListener("input", (e) => {
+    const key = e.target.getAttribute("data-preis");
+    if (!key) return;
+    materialPreise[key] = Math.max(0, parseFloat(e.target.value) || 0);
+    renderMaterialTable();
+    let steel = 0;
+    model.members.forEach((m) => { steel += designMember(m).totalWeight; });
+    updateCost(steel);
+  });
+
+  document.getElementById("btnBauteil").addEventListener("click", () => setMode("bauteil"));
+  document.getElementById("bauteilTyp").addEventListener("change", () => {
+    if (mode === "bauteil") setMode("bauteil");
+  });
+
   /* ------------------------------------------------------------- Tabellen */
 
   const tbody = document.getElementById("membersBody");
@@ -608,11 +817,13 @@
     const processing = totalWeight * value("processingPerKg");
     const transport = value("transportFlat");
     const storage = totalWeight * value("storagePerKg");
+    const arch = architekturKosten();
+    document.getElementById("costArch").textContent = arch.toFixed(2) + " €";
     document.getElementById("costMaterial").textContent = material.toFixed(2) + " €";
     document.getElementById("costProcessing").textContent = processing.toFixed(2) + " €";
     document.getElementById("costTransport").textContent = transport.toFixed(2) + " €";
     document.getElementById("costStorage").textContent = storage.toFixed(2) + " €";
-    document.getElementById("costTotal").textContent = (material + processing + transport + storage).toFixed(2) + " €";
+    document.getElementById("costTotal").textContent = (material + processing + transport + storage + arch).toFixed(2) + " €";
   }
 
   ["pricePerKg", "processingPerKg", "transportFlat", "storagePerKg"].forEach((id) => {
@@ -780,6 +991,7 @@
     model: { button: document.getElementById("tabModel"), view: document.getElementById("viewModel") },
     members: { button: document.getElementById("tabMembers"), view: document.getElementById("viewMembers") },
     nodes: { button: document.getElementById("tabNodes"), view: document.getElementById("viewNodes") },
+    arch: { button: document.getElementById("tabArch"), view: document.getElementById("viewArch") },
     cutlist: { button: document.getElementById("tabCutList"), view: document.getElementById("viewCutList") },
   };
 
@@ -789,6 +1001,7 @@
       TABS[key].button.classList.toggle("active", key === which);
     });
     if (which === "nodes") renderNodeTable();
+    if (which === "arch") renderArchTable();
     if (which === "cutlist") renderCutList();
     if (which === "model") { result.resize(); renderModel(); }
   }
@@ -800,6 +1013,7 @@
     renderSketch();
     if (!TABS.model.view.hidden) renderModel();
     if (!TABS.nodes.view.hidden) renderNodeTable();
+    if (!TABS.arch.view.hidden) renderArchTable();
     if (!TABS.cutlist.view.hidden) renderCutList();
   }
 
@@ -942,6 +1156,9 @@
       auflager: Array.from(model.supports.entries()),
       lasten: Array.from(model.loads.entries()),
       naechsteId: model.nextId,
+      bauteile: Array.from(model.elements.values()),
+      naechsteBauteilId: model.nextElementId,
+      baustoffpreise: materialPreise,
     };
   }
 
@@ -955,6 +1172,10 @@
     (data.auflager || []).forEach(([i, type]) => model.supports.set(Number(i), type));
     (data.lasten || []).forEach(([i, load]) => model.loads.set(Number(i), load));
     model.nextId = data.naechsteId || (Math.max(0, ...data.staebe.map((m) => m.id)) + 1);
+    (data.bauteile || []).forEach((el) => model.elements.set(el.id, el));
+    model.nextElementId = data.naechsteBauteilId || (model.elements.size + 1);
+    Object.keys(materialPreise).forEach((k) => delete materialPreise[k]);
+    Object.assign(materialPreise, data.baustoffpreise || {});
 
     const set = (id, value, fallback) => { if (value !== undefined) document.getElementById(id).value = value !== null ? value : fallback; };
     if (data.projekt) {
@@ -1076,6 +1297,26 @@
         rows.push(["K" + (index + 1), node.x.toFixed(2), node.y.toFixed(2), node.z.toFixed(2),
           support ? `${support === "pinned" ? "Festlager" : "Loslager"} ${reactions}` : "-",
           load ? Math.abs(load.fy) : 0, (selfWeightLoads[index] || 0).toFixed(2), entries.join(" | "), maxN.toFixed(1)]);
+      });
+    }
+
+    if (model.elements.size) {
+      rows.push([]);
+      rows.push(["Architektur-Bauteile (Mengen nach Geometrie, U-Wert nach DIN EN ISO 6946)"]);
+      rows.push(["Bauteil", "Typ", "Stück", "Fläche [m²]", "Dicke [m]", "Volumen [m³]", "Masse [kg]", "U [W/m²K]", "Zielwert", "flächenbez. Masse [kg/m²]", "Aufbau"]);
+      model.elements.forEach((element) => {
+        const a = bauteilAuswertung(element);
+        rows.push([bauteilBezeichnung(element), a.typName, element.anzahl, a.flaecheGesamt.toFixed(2),
+          a.geometrie.dicke.toFixed(3), a.volumenGesamt.toFixed(2), a.masseGesamt.toFixed(0),
+          a.uWert === null ? "-" : a.uWert.toFixed(3), element.zielU || "-", a.flaechenmasse.toFixed(0),
+          a.schichten.map((l) => `${l.name} ${(l.d * 1000).toFixed(0)} mm`).join(" | ")]);
+      });
+
+      rows.push([]);
+      rows.push(["Materialaufstellung Architektur"]);
+      rows.push(["Gruppe", "Baustoff", "Rohdichte [kg/m³]", "Volumen [m³]", "Masse [t]", "Preis [€/m³]", "Kosten [€]"]);
+      materialAufstellung(Array.from(model.elements.values()), materialPreise).forEach((e) => {
+        rows.push([e.gruppe, e.name, e.rho, e.volumen.toFixed(2), (e.masse / 1000).toFixed(2), e.preis, e.kosten.toFixed(2)]);
       });
     }
 

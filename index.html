@@ -77,6 +77,19 @@
         <label>Raster [m]</label>
         <input type="number" id="gridStep" step="0.25" min="0.05" value="0.5" title="Fangraster auf der Arbeitsebene">
       </span>
+      <span class="tool-group">
+        <button class="tool-btn plain" id="btnBauteil" title="Architektur-Bauteil auf der Arbeitsebene aufziehen">▤ Bauteil</button>
+        <select id="bauteilTyp" title="Bauteiltyp mit Standardaufbau">
+          <option value="wand_aussen" selected>Außenwand</option>
+          <option value="wand_innen">Innenwand</option>
+          <option value="decke">Geschossdecke</option>
+          <option value="dach">Dach (Warmdach)</option>
+          <option value="bodenplatte">Bodenplatte</option>
+          <option value="streifenfundament">Streifenfundament</option>
+          <option value="einzelfundament">Einzelfundament</option>
+        </select>
+        <input type="number" id="bauteilHoehe" step="0.05" min="0.1" value="2.75" title="Wandhöhe bzw. Breite des Streifenfundaments in Metern">
+      </span>
       <button class="tool-btn" id="btnSupport" title="Knoten anklicken: Festlager → Loslager → kein Lager">△ Auflager</button>
       <button class="tool-btn" id="btnLoad" title="Knoten anklicken und Knotenlast in kN eingeben">↓ Knotenlast</button>
       <button class="tool-btn primary" id="btnSolve" title="Stabkräfte aus Geometrie, Auflagern und Lasten berechnen">Σ Stabkräfte berechnen</button>
@@ -105,6 +118,7 @@
         <button class="tab-btn active" id="tabModel">3D-Modell</button>
         <button class="tab-btn" id="tabMembers">Bauteile</button>
         <button class="tab-btn" id="tabNodes">Knoten / Anschlüsse</button>
+        <button class="tab-btn" id="tabArch">Architektur</button>
         <button class="tab-btn" id="tabCutList">Stückliste</button>
       </div>
     </div>
@@ -170,6 +184,49 @@
         <tbody id="nodesBody"></tbody>
       </table>
       <div class="empty-state" id="nodesEmpty">Noch keine Stabkräfte berechnet – zuerst Auflager und Knotenlasten setzen und „Stabkräfte berechnen“ ausführen.</div>
+    </div>
+
+    <div class="result-panel-body" id="viewArch" hidden>
+      <p class="view-note">Bauteile mit Schichtaufbau. Mengen aus der Geometrie, Rohdichten nach DIN EN 1991-1-1 Anhang A,
+        Wärmeleitfähigkeiten nach DIN 4108-4, U-Wert nach DIN EN ISO 6946. Die Höchstwerte der U-Werte sind dem GEG zu
+        entnehmen; der Zielwert dient nur dem Abgleich.</p>
+
+      <h3 class="section-title">Bauteile</h3>
+      <table class="members-table" id="archTable">
+        <thead>
+          <tr>
+            <th>Bauteil</th>
+            <th>Typ</th>
+            <th>Geometrie</th>
+            <th>Stück</th>
+            <th>Fläche [m²]</th>
+            <th>Dicke [m]</th>
+            <th>Masse [kg]</th>
+            <th>U [W/m²K]</th>
+            <th>Ziel</th>
+            <th>Schichtaufbau (Material · Dicke [m])</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="archBody"></tbody>
+      </table>
+      <div class="empty-state" id="archEmpty">Noch keine Bauteile. Wählen Sie oben links einen Bauteiltyp, klicken Sie „Bauteil“ und ziehen Sie ihn auf der Arbeitsebene auf.</div>
+
+      <h3 class="section-title">Materialaufstellung und Kosten</h3>
+      <table class="members-table" id="archMaterialTable">
+        <thead>
+          <tr>
+            <th>Gruppe</th>
+            <th>Baustoff</th>
+            <th>ρ [kg/m³]</th>
+            <th>Volumen [m³]</th>
+            <th>Masse [t]</th>
+            <th>€/m³</th>
+            <th>Kosten [€]</th>
+          </tr>
+        </thead>
+        <tbody id="archMaterialBody"></tbody>
+      </table>
     </div>
 
     <div class="result-panel-body" id="viewCutList" hidden>
@@ -247,6 +304,7 @@
       <div class="stat"><span class="label">Bearbeitung</span><span class="value" id="costProcessing">0.00 €</span></div>
       <div class="stat"><span class="label">Transport</span><span class="value" id="costTransport">0.00 €</span></div>
       <div class="stat"><span class="label">Lagerung</span><span class="value" id="costStorage">0.00 €</span></div>
+      <div class="stat"><span class="label">Architektur (Material)</span><span class="value" id="costArch">0.00 €</span></div>
       <div class="stat"><span class="label">Gesamt (Kostenschätzung)</span><span class="value" id="costTotal">0.00 €</span></div>
     </div>
 
@@ -295,6 +353,10 @@
           Prüfung der statischen Bestimmtheit (m + r = 2n)</li>
         <li><strong>Teilsicherheitsbeiwerte</strong> nach DIN EN 1993-1-1/NA: γ<sub>M0</sub> = 1,00,
           γ<sub>M1</sub> = 1,10, γ<sub>M2</sub> = 1,25 (umschaltbar auf die EN-Empfehlung γ<sub>M1</sub> = 1,00)</li>
+        <li><strong>Architektur-Bauteile</strong>: Mengen aus der Geometrie; Rohdichten nach DIN EN 1991-1-1
+          Anhang A, Wärmeleitfähigkeiten nach DIN 4108-4; U-Wert nach DIN EN ISO 6946
+          (U = 1/(R<sub>si</sub> + Σ d/λ + R<sub>se</sub>)) mit Wärmeübergangswiderständen nach Tab. 7;
+          flächenbezogene Masse als Kennwert</li>
       </ul>
     </div>
     <div class="basis-col">
@@ -312,6 +374,10 @@
         <li><strong>Gebrauchstauglichkeit</strong> nach Abs. 7: Durchbiegung, Schwingung, Überhöhung</li>
         <li><strong>Lastannahmen</strong> nach DIN EN 1991 mit NA (Eigen-, Nutz-, Schnee- und Windlasten),
           Kombinationsregeln nach DIN EN 1990 – die Eingabewerte sind vom Anwender bereitzustellen</li>
+        <li><strong>Architektur:</strong> Tragfähigkeit von Beton (DIN EN 1992), Mauerwerk (DIN EN 1996) und
+          Holz (DIN EN 1995), Feuchteschutz nach DIN 4108-3, Schallschutznachweis nach DIN 4109, Brandschutz
+          sowie die Gebäudebilanz und die Höchstwerte der U-Werte nach GEG – der Zielwert in der Tabelle dient
+          nur dem Abgleich. Bauteile gegen Erdreich sind nach DIN EN ISO 13370 zu bewerten.</li>
         <li><strong>Weitere:</strong> Stabilität des Gesamtsystems und Imperfektionen nach Abs. 5,
           Brandbemessung (EN 1993-1-2), Ermüdung (EN 1993-1-9), Ausführung und Toleranzen
           (DIN EN 1090), Korrosionsschutz (DIN EN ISO 12944)</li>
@@ -335,6 +401,8 @@
 </div>
 
 <script src="js/steel-database.js"></script>
+<script src="js/materials.js"></script>
+<script src="js/architecture.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>
