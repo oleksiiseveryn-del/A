@@ -585,6 +585,12 @@ table.members-table input {
   line-height: 1.45;
 }
 
+.arch-actions {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0 2px;
+}
+
 .cutlist-controls {
   display: flex;
   gap: 14px;

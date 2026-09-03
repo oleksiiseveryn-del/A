@@ -926,6 +926,7 @@
       },
     });
 
+    sheetArt = "ansicht";
     document.getElementById("sheetBody").innerHTML = svg;
     document.getElementById("sheetTitle").textContent =
       `Ansicht ${bauteilBezeichnung(element)} · ${BAUTEILTYPEN[element.kind].name}`;
@@ -941,6 +942,37 @@
     zeichneAnsicht(pos >= 0 ? pos : 0);
   });
 
+  /** Aktuell im Blattfenster gezeigte Zeichnung: "ansicht" oder "grundriss". */
+  let sheetArt = "ansicht";
+
+  function zeichneGrundriss() {
+    const waende = ansichtsWaende();
+    if (!waende.length) {
+      setStatus("Für den Grundriss zuerst Wände anlegen.", "error");
+      return;
+    }
+    const svg = grundrissSVG({
+      waende,
+      oeffnungenVon,
+      geometrieVon: bauteilGeometrie,
+      bezeichnungVon: bauteilBezeichnung,
+      projekt: {
+        name: document.getElementById("projectName").value,
+        datum: document.getElementById("projectDate").value,
+        bearbeiter: "Oleksii Severyn",
+      },
+    });
+    sheetArt = "grundriss";
+    document.getElementById("sheetBody").innerHTML = svg;
+    document.getElementById("sheetTitle").textContent = "Grundriss";
+    const raeume = findeRaeume(waende);
+    document.getElementById("sheetCounter").textContent =
+      `${waende.length} Wände · ${raeume.length} ${raeume.length === 1 ? "Raum" : "Räume"}`;
+    document.getElementById("sheetOverlay").hidden = false;
+  }
+
+  document.getElementById("btnGrundriss").addEventListener("click", zeichneGrundriss);
+
   document.getElementById("sheetPrev").addEventListener("click", () => zeichneAnsicht(sheetIndex - 1));
   document.getElementById("sheetNext").addEventListener("click", () => zeichneAnsicht(sheetIndex + 1));
   document.getElementById("sheetClose").addEventListener("click", () => {
@@ -953,16 +985,20 @@
     window.setTimeout(() => document.body.classList.remove("printing-sheet"), 500);
   });
   document.getElementById("sheetSvg").addEventListener("click", () => {
-    const waende = ansichtsWaende();
-    const element = waende[sheetIndex];
-    if (!element) return;
     const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
-    saveFile(`Ansicht_${name}_${bauteilBezeichnung(element)}.svg`,
-      document.getElementById("sheetBody").innerHTML, "image/svg+xml");
+    const inhalt = document.getElementById("sheetBody").innerHTML;
+    if (sheetArt === "grundriss") {
+      saveFile(`Grundriss_${name}.svg`, inhalt, "image/svg+xml");
+      return;
+    }
+    const element = ansichtsWaende()[sheetIndex];
+    if (!element) return;
+    saveFile(`Ansicht_${name}_${bauteilBezeichnung(element)}.svg`, inhalt, "image/svg+xml");
   });
   window.addEventListener("keydown", (e) => {
     if (document.getElementById("sheetOverlay").hidden) return;
     if (e.key === "Escape") document.getElementById("sheetOverlay").hidden = true;
+    if (sheetArt !== "ansicht") return;
     if (e.key === "ArrowLeft") zeichneAnsicht(sheetIndex - 1);
     if (e.key === "ArrowRight") zeichneAnsicht(sheetIndex + 1);
   });

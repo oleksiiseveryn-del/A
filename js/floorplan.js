@@ -1,0 +1,381 @@
+/**
+ * Grundriss als maßstäbliches Blatt (A4 quer, SVG).
+ *
+ * Darstellung in Anlehnung an DIN 1356-1: geschnittene Bauteile mit
+ * kräftiger Umrandung, Fenster als Blendrahmen mit Verglasung, Türen mit
+ * Blatt und Aufschlagbogen. Maßeintragung nach DIN 406-11, Maßstäbe nach
+ * DIN ISO 5455.
+ *
+ * Raumflächen werden aus den Wandachsen ermittelt (Achsflächen). Die
+ * lichten Raumflächen und die Wohnflächenberechnung nach DIN 277 bzw.
+ * WoFlV weichen davon ab und sind gesondert zu ermitteln.
+ */
+
+/** Wandachsen als Kantenmodell aufbereiten: Knoten verschmelzen, Kanten bilden. */
+function grundrissGraph(waende, toleranz) {
+  const tol = toleranz || 0.05;
+  const knoten = [];
+  const kanten = [];
+
+  const knotenIndex = (x, z) => {
+    for (let i = 0; i < knoten.length; i++) {
+      if (Math.hypot(knoten[i].x - x, knoten[i].z - z) <= tol) return i;
+    }
+    knoten.push({ x, z });
+    return knoten.length - 1;
+  };
+
+  waende.forEach((wand) => {
+    const a = knotenIndex(wand.p1.x, wand.p1.z);
+    const b = knotenIndex(wand.p2.x, wand.p2.z);
+    if (a !== b) kanten.push({ a, b, wand });
+  });
+
+  return { knoten, kanten };
+}
+
+/**
+ * Wandachsen an allen Kreuzungs- und Anschlusspunkten teilen.
+ *
+ * Ohne diesen Schritt ist der Grundriss kein ebener Graph: Eine Wand, die
+ * mittig auf eine andere stößt (T-Anschluss) oder sie kreuzt, erzeugt dort
+ * keinen gemeinsamen Knoten – die Räume ließen sich nicht abgrenzen.
+ */
+function zerlegeWandachsen(waende, toleranz) {
+  const tol = toleranz || 1e-6;
+  const segmente = waende.map((wand) => ({
+    p1: { x: wand.p1.x, z: wand.p1.z },
+    p2: { x: wand.p2.x, z: wand.p2.z },
+    wand,
+    teiler: [0, 1],
+  }));
+
+  const kreuz = (ax, az, bx, bz) => ax * bz - az * bx;
+
+  for (let i = 0; i < segmente.length; i++) {
+    for (let j = i + 1; j < segmente.length; j++) {
+      const a = segmente[i], b = segmente[j];
+      const rx = a.p2.x - a.p1.x, rz = a.p2.z - a.p1.z;
+      const sx = b.p2.x - b.p1.x, sz = b.p2.z - b.p1.z;
+      const nenner = kreuz(rx, rz, sx, sz);
+      const qx = b.p1.x - a.p1.x, qz = b.p1.z - a.p1.z;
+
+      if (Math.abs(nenner) > 1e-9) {
+        const t = kreuz(qx, qz, sx, sz) / nenner;
+        const u = kreuz(qx, qz, rx, rz) / nenner;
+        if (t > -1e-6 && t < 1 + 1e-6 && u > -1e-6 && u < 1 + 1e-6) {
+          a.teiler.push(t);
+          b.teiler.push(u);
+        }
+      } else {
+        // parallel: gemeinsame Achse, Endpunkte aufeinander projizieren
+        const laengeA = rx * rx + rz * rz;
+        const laengeB = sx * sx + sz * sz;
+        if (Math.abs(kreuz(qx, qz, rx, rz)) > 1e-6) continue; // versetzt, kein Kontakt
+        if (laengeA > 1e-12) {
+          [b.p1, b.p2].forEach((p) => {
+            const t = ((p.x - a.p1.x) * rx + (p.z - a.p1.z) * rz) / laengeA;
+            if (t > 1e-6 && t < 1 - 1e-6) a.teiler.push(t);
+          });
+        }
+        if (laengeB > 1e-12) {
+          [a.p1, a.p2].forEach((p) => {
+            const u = ((p.x - b.p1.x) * sx + (p.z - b.p1.z) * sz) / laengeB;
+            if (u > 1e-6 && u < 1 - 1e-6) b.teiler.push(u);
+          });
+        }
+      }
+    }
+  }
+
+  const teile = [];
+  segmente.forEach((seg) => {
+    const werte = seg.teiler.slice().sort((x, y) => x - y);
+    for (let k = 0; k < werte.length - 1; k++) {
+      const t1 = werte[k], t2 = werte[k + 1];
+      if (t2 - t1 < 1e-6) continue;
+      const punkt = (t) => ({
+        x: seg.p1.x + (seg.p2.x - seg.p1.x) * t,
+        y: 0,
+        z: seg.p1.z + (seg.p2.z - seg.p1.z) * t,
+      });
+      const p1 = punkt(t1), p2 = punkt(t2);
+      if (Math.hypot(p2.x - p1.x, p2.z - p1.z) > 0.01) {
+        teile.push({ id: seg.wand.id, p1, p2, wand: seg.wand });
+      }
+    }
+  });
+  return teile;
+}
+
+/**
+ * Räume als Flächen des ebenen Graphen bestimmen (Umlauf über Halbkanten).
+ * @returns {Array} [{ punkte, flaeche, umfang }]
+ */
+function findeRaeume(waende) {
+  // Erst an Kreuzungen teilen, sonst bleiben T-Anschlüsse unverbunden
+  const { knoten, kanten } = grundrissGraph(zerlegeWandachsen(waende));
+  if (kanten.length < 3) return [];
+
+  // Halbkanten je Richtung
+  const halbkanten = [];
+  kanten.forEach((k) => {
+    halbkanten.push({ von: k.a, nach: k.b });
+    halbkanten.push({ von: k.b, nach: k.a });
+  });
+
+  const winkel = (h) => Math.atan2(knoten[h.nach].z - knoten[h.von].z, knoten[h.nach].x - knoten[h.von].x);
+
+  // ausgehende Halbkanten je Knoten, nach Richtung sortiert
+  const ausgehend = knoten.map(() => []);
+  halbkanten.forEach((h, i) => ausgehend[h.von].push(i));
+  ausgehend.forEach((liste) => liste.sort((i, j) => winkel(halbkanten[i]) - winkel(halbkanten[j])));
+
+  const gegenkante = (i) => (i % 2 === 0 ? i + 1 : i - 1);
+
+  /** Nächste Halbkante im Umlauf: am Zielknoten die Vorgängerrichtung der Gegenkante. */
+  const naechste = (i) => {
+    const gegen = gegenkante(i);
+    const liste = ausgehend[halbkanten[gegen].von];
+    const pos = liste.indexOf(gegen);
+    return liste[(pos - 1 + liste.length) % liste.length];
+  };
+
+  const besucht = new Set();
+  const flaechen = [];
+
+  halbkanten.forEach((_, start) => {
+    if (besucht.has(start)) return;
+    const zyklus = [];
+    let i = start;
+    let schutz = 0;
+    do {
+      besucht.add(i);
+      zyklus.push(i);
+      i = naechste(i);
+      schutz++;
+    } while (i !== start && schutz < 5000);
+    if (i !== start || zyklus.length < 3) return;
+
+    const punkte = zyklus.map((h) => knoten[halbkanten[h].von]);
+    let flaeche = 0;
+    for (let k = 0; k < punkte.length; k++) {
+      const p = punkte[k], q = punkte[(k + 1) % punkte.length];
+      flaeche += p.x * q.z - q.x * p.z;
+    }
+    flaeche /= 2;
+    flaechen.push({ punkte, flaeche });
+  });
+
+  // Der Umlauf liefert Innenflächen mit positivem, die Außenkontur mit
+  // negativem Vorzeichen. Über den Betrag ließe sich beides bei nur einem
+  // Raum nicht unterscheiden, da Innen- und Außenfläche dann gleich groß sind.
+  return flaechen
+    .filter((f) => f.flaeche > 0.5)
+    .map((f) => ({ punkte: f.punkte, flaeche: f.flaeche }))
+    .sort((a, b) => b.flaeche - a.flaeche);
+}
+
+/** Schwerpunkt eines Polygons. */
+function polygonSchwerpunkt(punkte) {
+  let x = 0, z = 0, a = 0;
+  for (let i = 0; i < punkte.length; i++) {
+    const p = punkte[i], q = punkte[(i + 1) % punkte.length];
+    const f = p.x * q.z - q.x * p.z;
+    a += f;
+    x += (p.x + q.x) * f;
+    z += (p.z + q.z) * f;
+  }
+  a *= 0.5;
+  if (Math.abs(a) < 1e-9) return punkte[0];
+  return { x: x / (6 * a), z: z / (6 * a) };
+}
+
+/**
+ * Erzeugt das Grundrissblatt.
+ * @param {Object} daten - { waende, oeffnungenVon, geometrieVon, projekt }
+ */
+function grundrissSVG(daten) {
+  const { waende, oeffnungenVon, geometrieVon, projekt } = daten;
+  if (!waende.length) return "";
+
+  // Ausdehnung über alle Wände einschließlich Dicke
+  let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+  waende.forEach((wand) => {
+    const d = geometrieVon(wand).dicke;
+    [wand.p1, wand.p2].forEach((p) => {
+      minX = Math.min(minX, p.x - d); maxX = Math.max(maxX, p.x + d);
+      minZ = Math.min(minZ, p.z - d); maxZ = Math.max(maxZ, p.z + d);
+    });
+  });
+  const breiteM = Math.max(maxX - minX, 0.5);
+  const tiefeM = Math.max(maxZ - minZ, 0.5);
+
+  const feldBreite = BLATT.breite - BLATT.randLinks - BLATT.randRechts - 74;
+  const feldHoehe = 128;
+  const nenner = waehleMassstab(breiteM, tiefeM, feldBreite, feldHoehe);
+  const m = (wert) => (wert * 1000) / nenner;
+
+  // Zeichnung im verfügbaren Feld zentrieren
+  const x0 = BLATT.randLinks + 22 + Math.max((feldBreite - m(breiteM)) / 2, 0);
+  const y0 = BLATT.randOben + 16 + Math.max((feldHoehe - m(tiefeM)) / 2, 0);
+  // Modell -> Blatt: z nach unten, damit der Grundriss von oben gesehen stimmt
+  const px = (x) => x0 + m(x - minX);
+  const pz = (z) => y0 + m(z - minZ);
+
+  let svg = "";
+
+  // Räume zuerst, damit die Wände darüber liegen
+  const raeume = findeRaeume(waende);
+  raeume.forEach((raum, i) => {
+    const d = raum.punkte.map((p) => `${px(p.x).toFixed(2)},${pz(p.z).toFixed(2)}`).join(" ");
+    svg += `<polygon points="${d}" class="raum"/>`;
+    const s = polygonSchwerpunkt(raum.punkte);
+    svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) - 1).toFixed(2)}" class="t-raum">R${i + 1}</text>`;
+    svg += `<text x="${px(s.x).toFixed(2)}" y="${(pz(s.z) + 3).toFixed(2)}" class="t-mass">${raum.flaeche.toFixed(2)} m²</text>`;
+  });
+
+  // Wände im Schnitt, zwischen den Öffnungen aufgeteilt
+  waende.forEach((wand) => {
+    const geo = geometrieVon(wand);
+    const dicke = m(geo.dicke);
+    const laengeM = Math.hypot(wand.p2.x - wand.p1.x, wand.p2.z - wand.p1.z);
+    if (laengeM < 1e-6) return;
+
+    const ax = px(wand.p1.x), az = pz(wand.p1.z);
+    const bx = px(wand.p2.x), bz = pz(wand.p2.z);
+    const drehung = (Math.atan2(bz - az, bx - ax) * 180) / Math.PI;
+    const laenge = Math.hypot(bx - ax, bz - az);
+
+    const felder = oeffnungsPositionen(oeffnungenVon(wand.id), laengeM, geo.hoehe).felder
+      .filter((f) => f.x0 >= 0 && f.x0 + f.b <= laengeM)
+      .sort((a, b) => a.x0 - b.x0);
+
+    svg += `<g transform="translate(${ax.toFixed(2)} ${az.toFixed(2)}) rotate(${drehung.toFixed(3)})">`;
+
+    // massive Wandstücke zwischen den Öffnungen
+    let cursor = 0;
+    const stuecke = [];
+    felder.forEach((f) => {
+      if (f.x0 > cursor) stuecke.push([cursor, f.x0]);
+      cursor = Math.max(cursor, f.x0 + f.b);
+    });
+    if (cursor < laengeM) stuecke.push([cursor, laengeM]);
+
+    stuecke.forEach(([von, bis]) => {
+      svg += `<rect x="${m(von).toFixed(2)}" y="${(-dicke / 2).toFixed(2)}" width="${m(bis - von).toFixed(2)}" height="${dicke.toFixed(2)}" class="wand"/>`;
+    });
+
+    // Öffnungssymbole
+    felder.forEach((f) => {
+      const fx = m(f.x0), fb = m(f.b);
+      const art = OEFFNUNGSTYPEN[f.typ] ? OEFFNUNGSTYPEN[f.typ].art : "Fenster";
+      // Laibungskanten
+      svg += `<line x1="${fx.toFixed(2)}" y1="${(-dicke / 2).toFixed(2)}" x2="${fx.toFixed(2)}" y2="${(dicke / 2).toFixed(2)}" class="laibung"/>`;
+      svg += `<line x1="${(fx + fb).toFixed(2)}" y1="${(-dicke / 2).toFixed(2)}" x2="${(fx + fb).toFixed(2)}" y2="${(dicke / 2).toFixed(2)}" class="laibung"/>`;
+
+      if (art === "Fenster") {
+        // Blendrahmen und Verglasung
+        svg += `<rect x="${fx.toFixed(2)}" y="${(-dicke / 6).toFixed(2)}" width="${fb.toFixed(2)}" height="${(dicke / 3).toFixed(2)}" class="fenster-plan"/>`;
+        svg += `<line x1="${fx.toFixed(2)}" y1="0" x2="${(fx + fb).toFixed(2)}" y2="0" class="glas"/>`;
+      } else {
+        // Türblatt an der linken Laibung mit Aufschlagbogen
+        svg += `<line x1="${fx.toFixed(2)}" y1="${(-dicke / 2).toFixed(2)}" x2="${fx.toFixed(2)}" y2="${(-dicke / 2 - fb).toFixed(2)}" class="tuerblatt"/>`;
+        svg += `<path d="M ${(fx + fb).toFixed(2)} ${(-dicke / 2).toFixed(2)} A ${fb.toFixed(2)} ${fb.toFixed(2)} 0 0 0 ${fx.toFixed(2)} ${(-dicke / 2 - fb).toFixed(2)}" class="tuerbogen"/>`;
+      }
+    });
+
+    // Wandbeschriftung entlang der Achse
+    svg += `<text x="${(laenge / 2).toFixed(2)}" y="${(dicke / 2 + 4).toFixed(2)}" class="t-wand">${daten.bezeichnungVon(wand)} · ${laengeM.toFixed(2)} m · ${(geo.dicke * 1000).toFixed(0)} mm</text>`;
+    svg += `</g>`;
+  });
+
+  // Gesamtmaße unten und links
+  const yUnten = y0 + m(tiefeM) + 14;
+  svg += massketteWaagerecht([px(minX), px(maxX)], yUnten, y0 + m(tiefeM) + 2, "kette");
+  svg += `<text x="${((px(minX) + px(maxX)) / 2).toFixed(2)}" y="${(yUnten - 1.5).toFixed(2)}" class="t-mass-gross">${breiteM.toFixed(2)}</text>`;
+
+  const xLinks = x0 - 12;
+  svg += massketteLotrecht([pz(minZ), pz(maxZ)], xLinks, x0 - 2);
+  svg += `<text x="${(xLinks - 2).toFixed(2)}" y="${((pz(minZ) + pz(maxZ)) / 2).toFixed(2)}" class="t-mass-gross" transform="rotate(-90 ${(xLinks - 2).toFixed(2)} ${((pz(minZ) + pz(maxZ)) / 2).toFixed(2)})">${tiefeM.toFixed(2)}</text>`;
+
+  // Raumaufstellung und Achsenzeiger rechts
+  const xInfo = BLATT.breite - BLATT.randRechts - 68;
+  let yInfo = BLATT.randOben + 8;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-kopf">Räume (Achsflächen)</text>`;
+  yInfo += 5;
+  let summe = 0;
+  raeume.forEach((raum, i) => {
+    summe += raum.flaeche;
+    svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">R${i + 1}   ${raum.flaeche.toFixed(2)} m²</text>`;
+    yInfo += 4;
+  });
+  if (!raeume.length) {
+    svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">kein geschlossener Raum erkannt</text>`;
+    yInfo += 4;
+  } else {
+    svg += `<text x="${xInfo}" y="${(yInfo + 1).toFixed(2)}" class="t-kopf">Summe ${summe.toFixed(2)} m²</text>`;
+    yInfo += 6;
+  }
+  yInfo += 3;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">Achsflächen zwischen den Wandachsen –</text>`;
+  yInfo += 3.6;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">lichte Flächen und Wohnfläche nach</text>`;
+  yInfo += 3.6;
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-klein">DIN 277 bzw. WoFlV gesondert ermitteln.</text>`;
+  yInfo += 8;
+
+  // Achsenzeiger: x nach rechts, z nach unten (Modellkoordinaten)
+  svg += `<text x="${xInfo}" y="${yInfo}" class="t-kopf">Lage</text>`;
+  const ax0 = xInfo + 6, az0 = yInfo + 12;
+  svg += `<line x1="${ax0}" y1="${az0}" x2="${ax0 + 12}" y2="${az0}" class="achse"/>`;
+  svg += `<line x1="${ax0}" y1="${az0}" x2="${ax0}" y2="${az0 + 12}" class="achse"/>`;
+  svg += `<text x="${ax0 + 14}" y="${az0 + 1}" class="t-klein">x</text>`;
+  svg += `<text x="${ax0 - 1}" y="${az0 + 16}" class="t-klein">z</text>`;
+  svg += `<text x="${xInfo}" y="${az0 + 22}" class="t-klein">Nordrichtung projektbezogen eintragen.</text>`;
+
+  // Schriftfeld
+  const sfB = 104, sfH = 30;
+  const sfX = BLATT.breite - BLATT.randRechts - sfB;
+  const sfY = BLATT.hoehe - BLATT.randUnten - sfH;
+  svg += `<rect x="${sfX}" y="${sfY}" width="${sfB}" height="${sfH}" class="schriftfeld"/>`;
+  svg += `<line x1="${sfX}" y1="${sfY + 9}" x2="${sfX + sfB}" y2="${sfY + 9}" class="schriftfeld"/>`;
+  svg += `<line x1="${sfX}" y1="${sfY + 19}" x2="${sfX + sfB}" y2="${sfY + 19}" class="schriftfeld"/>`;
+  svg += `<line x1="${sfX + 62}" y1="${sfY + 19}" x2="${sfX + 62}" y2="${sfY + sfH}" class="schriftfeld"/>`;
+  svg += `<text x="${sfX + 3}" y="${sfY + 6}" class="t-firma">HSD Hamburg GmbH</text>`;
+  svg += `<text x="${sfX + 3}" y="${sfY + 15}" class="t-klein">${projekt.name || "Projekt"} · Grundriss · ${waende.length} Wände</text>`;
+  svg += `<text x="${sfX + 3}" y="${sfY + 25}" class="t-klein">Bearbeiter: ${projekt.bearbeiter}</text>`;
+  svg += `<text x="${sfX + 3}" y="${sfY + 28.5}" class="t-klein">Datum: ${projekt.datum}</text>`;
+  svg += `<text x="${sfX + 65}" y="${sfY + 25}" class="t-massstab">M 1:${nenner}</text>`;
+  svg += `<text x="${sfX + 65}" y="${sfY + 28.5}" class="t-klein">Grundriss</text>`;
+
+  svg += `<text x="${BLATT.randLinks}" y="${BLATT.hoehe - 4}" class="t-hinweis">Vorbemessung – keine prüffähige Ausführungsplanung. Maße in Metern als Achsmaße, Rohbaumaße ohne Toleranzen nach DIN 18202.</text>`;
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${BLATT.breite} ${BLATT.hoehe}" width="100%" style="background:#fff">
+<style>
+  .wand { fill: #b9c0c7; stroke: #1b2733; stroke-width: 0.5; }
+  .raum { fill: #f6f3ec; stroke: none; }
+  .laibung { stroke: #1b2733; stroke-width: 0.35; }
+  .fenster-plan { fill: #dceaf5; stroke: #1b2733; stroke-width: 0.2; }
+  .glas { stroke: #1b2733; stroke-width: 0.2; }
+  .tuerblatt { stroke: #1b2733; stroke-width: 0.4; }
+  .tuerbogen { fill: none; stroke: #8a97a3; stroke-width: 0.2; stroke-dasharray: 1 0.8; }
+  .achse { stroke: #1b2733; stroke-width: 0.3; }
+  .ml { stroke: #1b2733; stroke-width: 0.25; }
+  .mhl { stroke: #1b2733; stroke-width: 0.13; }
+  .mb { stroke: #1b2733; stroke-width: 0.35; }
+  .schriftfeld { fill: none; stroke: #1b2733; stroke-width: 0.35; }
+  text { font-family: "IBM Plex Sans", Arial, sans-serif; fill: #1b2733; }
+  .t-mass { font-size: 2.5px; text-anchor: middle; }
+  .t-mass-gross { font-size: 3.2px; text-anchor: middle; font-weight: 600; }
+  .t-raum { font-size: 3.4px; text-anchor: middle; font-weight: 600; }
+  .t-wand { font-size: 2.3px; text-anchor: middle; fill: #46525e; }
+  .t-kopf { font-size: 3.2px; font-weight: 600; }
+  .t-klein { font-size: 2.6px; }
+  .t-firma { font-size: 4.5px; font-weight: 700; }
+  .t-massstab { font-size: 4px; font-weight: 600; }
+  .t-hinweis { font-size: 2.2px; fill: #64707c; }
+</style>
+${svg}
+</svg>`;
+}
