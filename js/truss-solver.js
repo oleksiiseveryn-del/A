@@ -1,20 +1,20 @@
 /**
- * Ebener Fachwerk-Solver (Knotengleichgewichtsverfahren).
+ * Fachwerk-Solver für ebene und räumliche Systeme (Knotengleichgewicht).
  *
- * Aufgestellt wird das Gleichungssystem A · x = b mit
- *   x = [N_1 … N_m, R_1 … R_r]   (Stabnormalkräfte und Auflagerreaktionen)
- * und je Knoten zwei Gleichgewichtsbedingungen (ΣH = 0, ΣV = 0).
+ * Aufgestellt wird A · x = b mit x = [N_1 … N_m, R_1 … R_r]; je Knoten
+ * gelten zwei (eben) bzw. drei (räumlich) Gleichgewichtsbedingungen.
  * Gelöst wird mit Gaußelimination und Spaltenpivotisierung.
  *
- * Vorzeichen: N > 0 = Zug, N < 0 = Druck (Stahlbau-Konvention).
- * Voraussetzung: statisch bestimmtes, unverschiebliches Fachwerk mit
- * gelenkigen Knoten und ausschließlich Knotenlasten.
+ * Liegen alle Knoten in einer Ebene, wird in dieser Ebene gerechnet -
+ * andernfalls wäre ein ebenes Fachwerk im Raum stets verschieblich.
+ *
+ * Vorzeichen: N > 0 = Zug, N < 0 = Druck.
+ * Voraussetzung: gelenkige Knoten, ausschließlich Knotenlasten,
+ * statisch bestimmtes und unverschiebliches System.
  */
 
-/** Löst A · x = b mit Gaußelimination und Spaltenpivotisierung. */
 function solveLinearSystem(A, b) {
   const n = b.length;
-  // Arbeitskopie der erweiterten Koeffizientenmatrix
   const M = A.map((row, i) => row.concat([b[i]]));
 
   for (let col = 0; col < n; col++) {
@@ -36,7 +36,6 @@ function solveLinearSystem(A, b) {
     }
   }
 
-  // Rückwärtseinsetzen
   const x = new Array(n).fill(0);
   for (let r = n - 1; r >= 0; r--) {
     let sum = M[r][n];
@@ -46,85 +45,132 @@ function solveLinearSystem(A, b) {
   return x;
 }
 
+/** Prüft, ob alle Knoten in einer Ebene liegen, und liefert deren Achsen. */
+function detectPlane(nodes) {
+  if (nodes.length < 3) return null;
+  const p0 = nodes[0];
+  let bestNormal = null;
+  let bestLen = 0;
+
+  for (let i = 1; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const u = [nodes[i].x - p0.x, nodes[i].y - p0.y, nodes[i].z - p0.z];
+      const v = [nodes[j].x - p0.x, nodes[j].y - p0.y, nodes[j].z - p0.z];
+      const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+      const len = Math.hypot(n[0], n[1], n[2]);
+      if (len > bestLen) { bestLen = len; bestNormal = [n[0] / len, n[1] / len, n[2] / len]; }
+    }
+  }
+  if (!bestNormal || bestLen < 1e-9) return null;
+
+  // Abstand aller Knoten von dieser Ebene prüfen
+  const planar = nodes.every((p) => {
+    const d = (p.x - p0.x) * bestNormal[0] + (p.y - p0.y) * bestNormal[1] + (p.z - p0.z) * bestNormal[2];
+    return Math.abs(d) < 1e-6;
+  });
+  if (!planar) return null;
+
+  // Lokale Achsen: e2 möglichst lotrecht, e1 rechtwinklig dazu in der Ebene
+  const up = [0, 1, 0];
+  const dot = up[0] * bestNormal[0] + up[1] * bestNormal[1] + up[2] * bestNormal[2];
+  let e2 = [up[0] - dot * bestNormal[0], up[1] - dot * bestNormal[1], up[2] - dot * bestNormal[2]];
+  let len2 = Math.hypot(e2[0], e2[1], e2[2]);
+  if (len2 < 1e-6) { e2 = [1, 0, 0]; len2 = 1; } // waagerechte Ebene
+  e2 = [e2[0] / len2, e2[1] / len2, e2[2] / len2];
+  const e1 = [
+    e2[1] * bestNormal[2] - e2[2] * bestNormal[1],
+    e2[2] * bestNormal[0] - e2[0] * bestNormal[2],
+    e2[0] * bestNormal[1] - e2[1] * bestNormal[0],
+  ];
+  return { normal: bestNormal, e1, e2 };
+}
+
 /**
- * @param {Array} nodes - [{ x, y }] in Zeichenkoordinaten (y nach unten)
- * @param {Array} bars  - [{ id, a, b }] Knotenindizes je Stab
- * @param {Array} supports - je Knotenindex "pinned" | "roller" | undefined
- * @param {Array} loads - je Knotenindex { fx, fz } in kN (fz positiv = nach unten)
- * @returns {Object} { ok, forces, reactions, message }
+ * @param {Array} nodes    - [{ x, y, z }] in Metern, y nach oben
+ * @param {Array} bars     - [{ id, a, b }]
+ * @param {Array} supports - je Knoten "pinned" | "roller" | undefined
+ * @param {Array} loads    - je Knoten { fx, fy, fz } in kN (fy negativ = nach unten)
  */
 function solveTruss(nodes, bars, supports, loads) {
   const n = nodes.length;
   const m = bars.length;
-
   if (n === 0 || m === 0) {
     return { ok: false, message: "Keine Stäbe vorhanden – bitte zuerst die Skizze zeichnen." };
   }
 
-  // Auflagerunbekannte einsammeln: Festlager = 2 (H und V), Loslager = 1 (V)
+  const plane = detectPlane(nodes);
+  const dim = plane ? 2 : 3;
+  // Basisvektoren der Gleichgewichtsrichtungen
+  const basis = plane ? [plane.e1, plane.e2] : [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+
+  // Auflagerunbekannte: Festlager hält alle Richtungen, Loslager nur die lotrechte
   const reactionDofs = [];
   supports.forEach((type, nodeIndex) => {
     if (type === "pinned") {
-      reactionDofs.push({ node: nodeIndex, dir: "x" });
-      reactionDofs.push({ node: nodeIndex, dir: "y" });
+      for (let d = 0; d < dim; d++) reactionDofs.push({ node: nodeIndex, dir: d });
     } else if (type === "roller") {
-      reactionDofs.push({ node: nodeIndex, dir: "y" });
+      // lotrechte Richtung: die Basisachse mit dem größten y-Anteil
+      let best = 0;
+      basis.forEach((axis, d) => { if (Math.abs(axis[1]) > Math.abs(basis[best][1])) best = d; });
+      reactionDofs.push({ node: nodeIndex, dir: best });
     }
   });
   const r = reactionDofs.length;
+  const required = dim === 2 ? 3 : 6;
 
-  if (r < 3) {
+  if (r < required) {
     return {
       ok: false,
-      message: "Zu wenige Auflagerbindungen: mindestens ein Festlager und ein Loslager setzen (3 Bindungen).",
+      message: `Zu wenige Auflagerbindungen: ${dim === 2 ? "ebenes" : "räumliches"} System benötigt mindestens ${required}, vorhanden sind ${r}.`,
+      dimension: dim,
     };
   }
 
-  const degree = m + r - 2 * n;
+  const degree = m + r - dim * n;
   if (degree < 0) {
     return {
       ok: false,
-      message: `System ${-degree}-fach verschieblich (kinematisch): ${m} Stäbe + ${r} Auflagerbindungen < ${2 * n} Gleichgewichtsbedingungen. Fehlende Diagonale oder Auflagerbindung ergänzen.`,
+      message: `System ${-degree}-fach verschieblich (kinematisch): ${m} Stäbe + ${r} Auflagerbindungen < ${dim * n} Gleichgewichtsbedingungen. Fehlende Diagonale oder Auflagerbindung ergänzen.`,
+      dimension: dim,
     };
   }
   if (degree > 0) {
     return {
       ok: false,
       message: `System ${degree}-fach statisch unbestimmt. Dieses Verfahren löst nur statisch bestimmte Fachwerke – überzählige Stäbe oder Auflagerbindungen entfernen.`,
+      dimension: dim,
     };
   }
 
-  // Gleichungssystem aufbauen: Zeile 2i = ΣH am Knoten i, Zeile 2i+1 = ΣV
-  const size = 2 * n;
+  const size = dim * n;
   const A = Array.from({ length: size }, () => new Array(size).fill(0));
   const b = new Array(size).fill(0);
 
   bars.forEach((bar, j) => {
     const na = nodes[bar.a];
     const nb = nodes[bar.b];
-    const dx = nb.x - na.x;
-    const dy = nb.y - na.y;
-    const len = Math.sqrt(dx * dx + dy * dy);
+    const d = [nb.x - na.x, nb.y - na.y, nb.z - na.z];
+    const len = Math.hypot(d[0], d[1], d[2]);
     if (len < 1e-9) return;
-    const cx = dx / len;
-    const cy = dy / len;
-    // Zugkraft zieht den Knoten jeweils zum gegenüberliegenden Knoten hin
-    A[2 * bar.a][j] += cx;
-    A[2 * bar.a + 1][j] += cy;
-    A[2 * bar.b][j] -= cx;
-    A[2 * bar.b + 1][j] -= cy;
+    const unit = [d[0] / len, d[1] / len, d[2] / len];
+
+    basis.forEach((axis, k) => {
+      const c = unit[0] * axis[0] + unit[1] * axis[1] + unit[2] * axis[2];
+      A[dim * bar.a + k][j] += c;
+      A[dim * bar.b + k][j] -= c;
+    });
   });
 
   reactionDofs.forEach((dof, k) => {
-    const row = dof.dir === "x" ? 2 * dof.node : 2 * dof.node + 1;
-    A[row][m + k] = 1;
+    A[dim * dof.node + dof.dir][m + k] = 1;
   });
 
-  // Äußere Lasten auf die rechte Seite: Σ innere Kräfte = −Σ äußere Kräfte
   loads.forEach((load, nodeIndex) => {
     if (!load) return;
-    b[2 * nodeIndex] = -(load.fx || 0);
-    b[2 * nodeIndex + 1] = -(load.fz || 0); // fz positiv = nach unten = +y
+    const f = [load.fx || 0, load.fy || 0, load.fz || 0];
+    basis.forEach((axis, k) => {
+      b[dim * nodeIndex + k] = -(f[0] * axis[0] + f[1] * axis[1] + f[2] * axis[2]);
+    });
   });
 
   const x = solveLinearSystem(A, b);
@@ -132,20 +178,27 @@ function solveTruss(nodes, bars, supports, loads) {
     return {
       ok: false,
       message: "System nicht lösbar (verschieblich oder Auflager ungünstig angeordnet), z. B. drei parallele oder in einem Punkt schneidende Auflagerkräfte.",
+      dimension: dim,
     };
   }
 
   const forces = {};
   bars.forEach((bar, j) => {
-    // Numerisches Rauschen abschneiden, damit Nullstäbe als glatte 0 erscheinen
-    forces[bar.id] = Math.abs(x[j]) < 0.05 ? 0 : x[j];
+    forces[bar.id] = Math.abs(x[j]) < 0.05 ? 0 : x[j]; // numerisches Rauschen abschneiden
   });
 
   const reactions = reactionDofs.map((dof, k) => ({
     node: dof.node,
-    dir: dof.dir,
+    dir: basis[dof.dir][1] > 0.7 ? "y" : "h", // lotrecht oder waagerecht
+    axis: basis[dof.dir],
     value: x[m + k],
   }));
 
-  return { ok: true, forces, reactions, message: "Stabkräfte berechnet." };
+  return {
+    ok: true,
+    forces,
+    reactions,
+    dimension: dim,
+    message: dim === 2 ? "Stabkräfte berechnet (ebenes System)." : "Stabkräfte berechnet (räumliches System).",
+  };
 }

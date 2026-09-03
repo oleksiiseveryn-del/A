@@ -6,6 +6,8 @@
 <title>Stahlbau Skizzen-Konverter · HSD Hamburg GmbH</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="css/styles.css">
+<!-- three.js r128 (MIT), lokal eingebunden: die App läuft ohne Internetverbindung -->
+<script src="js/vendor/three.min.js"></script>
 </head>
 <body>
 
@@ -57,13 +59,24 @@
   <!-- Fenster 1: Skizze mit Linien -->
   <div class="panel">
     <div class="panel-header">
-      <h2><span class="badge-num">1</span> Skizze (Bauteilachsen)</h2>
+      <h2><span class="badge-num">1</span> Skizze (Bauteilachsen, räumlich)</h2>
     </div>
     <div class="toolbar">
-      <button class="tool-btn" id="btnDraw" title="Linie zeichnen: Start klicken, Ende klicken">✏️ Linie zeichnen</button>
-      <button class="tool-btn" id="btnCalibrate" title="Maßstab per Referenzlinie festlegen">📏 Maßstab kalibrieren</button>
-      <button class="tool-btn" id="btnGrid" title="Raster ein/aus">▦ Raster</button>
-      <button class="tool-btn" id="btnAngleSnap" title="Winkelfang 15° ein/aus">∠ Winkelfang</button>
+      <button class="tool-btn active" id="btnDraw" title="Stab zeichnen: Anfangs- und Endpunkt auf der Arbeitsebene anklicken">✏️ Zeichnen</button>
+      <button class="tool-btn" id="btnOrbit" title="Modell drehen (auch jederzeit mit der rechten Maustaste)">⟳ Navigieren</button>
+      <span class="tool-group">
+        <label>Arbeitsebene</label>
+        <select id="planeAxis" title="Ebene, in der gezeichnet wird">
+          <option value="XY" selected>Ansicht X–Y (lotrecht)</option>
+          <option value="XZ">Grundriss X–Z (waagerecht)</option>
+          <option value="ZY">Seite Z–Y (lotrecht)</option>
+        </select>
+        <input type="number" id="planeOffset" step="0.5" value="0" title="Versatz der Arbeitsebene in Metern">
+      </span>
+      <span class="tool-group">
+        <label>Raster [m]</label>
+        <input type="number" id="gridStep" step="0.25" min="0.05" value="0.5" title="Fangraster auf der Arbeitsebene">
+      </span>
       <button class="tool-btn" id="btnSupport" title="Knoten anklicken: Festlager → Loslager → kein Lager">△ Auflager</button>
       <button class="tool-btn" id="btnLoad" title="Knoten anklicken und Knotenlast in kN eingeben">↓ Knotenlast</button>
       <button class="tool-btn primary" id="btnSolve" title="Stabkräfte aus Geometrie, Auflagern und Lasten berechnen">Σ Stabkräfte berechnen</button>
@@ -73,11 +86,11 @@
           <input type="number" id="gammaG" step="0.05" min="1" max="1.5" value="1.35" title="Teilsicherheitsbeiwert für ständige Einwirkungen nach DIN EN 1990">
         </span>
       </label>
-      <button class="tool-btn" id="btnExample" title="Beispiel-Fachwerkbinder laden">⌁ Beispiel laden</button>
-      <button class="tool-btn danger" id="btnClearAll" title="Skizze und Bauteile löschen">🗑 Alles löschen</button>
+      <button class="tool-btn" id="btnFit" title="Modell ins Bild einpassen">⤢ Einpassen</button>
+      <button class="tool-btn" id="btnExample" title="Beispiel laden">⌁ Beispiel</button>
+      <button class="tool-btn danger" id="btnClearAll" title="Modell vollständig löschen">🗑 Alles löschen</button>
     </div>
-    <div class="canvas-wrap">
-      <canvas id="sketchCanvas"></canvas>
+    <div class="canvas-wrap" id="sketchView">
       <div class="hint" id="hintBox"></div>
       <div class="scale-info" id="scaleInfo"></div>
     </div>
@@ -87,14 +100,36 @@
   <!-- Fenster 2: Passende Stahlform -->
   <div class="panel">
     <div class="panel-header">
-      <h2><span class="badge-num">2</span> Stahlbau-Ergebnis (Profilzuordnung)</h2>
+      <h2><span class="badge-num">2</span> Stahlbau-Modell und Profilzuordnung</h2>
       <div class="tab-switch">
-        <button class="tab-btn active" id="tabMembers">Bauteile</button>
+        <button class="tab-btn active" id="tabModel">3D-Modell</button>
+        <button class="tab-btn" id="tabMembers">Bauteile</button>
         <button class="tab-btn" id="tabNodes">Knoten / Anschlüsse</button>
         <button class="tab-btn" id="tabCutList">Stückliste</button>
       </div>
     </div>
-    <div class="result-panel-body" id="viewMembers">
+    <div class="result-panel-body no-pad" id="viewModel">
+      <div class="model-view" id="modelView">
+        <div class="model-legend">
+          <span><i class="swatch u1"></i> bis 60 %</span>
+          <span><i class="swatch u2"></i> bis 85 %</span>
+          <span><i class="swatch u3"></i> bis 100 %</span>
+          <span><i class="swatch u4"></i> über 100 %</span>
+        </div>
+        <div class="model-controls">
+          <label for="sectionScale">Querschnitt</label>
+          <select id="sectionScale" title="Nur die Querschnittsabmessungen werden überhöht, die Stablängen bleiben maßstäblich">
+            <option value="1" selected>maßstäblich 1:1</option>
+            <option value="2">2-fach überhöht</option>
+            <option value="4">4-fach überhöht</option>
+            <option value="8">8-fach überhöht</option>
+          </select>
+        </div>
+        <div class="scale-info" id="modelInfo">Profile nach Auslastung eingefärbt · Kamera folgt dem Skizzenfenster</div>
+      </div>
+    </div>
+
+    <div class="result-panel-body" id="viewMembers" hidden>
       <div class="empty-state" id="emptyState">Noch keine Linien gezeichnet. Zeichnen Sie links eine Bauteilachse (Stütze, Gurt, Strebe …) – die passende Stahlform erscheint hier automatisch.</div>
       <table class="members-table">
         <thead>
@@ -118,12 +153,13 @@
     </div>
 
     <div class="result-panel-body" id="viewNodes" hidden>
-      <p class="view-note">Anschlusskräfte je Knoten für die Werkstattzeichnung. Koordinaten bezogen auf den linken unteren Knoten des Systems (x nach rechts, z nach oben). Vorzeichen: + Zug, − Druck.</p>
+      <p class="view-note">Anschlusskräfte je Knoten für die Werkstattzeichnung. Koordinaten in Metern im Modellsystem (x nach rechts, y nach oben, z nach vorne). Vorzeichen: + Zug, − Druck.</p>
       <table class="members-table">
         <thead>
           <tr>
             <th>Knoten</th>
             <th>x [m]</th>
+            <th>y [m]</th>
             <th>z [m]</th>
             <th>Anschlüsse</th>
             <th>Stabkräfte [kN]</th>
@@ -282,7 +318,8 @@
       </ul>
     </div>
   </div>
-  <p class="basis-note">Profilkennwerte sind gerundete Katalogwerte für die Vorbemessung; für die
+  <p class="basis-note">Das Fachwerk wird eben oder räumlich gelöst: Liegen alle Knoten in einer Ebene,
+    gilt m + r = 2n, andernfalls m + r = 3n. Profilkennwerte sind gerundete Katalogwerte für die Vorbemessung; für die
     Ausführungsstatik sind die Werte der gültigen Normtabellen (DIN EN 10365, DIN EN 10210, DIN EN 10056)
     zu verwenden. Bei Doppelwinkeln ist als Knickachse i<sub>y</sub> des Einzelwinkels angesetzt, was
     ausreichende Bindebleche voraussetzt. Ein einziger Knicklängenbeiwert β wirkt auf die schwache Achse;
@@ -298,9 +335,10 @@
 </div>
 
 <script src="js/steel-database.js"></script>
+<script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>
-<script src="js/canvas-editor.js"></script>
+<script src="js/scene3d.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

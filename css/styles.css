@@ -184,17 +184,99 @@ button.tool-btn.danger:hover {
 .canvas-wrap {
   flex: 1;
   position: relative;
-  min-height: 420px;
+  min-height: 460px;
+  overflow: hidden;
 }
 
-#sketchCanvas {
+.canvas-wrap canvas, .model-view canvas {
   display: block;
   width: 100%;
   height: 100%;
-  cursor: crosshair;
+}
+
+.canvas-wrap { cursor: crosshair; }
+
+.model-view {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 460px;
+}
+
+.result-panel-body.no-pad { padding: 0; overflow: hidden; }
+
+.model-controls {
+  position: absolute;
+  top: 10px;
+  left: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 36, 56, 0.82);
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  color: #dce9f4;
+}
+
+.model-controls select {
+  font-size: 0.72rem;
+  padding: 2px 4px;
+  border: 1px solid #3d6a8f;
+  border-radius: 3px;
+  background: #16324a;
+  color: #dce9f4;
+}
+
+.model-legend {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: rgba(15, 36, 56, 0.82);
+  padding: 7px 10px;
+  border-radius: 4px;
+  font-size: 0.7rem;
+  color: #dce9f4;
+}
+
+.model-legend .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  margin-right: 5px;
+}
+
+.model-legend .swatch.u1 { background: #6f8ea8; }
+.model-legend .swatch.u2 { background: #3f9e63; }
+.model-legend .swatch.u3 { background: #e0a021; }
+.model-legend .swatch.u4 { background: #d1453b; }
+
+.tool-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 8px;
+  background: #fff;
+  font-size: 0.76rem;
+}
+
+.tool-group label { color: var(--text-muted); }
+.tool-group select { font-size: 0.76rem; padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px; }
+.tool-group input {
+  width: 62px; padding: 2px 4px; border: 1px solid var(--border); border-radius: 3px;
+  font-family: var(--font-data); font-size: 0.74rem;
 }
 
 .scale-info {
+  z-index: 2;
   font-family: var(--font-data);
   position: absolute;
   bottom: 8px;
@@ -207,6 +289,7 @@ button.tool-btn.danger:hover {
 }
 
 .hint {
+  z-index: 2;
   position: absolute;
   top: 8px;
   left: 12px;
