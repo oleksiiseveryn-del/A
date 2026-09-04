@@ -393,6 +393,9 @@
         </div>
       </div>
 
+      <div class="arch-actions">
+        <button class="tool-btn primary" id="btnSchalUebersicht" title="Grundriss aller Betonbauteile mit Positionen, Höhenkoten und Mengen">🧱 Schalplan-Übersicht</button>
+      </div>
       <h3 class="section-title">Betonbauteile</h3>
       <table class="members-table" id="betonTable">
         <thead>
@@ -412,12 +415,32 @@
             <th>Aushub [m³]</th>
             <th>Masse [t]</th>
             <th>Hinweis</th>
+            <th>Schalplan</th>
             <th></th>
           </tr>
         </thead>
         <tbody id="betonBody"></tbody>
       </table>
       <div class="empty-state" id="betonEmpty">Noch kein Betonbauteil gesetzt – links „▣ Betonteil“ wählen und auf der Arbeitsebene setzen.</div>
+
+      <h3 class="section-title">Schalungsliste</h3>
+      <p class="view-note">Schalflächen getrennt nach Seiten-, Decken- und Aussparungsschalung, weil sie unterschiedlich
+        kalkuliert und abgerechnet werden. Ausschalfristen, Schalungsdruck und die Standsicherheit der Schalung und ihrer
+        Unterstützung sind nach DIN EN 13670 mit DIN 1045-3 bzw. DIN EN 12812 gesondert festzulegen.</p>
+      <table class="members-table" id="schalungTable">
+        <thead>
+          <tr>
+            <th>Bauteil</th>
+            <th>Schalungsart</th>
+            <th>Fläche je Stück [m²]</th>
+            <th>Stück</th>
+            <th>Fläche gesamt [m²]</th>
+            <th>Schalungssystem</th>
+          </tr>
+        </thead>
+        <tbody id="schalungBody"></tbody>
+      </table>
+      <div class="empty-state" id="schalungEmpty">Keine Schalflächen – zuerst ein Betonbauteil anlegen.</div>
 
       <h3 class="section-title">Bewehrung je Bauteil</h3>
       <p class="view-note">Parametrisierte <strong>Regelbewehrung</strong> aus Durchmesser, Stababstand und Stabzahl:
@@ -678,6 +701,10 @@
           (α<sub>cc</sub> = 0,85, γ<sub>C</sub> = 1,50 nach NA); Abgleich der Festigkeitsklasse mit der
           Expositionsklasse nach DIN 1045-2. Die Werte der Betondeckung und der Mindestfestigkeitsklassen sind
           Richtwerte des Nationalen Anhangs und im Bauteil überschreibbar</li>
+        <li><strong>Schalung</strong>: Schalflächen getrennt nach Seiten-, Decken- und Aussparungsschalung aus der
+          Bauteilgeometrie; Schalplan je Bauteil mit Maßketten nach DIN 406-11, Höhenkoten über ±0,00, Aussparungen und
+          den Beton- und Schalungsangaben sowie Schalplan-Übersicht aller Bauteile im Grundriss (Darstellung nach
+          DIN 1356-1, Maßstäbe nach DIN ISO 5455). Maße sind Rohbaumaße ohne Toleranzen nach DIN 18202</li>
         <li><strong>Bewehrung</strong>: parametrisierte Regelbewehrung mit Stabanzahl n = Verteilbreite/e + 1,
           Stablängen aus den lichten Maßen abzüglich 2 · c<sub>nom</sub>, Endhaken 10 d<sub>s</sub>, Bügellänge
           2 · (b + h) + 2 Haken, Kreisbügel π · d + 2 Haken, Wendel aus Windungszahl und Steigung; Teilung langer Stäbe
@@ -720,7 +747,8 @@
           Mindest- und Höchstbewehrung nach Abs. 9, Verankerungs- und Übergreifungslängen nach Abs. 8.4 und 8.7,
           Bügelabstände aus der Querkraft- und Durchstanzbemessung, Zulagen, Steckeisen und die Bewehrungsführung
           an Rahmenecken und Auflagern sind vom Tragwerksplaner festzulegen und in prüffähigen Bewehrungsplänen
-          darzustellen</li>
+          darzustellen. Für die Schalung sind Ausschalfristen, Schalungsdruck, Standsicherheit und Unterstützung nach
+          DIN EN 13670 mit DIN 1045-3 und DIN EN 12812 sowie die Nachbehandlung des Betons gesondert festzulegen</li>
         <li><strong>Flächen und Rauminhalte:</strong> Zuordnung der Grundflächen zu den Bereichen a/b/c nach
           DIN 277-1 (überdeckt, nicht überdeckt), Brutto-Rauminhalt, Zuordnung zu Nutzungsgruppen NUF 1–7 sowie
           die Wohnfläche nach WoFlV § 4 mit den Anrechnungsfaktoren aus der lichten Raumhöhe (unter 1 m ohne
@@ -755,6 +783,7 @@
 <script src="js/floorplan.js"></script>
 <script src="js/concrete.js"></script>
 <script src="js/rebar.js"></script>
+<script src="js/formwork.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

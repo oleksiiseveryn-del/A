@@ -781,6 +781,9 @@ button.tool-btn.plain.active { background: var(--hsd-blue); color: #fff; border-
 #bewehrungTable .layer-cell { min-width: 300px; }
 #bewehrungTable .layer-row input[type="number"] { width: 52px; }
 #stahllisteTable td:nth-child(n+5):nth-child(-n+11) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
+#schalungTable td:nth-child(3),
+#schalungTable td:nth-child(4),
+#schalungTable td:nth-child(5) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
 #stahlauszugTable td { text-align: right; white-space: nowrap; font-family: var(--font-data); }
 #stahlauszugTable td:first-child { text-align: left; }
 .u-warn { color: var(--warn); font-weight: 600; }

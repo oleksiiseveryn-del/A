@@ -193,6 +193,7 @@ function betonGeometrie(element, arbeitsraum) {
       const b = wert("breite", 0.6), d = wert("dicke", 0.5);
       return {
         volumen: b * d * laenge, schalung: 2 * d * laenge,
+        schalungTeile: { seiten: 2 * d * laenge, boden: 0, aussparung: 0 },
         aushub: typ.erdreich ? (b + 2 * a) * (d + 0.05) * laenge : 0,
         grundflaeche: b * laenge, hoehe: d, laenge, breite: b, dicke: d,
         beschreibung: `L ${laenge.toFixed(2)} × b ${b.toFixed(2)} × d ${d.toFixed(2)} m`,
@@ -201,9 +202,12 @@ function betonGeometrie(element, arbeitsraum) {
     // Wand, Kellerwand, Unterzug: Querschnitt d/b × h entlang der Achse
     const d = wert("dicke", wert("breite", 0.24));
     const h = wert("hoehe", 2.75);
-    const schalung = element.kind === "unterzug" ? (2 * h + d) * laenge : 2 * h * laenge;
+    const seiten = 2 * h * laenge;
+    const boden = element.kind === "unterzug" ? d * laenge : 0;  // Untersicht des Balkens
+    const schalung = seiten + boden;
     return {
       volumen: d * h * laenge, schalung,
+      schalungTeile: { seiten, boden, aussparung: 0 },
       aushub: typ.erdreich ? (d + 2 * a) * h * laenge : 0,
       grundflaeche: d * laenge, hoehe: h, laenge, breite: d, dicke: d,
       beschreibung: `L ${laenge.toFixed(2)} × h ${h.toFixed(2)} × d ${d.toFixed(2)} m`,
@@ -218,6 +222,7 @@ function betonGeometrie(element, arbeitsraum) {
     return {
       volumen: lx * lz * d,
       schalung: typ.deckenschalung ? lx * lz + rand : rand,
+      schalungTeile: { seiten: rand, boden: typ.deckenschalung ? lx * lz : 0, aussparung: 0 },
       aushub: typ.erdreich ? (lx + 2 * a) * (lz + 2 * a) * (d + 0.05) : 0,
       grundflaeche: lx * lz, hoehe: d, laenge: lx, breite: lz, dicke: d,
       beschreibung: `${lx.toFixed(2)} × ${lz.toFixed(2)} × d ${d.toFixed(2)} m`,
@@ -229,7 +234,9 @@ function betonGeometrie(element, arbeitsraum) {
     const d = wert("durchmesser", 0.6), l = wert("laenge", 8);
     const flaeche = (Math.PI * d * d) / 4;
     return {
-      volumen: flaeche * l, schalung: 0, aushub: flaeche * l, // Bohrgut = verdrängtes Volumen
+      volumen: flaeche * l, schalung: 0, // verrohrt bzw. stützende Flüssigkeit, keine Schalung
+      schalungTeile: { seiten: 0, boden: 0, aussparung: 0 },
+      aushub: flaeche * l, // Bohrgut = verdrängtes Volumen
       grundflaeche: flaeche, hoehe: l, laenge: d, breite: d, dicke: d,
       beschreibung: `⌀ ${d.toFixed(2)} × L ${l.toFixed(2)} m`,
     };
@@ -239,6 +246,7 @@ function betonGeometrie(element, arbeitsraum) {
     const flaeche = (Math.PI * d * d) / 4;
     return {
       volumen: flaeche * h, schalung: Math.PI * d * h, aushub: 0,
+      schalungTeile: { seiten: Math.PI * d * h, boden: 0, aussparung: 0 },
       grundflaeche: flaeche, hoehe: h, laenge: d, breite: d, dicke: d,
       beschreibung: `⌀ ${d.toFixed(2)} × h ${h.toFixed(2)} m`,
     };
@@ -247,6 +255,7 @@ function betonGeometrie(element, arbeitsraum) {
     const la = wert("laenge", 0.3), b = wert("breite", 0.3), h = wert("hoehe", 3);
     return {
       volumen: la * b * h, schalung: 2 * (la + b) * h, aushub: 0,
+      schalungTeile: { seiten: 2 * (la + b) * h, boden: 0, aussparung: 0 },
       grundflaeche: la * b, hoehe: h, laenge: la, breite: b, dicke: Math.min(la, b),
       beschreibung: `${la.toFixed(2)} × ${b.toFixed(2)} × h ${h.toFixed(2)} m`,
     };
@@ -260,6 +269,7 @@ function betonGeometrie(element, arbeitsraum) {
     return {
       volumen: Math.max(la * b * d - koecher, 0),
       schalung: 2 * (la + b) * d + 2 * (kl + kb) * kt,
+      schalungTeile: { seiten: 2 * (la + b) * d, boden: 0, aussparung: 2 * (kl + kb) * kt },
       aushub: (la + 2 * a) * (b + 2 * a) * (d + 0.05),
       grundflaeche: la * b, hoehe: d, laenge: la, breite: b, dicke: d,
       koecher: { l: kl, b: kb, t: kt, volumen: koecher },
@@ -270,6 +280,7 @@ function betonGeometrie(element, arbeitsraum) {
   const la = wert("laenge", 1.5), b = wert("breite", 1.5), d = wert("dicke", 0.6);
   return {
     volumen: la * b * d, schalung: 2 * (la + b) * d,
+    schalungTeile: { seiten: 2 * (la + b) * d, boden: 0, aussparung: 0 },
     aushub: (la + 2 * a) * (b + 2 * a) * (d + 0.05),
     grundflaeche: la * b, hoehe: d, laenge: la, breite: b, dicke: d,
     beschreibung: `${la.toFixed(2)} × ${b.toFixed(2)} × d ${d.toFixed(2)} m`,

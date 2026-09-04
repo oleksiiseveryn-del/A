@@ -1008,12 +1008,15 @@
     zeichneBewehrungsplan(ids[((i < 0 ? 0 : i + schritt) + ids.length) % ids.length]);
   }
 
-  document.getElementById("sheetPrev").addEventListener("click", () => {
-    if (sheetArt === "bewehrung") blaettereBewehrung(-1); else zeichneAnsicht(sheetIndex - 1);
-  });
-  document.getElementById("sheetNext").addEventListener("click", () => {
-    if (sheetArt === "bewehrung") blaettereBewehrung(1); else zeichneAnsicht(sheetIndex + 1);
-  });
+  /** Blättern im Blattfenster je nach gezeigter Zeichnungsart. */
+  function blaettereBlatt(schritt) {
+    if (sheetArt === "bewehrung") blaettereBewehrung(schritt);
+    else if (sheetArt === "schalung") blaettereSchalplan(schritt);
+    else if (sheetArt === "ansicht") zeichneAnsicht(sheetIndex + schritt);
+  }
+
+  document.getElementById("sheetPrev").addEventListener("click", () => blaettereBlatt(-1));
+  document.getElementById("sheetNext").addEventListener("click", () => blaettereBlatt(1));
   document.getElementById("sheetClose").addEventListener("click", () => {
     document.getElementById("sheetOverlay").hidden = true;
   });
@@ -1035,6 +1038,15 @@
       saveFile(`Bewehrungsplan_${name}_${beton ? betonBezeichnung(beton) : "Bauteil"}.svg`, inhalt, "image/svg+xml");
       return;
     }
+    if (sheetArt === "schalung") {
+      const beton = model.beton.get(schalplanId);
+      saveFile(`Schalplan_${name}_${beton ? betonBezeichnung(beton) : "Bauteil"}.svg`, inhalt, "image/svg+xml");
+      return;
+    }
+    if (sheetArt === "schaluebersicht") {
+      saveFile(`Schalplan_Uebersicht_${name}.svg`, inhalt, "image/svg+xml");
+      return;
+    }
     const element = ansichtsWaende()[sheetIndex];
     if (!element) return;
     saveFile(`Ansicht_${name}_${bauteilBezeichnung(element)}.svg`, inhalt, "image/svg+xml");
@@ -1042,14 +1054,8 @@
   window.addEventListener("keydown", (e) => {
     if (document.getElementById("sheetOverlay").hidden) return;
     if (e.key === "Escape") document.getElementById("sheetOverlay").hidden = true;
-    if (sheetArt === "bewehrung") {
-      if (e.key === "ArrowLeft") blaettereBewehrung(-1);
-      if (e.key === "ArrowRight") blaettereBewehrung(1);
-      return;
-    }
-    if (sheetArt !== "ansicht") return;
-    if (e.key === "ArrowLeft") zeichneAnsicht(sheetIndex - 1);
-    if (e.key === "ArrowRight") zeichneAnsicht(sheetIndex + 1);
+    if (e.key === "ArrowLeft") blaettereBlatt(-1);
+    if (e.key === "ArrowRight") blaettereBlatt(1);
   });
 
 
@@ -1359,10 +1365,12 @@
         <td>${a.aushub > 0 ? a.aushub.toFixed(2) : "–"}</td>
         <td>${(a.masse / 1000).toFixed(2)}</td>
         <td class="cut-labels">${hinweise.map((h) => (a.warnungen.indexOf(h) >= 0 ? `<span class="cut-warning">${h}</span>` : h)).join(" ")}</td>
+        <td><button class="tool-btn plain" data-schal="${element.id}" title="Schalplan mit Maßketten, Höhenkoten und Schalflächen">🧱 Plan</button></td>
         <td><button class="row-remove" data-remove-bt="${element.id}" title="Betonbauteil löschen">✕</button></td>`;
       body.appendChild(tr);
     });
 
+    renderSchalungsliste();
     renderBewehrungTable();
     renderStahlliste();
     renderBetonKosten();
@@ -1604,9 +1612,111 @@
   });
 
   document.getElementById("betonBody").addEventListener("click", (e) => {
+    const plan = e.target.getAttribute("data-schal");
+    if (plan) { zeichneSchalplan(parseInt(plan, 10)); return; }
     const id = e.target.getAttribute("data-remove-bt");
     if (id) { model.beton.delete(parseInt(id, 10)); refreshAll(); }
   });
+
+  /* ------------------------------------------------------------ Schalung */
+
+  function renderSchalungsliste() {
+    const body = document.getElementById("schalungBody");
+    const empty = document.getElementById("schalungEmpty");
+    body.innerHTML = "";
+    const auf = schalungsAufstellung(Array.from(model.beton.values()), arbeitsraumWert(), betonGeometrie, betonBezeichnung);
+    empty.hidden = auf.zeilen.length > 0;
+
+    auf.zeilen.forEach((z) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${z.bauteil}</td>
+        <td>${z.artName}</td>
+        <td>${z.einzel.toFixed(2)}</td>
+        <td>${z.anzahl}</td>
+        <td><strong>${z.flaeche.toFixed(2)}</strong></td>
+        <td class="cut-labels">${z.system}</td>`;
+      body.appendChild(tr);
+    });
+
+    if (auf.zeilen.length) {
+      Object.keys(SCHALUNGSARTEN).forEach((art) => {
+        if (auf.jeArt[art] <= 0) return;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td></td><td><strong>Summe ${SCHALUNGSARTEN[art].name}</strong></td><td></td><td></td>
+          <td><strong>${auf.jeArt[art].toFixed(2)}</strong></td><td class="cut-labels">${SCHALUNGSARTEN[art].beschreibung}</td>`;
+        body.appendChild(tr);
+      });
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td></td><td><strong>Schalfläche gesamt</strong></td><td></td><td></td>
+        <td><strong>${auf.gesamt.toFixed(2)}</strong></td><td></td>`;
+      body.appendChild(tr);
+    }
+  }
+
+  /** Schalplan eines einzelnen Bauteils. */
+  function zeichneSchalplan(elementId) {
+    const element = model.beton.get(elementId);
+    if (!element) return;
+    const typ = BETONTEILTYPEN[element.kind];
+    const geo = betonGeometrie(element, arbeitsraumWert());
+
+    const svg = schalplanSVG({
+      element, geo, deckung: betondeckung(element),
+      bezeichnung: betonBezeichnung(element), typName: typ.name,
+      auswertung: betonWertung(element),
+      projekt: {
+        name: document.getElementById("projectName").value,
+        datum: document.getElementById("projectDate").value,
+        bearbeiter: "Oleksii Severyn",
+      },
+    });
+
+    sheetArt = "schalung";
+    schalplanId = elementId;
+    document.getElementById("sheetBody").innerHTML = svg;
+    document.getElementById("sheetTitle").textContent = `Schalplan ${betonBezeichnung(element)} · ${typ.name}`;
+    const ids = Array.from(model.beton.keys());
+    document.getElementById("sheetCounter").textContent = `${ids.indexOf(elementId) + 1} / ${ids.length}`;
+    document.getElementById("sheetOverlay").hidden = false;
+  }
+
+  let schalplanId = null;
+
+  /** Blättern zwischen den Schalplänen. */
+  function blaettereSchalplan(schritt) {
+    const ids = Array.from(model.beton.keys());
+    if (!ids.length) return;
+    const i = ids.indexOf(schalplanId);
+    zeichneSchalplan(ids[((i < 0 ? 0 : i + schritt) + ids.length) % ids.length]);
+  }
+
+  /** Übersichtsplan aller Betonbauteile im Grundriss. */
+  function zeichneSchalUebersicht() {
+    if (!model.beton.size) {
+      setStatus("Für den Schalplan zuerst Betonbauteile setzen.", "error");
+      return;
+    }
+    const svg = schalungsUebersichtSVG({
+      elemente: Array.from(model.beton.values()),
+      geometrieVon: betonGeometrie,
+      bezeichnungVon: betonBezeichnung,
+      arbeitsraum: arbeitsraumWert(),
+      projekt: {
+        name: document.getElementById("projectName").value,
+        datum: document.getElementById("projectDate").value,
+        bearbeiter: "Oleksii Severyn",
+      },
+    });
+    sheetArt = "schaluebersicht";
+    document.getElementById("sheetBody").innerHTML = svg;
+    document.getElementById("sheetTitle").textContent = "Schalplan-Übersicht";
+    document.getElementById("sheetCounter").textContent =
+      `${model.beton.size} ${model.beton.size === 1 ? "Bauteil" : "Bauteile"}`;
+    document.getElementById("sheetOverlay").hidden = false;
+  }
+
+  document.getElementById("btnSchalUebersicht").addEventListener("click", zeichneSchalUebersicht);
 
   ["arbeitsraum", "preisBeton", "preisSchalung", "preisBewehrung", "preisAushub"].forEach((id) => {
     document.getElementById(id).addEventListener("change", refreshAll);
@@ -2332,6 +2442,20 @@
           a.volumen.toFixed(2), a.schalung.toFixed(2), a.bewehrungsgrad, a.bewehrung.toFixed(0),
           a.aushub.toFixed(2), (a.masse / 1000).toFixed(2), a.warnungen.join(" ")]);
       });
+
+      const schal = schalungsAufstellung(Array.from(model.beton.values()), raum, betonGeometrie, betonBezeichnung);
+      if (schal.zeilen.length) {
+        rows.push([]);
+        rows.push(["Schalungsliste (Schalflächen nach Art getrennt)"]);
+        rows.push(["Bauteil", "Schalungsart", "Fläche je Stück [m²]", "Stück", "Fläche gesamt [m²]", "Schalungssystem"]);
+        schal.zeilen.forEach((z) => {
+          rows.push([z.bauteil, z.artName, z.einzel.toFixed(2), z.anzahl, z.flaeche.toFixed(2), z.system]);
+        });
+        Object.keys(SCHALUNGSARTEN).forEach((art) => {
+          if (schal.jeArt[art] > 0) rows.push(["", "Summe " + SCHALUNGSARTEN[art].name, "", "", schal.jeArt[art].toFixed(2), ""]);
+        });
+        rows.push(["", "Schalfläche gesamt", "", "", schal.gesamt.toFixed(2), ""]);
+      }
 
       const liste = gesamteStahlliste();
       if (liste.zeilen.length) {
