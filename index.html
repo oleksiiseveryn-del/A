@@ -419,6 +419,91 @@
       </table>
       <div class="empty-state" id="betonEmpty">Noch kein Betonbauteil gesetzt – links „▣ Betonteil“ wählen und auf der Arbeitsebene setzen.</div>
 
+      <h3 class="section-title">Bewehrung je Bauteil</h3>
+      <p class="view-note">Parametrisierte <strong>Regelbewehrung</strong> aus Durchmesser, Stababstand und Stabzahl:
+        Stabanzahl n = Verteilbreite / e + 1, Stablänge = lichtes Maß abzüglich zweifacher Betondeckung, Endhaken 10 d<sub>s</sub>,
+        Biegerollendurchmesser nach DIN EN 1992-1-1 Tab. 8.1N. Stäbe über der Lieferlänge werden mit Übergreifungsstoß
+        geteilt. <strong>Das ist keine Bemessung</strong> – die erforderliche Bewehrung aus Biegung, Querkraft, Durchstanzen
+        und Rissbreitenbeschränkung sowie die Verankerungs- und Übergreifungslängen nach DIN EN 1992-1-1 Abs. 8 und 9
+        weist der Tragwerksplaner nach.</p>
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="lieferlaenge">Lieferlänge [m]</label>
+          <input type="number" id="lieferlaenge" step="0.5" min="2" value="12" title="Längere Stäbe werden mit Übergreifungsstoß geteilt">
+        </div>
+        <div class="field">
+          <label for="stossFaktor">Stoßlänge l₀ = x · d<sub>s</sub></label>
+          <input type="number" id="stossFaktor" step="5" min="10" value="50" title="Richtwert; maßgebend ist die Übergreifungslänge nach DIN EN 1992-1-1 Abs. 8.7.3">
+        </div>
+        <div class="field">
+          <label for="hakenAktiv">Endhaken</label>
+          <select id="hakenAktiv" title="Gerade Stäbe in Platten und Fundamenten mit Endhaken 10 ds">
+            <option value="ja" selected>mit Endhaken 10 d_s</option>
+            <option value="nein">ohne Endhaken</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="stahllisteKosten">Kostenansatz Betonstahl</label>
+          <select id="stahllisteKosten" title="Grundlage der Kostenzeile Betonstahl">
+            <option value="grad" selected>Bewehrungsgrad [kg/m³]</option>
+            <option value="liste">Stahlliste</option>
+          </select>
+        </div>
+      </div>
+      <table class="members-table" id="bewehrungTable">
+        <thead>
+          <tr>
+            <th>Bauteil</th>
+            <th>Typ</th>
+            <th>Bewehrungsparameter</th>
+            <th>Positionen</th>
+            <th>Betonstahl [kg]</th>
+            <th>kg/m³</th>
+            <th>Ansatz [kg/m³]</th>
+            <th>Plan</th>
+          </tr>
+        </thead>
+        <tbody id="bewehrungBody"></tbody>
+      </table>
+      <div class="empty-state" id="bewehrungEmpty">Noch kein Betonbauteil vorhanden.</div>
+
+      <h3 class="section-title">Stahlliste (Betonstahl B500B nach DIN 488)</h3>
+      <table class="members-table" id="stahllisteTable">
+        <thead>
+          <tr>
+            <th>Bauteil</th>
+            <th>Pos</th>
+            <th>Bezeichnung</th>
+            <th>Biegeform</th>
+            <th>⌀ [mm]</th>
+            <th>Anzahl</th>
+            <th>Einzellänge [m]</th>
+            <th>Gesamtlänge [m]</th>
+            <th>kg/m</th>
+            <th>Masse [kg]</th>
+            <th>D<sub>br</sub> [mm]</th>
+            <th>Bemerkung</th>
+          </tr>
+        </thead>
+        <tbody id="stahllisteBody"></tbody>
+      </table>
+      <div class="empty-state" id="stahllisteEmpty">Keine Bewehrungspositionen – zuerst ein Betonbauteil anlegen.</div>
+
+      <h3 class="section-title">Stahlauszug nach Durchmessern</h3>
+      <table class="members-table" id="stahlauszugTable">
+        <thead>
+          <tr>
+            <th>⌀ [mm]</th>
+            <th>Querschnitt [cm²]</th>
+            <th>Stück</th>
+            <th>Gesamtlänge [m]</th>
+            <th>kg/m</th>
+            <th>Masse [kg]</th>
+          </tr>
+        </thead>
+        <tbody id="stahlauszugBody"></tbody>
+      </table>
+
       <h3 class="section-title">Mengen und Kosten Betonbau</h3>
       <table class="members-table" id="betonKostenTable">
         <thead>
@@ -593,6 +678,12 @@
           (α<sub>cc</sub> = 0,85, γ<sub>C</sub> = 1,50 nach NA); Abgleich der Festigkeitsklasse mit der
           Expositionsklasse nach DIN 1045-2. Die Werte der Betondeckung und der Mindestfestigkeitsklassen sind
           Richtwerte des Nationalen Anhangs und im Bauteil überschreibbar</li>
+        <li><strong>Bewehrung</strong>: parametrisierte Regelbewehrung mit Stabanzahl n = Verteilbreite/e + 1,
+          Stablängen aus den lichten Maßen abzüglich 2 · c<sub>nom</sub>, Endhaken 10 d<sub>s</sub>, Bügellänge
+          2 · (b + h) + 2 Haken, Kreisbügel π · d + 2 Haken, Wendel aus Windungszahl und Steigung; Teilung langer Stäbe
+          mit Übergreifungsstoß l<sub>0</sub> = x · d<sub>s</sub> (Richtwert). Massen nach DIN 488-1/-2
+          (m = π/4 · d<sub>s</sub>² · 7850 kg/m³), Biegerollendurchmesser nach DIN EN 1992-1-1 Tab. 8.1N,
+          Darstellung nach DIN 1356-1 und DIN EN ISO 3766. Stahlliste und Stahlauszug nach Durchmessern</li>
         <li><strong>Raumflächen</strong> nach DIN 277-1: lichte Maße in Höhe der Fußbodenoberkante durch Versatz
           der Wandachsen um die halbe Wanddicke; Netto-Raumfläche NRF = lichte Fläche − Konstruktionsflächen
           (Stützen, Pfeiler, Vorlagen, Schächte, Schornsteine) + Nischen bis zum Fußboden. Wahlweise mit den
@@ -624,7 +715,12 @@
           Übergreifungslängen, Mindest- und Höchstbewehrung, Fugen und Arbeitsfugen. Für die Gründung zusätzlich der
           Grundbruch-, Gleit- und Setzungsnachweis nach DIN EN 1997-1 mit DIN 1054, für Bohrpfähle die Herstellung
           nach DIN EN 1536 und die Pfahltragfähigkeit nach EA-Pfähle; Baugrubenböschungen und Verbau nach DIN 4124.
-          Der Bewehrungsgrad ist ein Erfahrungswert der Kostenschätzung und keine Bewehrungsermittlung</li>
+          Der Bewehrungsgrad ist ein Erfahrungswert der Kostenschätzung und keine Bewehrungsermittlung.
+          Die <strong>Regelbewehrung ist keine Bemessung</strong>: erforderliche Bewehrungsquerschnitte,
+          Mindest- und Höchstbewehrung nach Abs. 9, Verankerungs- und Übergreifungslängen nach Abs. 8.4 und 8.7,
+          Bügelabstände aus der Querkraft- und Durchstanzbemessung, Zulagen, Steckeisen und die Bewehrungsführung
+          an Rahmenecken und Auflagern sind vom Tragwerksplaner festzulegen und in prüffähigen Bewehrungsplänen
+          darzustellen</li>
         <li><strong>Flächen und Rauminhalte:</strong> Zuordnung der Grundflächen zu den Bereichen a/b/c nach
           DIN 277-1 (überdeckt, nicht überdeckt), Brutto-Rauminhalt, Zuordnung zu Nutzungsgruppen NUF 1–7 sowie
           die Wohnfläche nach WoFlV § 4 mit den Anrechnungsfaktoren aus der lichten Raumhöhe (unter 1 m ohne
@@ -658,6 +754,7 @@
 <script src="js/elevation.js"></script>
 <script src="js/floorplan.js"></script>
 <script src="js/concrete.js"></script>
+<script src="js/rebar.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

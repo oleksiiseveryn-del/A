@@ -777,6 +777,14 @@ button.tool-btn.plain.active { background: var(--hsd-blue); color: #fff; border-
 #betonTable .layer-row input { width: 56px; }
 #betonTable select { max-width: 155px; }
 #betonTable td:nth-child(15) { min-width: 170px; }
+#bewehrungTable td:nth-child(n+5):nth-child(-n+7) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
+#bewehrungTable .layer-cell { min-width: 300px; }
+#bewehrungTable .layer-row input[type="number"] { width: 52px; }
+#stahllisteTable td:nth-child(n+5):nth-child(-n+11) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
+#stahlauszugTable td { text-align: right; white-space: nowrap; font-family: var(--font-data); }
+#stahlauszugTable td:first-child { text-align: left; }
+.u-warn { color: var(--warn); font-weight: 600; }
+
 #betonKostenTable td:nth-child(2),
 #betonKostenTable td:nth-child(4),
 #betonKostenTable td:nth-child(5) { text-align: right; font-family: var(--font-data); white-space: nowrap; }

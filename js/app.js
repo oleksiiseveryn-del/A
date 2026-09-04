@@ -1000,8 +1000,20 @@
 
   document.getElementById("btnGrundriss").addEventListener("click", zeichneGrundriss);
 
-  document.getElementById("sheetPrev").addEventListener("click", () => zeichneAnsicht(sheetIndex - 1));
-  document.getElementById("sheetNext").addEventListener("click", () => zeichneAnsicht(sheetIndex + 1));
+  /** Nächster bzw. vorheriger Bewehrungsplan in der Reihenfolge der Bauteile. */
+  function blaettereBewehrung(schritt) {
+    const ids = Array.from(model.beton.keys());
+    if (!ids.length) return;
+    const i = ids.indexOf(bewehrungsplanId);
+    zeichneBewehrungsplan(ids[((i < 0 ? 0 : i + schritt) + ids.length) % ids.length]);
+  }
+
+  document.getElementById("sheetPrev").addEventListener("click", () => {
+    if (sheetArt === "bewehrung") blaettereBewehrung(-1); else zeichneAnsicht(sheetIndex - 1);
+  });
+  document.getElementById("sheetNext").addEventListener("click", () => {
+    if (sheetArt === "bewehrung") blaettereBewehrung(1); else zeichneAnsicht(sheetIndex + 1);
+  });
   document.getElementById("sheetClose").addEventListener("click", () => {
     document.getElementById("sheetOverlay").hidden = true;
   });
@@ -1018,6 +1030,11 @@
       saveFile(`Grundriss_${name}.svg`, inhalt, "image/svg+xml");
       return;
     }
+    if (sheetArt === "bewehrung") {
+      const beton = model.beton.get(bewehrungsplanId);
+      saveFile(`Bewehrungsplan_${name}_${beton ? betonBezeichnung(beton) : "Bauteil"}.svg`, inhalt, "image/svg+xml");
+      return;
+    }
     const element = ansichtsWaende()[sheetIndex];
     if (!element) return;
     saveFile(`Ansicht_${name}_${bauteilBezeichnung(element)}.svg`, inhalt, "image/svg+xml");
@@ -1025,6 +1042,11 @@
   window.addEventListener("keydown", (e) => {
     if (document.getElementById("sheetOverlay").hidden) return;
     if (e.key === "Escape") document.getElementById("sheetOverlay").hidden = true;
+    if (sheetArt === "bewehrung") {
+      if (e.key === "ArrowLeft") blaettereBewehrung(-1);
+      if (e.key === "ArrowRight") blaettereBewehrung(1);
+      return;
+    }
     if (sheetArt !== "ansicht") return;
     if (e.key === "ArrowLeft") zeichneAnsicht(sheetIndex - 1);
     if (e.key === "ArrowRight") zeichneAnsicht(sheetIndex + 1);
@@ -1341,13 +1363,200 @@
       body.appendChild(tr);
     });
 
+    renderBewehrungTable();
+    renderStahlliste();
     renderBetonKosten();
   }
+
+  /* ------------------------------------------------------------ Bewehrung */
+
+  /** Allgemeine Bewehrungsvorgaben aus den Eingabefeldern. */
+  function bewehrungVorgabe() {
+    const zahl = (id, fallback) => {
+      const v = parseFloat(document.getElementById(id).value);
+      return Number.isFinite(v) && v > 0 ? v : fallback;
+    };
+    return {
+      lieferlaenge: zahl("lieferlaenge", BEWEHRUNG_VORGABE.lieferlaenge),
+      stossFaktor: zahl("stossFaktor", BEWEHRUNG_VORGABE.stossFaktor),
+      haken: document.getElementById("hakenAktiv").value !== "nein",
+    };
+  }
+
+  /** Bewehrung eines Bauteils: Positionen, Ansichten und Hinweise. */
+  function bewehrungVon(element) {
+    const geo = betonGeometrie(element, arbeitsraumWert());
+    const deckung = betondeckung(element);
+    const b = bewehrungPositionen(element, geo, deckung, bewehrungVorgabe());
+    return { geo, deckung, positionen: b.positionen, hinweise: b.hinweise, parameter: b.parameter };
+  }
+
+  /** Stahlliste über alle Betonbauteile. */
+  function gesamteStahlliste() {
+    const eintraege = [];
+    model.beton.forEach((element) => {
+      const b = bewehrungVon(element);
+      eintraege.push({ bauteil: betonBezeichnung(element), anzahlBauteile: element.anzahl || 1, positionen: b.positionen });
+    });
+    return stahlliste(eintraege);
+  }
+
+  function renderBewehrungTable() {
+    const body = document.getElementById("bewehrungBody");
+    const empty = document.getElementById("bewehrungEmpty");
+    body.innerHTML = "";
+    empty.hidden = model.beton.size > 0;
+
+    model.beton.forEach((element) => {
+      const typ = BETONTEILTYPEN[element.kind];
+      const b = bewehrungVon(element);
+      const liste = stahlliste([{ bauteil: betonBezeichnung(element), anzahlBauteile: element.anzahl || 1, positionen: b.positionen }]);
+      const volumen = b.geo.volumen * Math.max(1, element.anzahl || 1);
+      const istGrad = volumen > 0 ? liste.gesamtMasse / volumen : 0;
+      const ansatz = Number.isFinite(element.bewehrungsgrad) ? element.bewehrungsgrad : typ.bewehrung;
+
+      const felder = Object.keys(BEWEHRUNG_STANDARD[element.kind] || {}).map((f) => {
+        const wert = b.parameter[f];
+        if (f === "obenAktiv") {
+          return `<span class="layer-row"><label class="masse-label">${bewehrungFeldName(element.kind, f)}</label>
+            <input type="checkbox" data-bw="${element.id}" data-feld="${f}" ${wert ? "checked" : ""}></span>`;
+        }
+        return `<span class="layer-row"><label class="masse-label">${bewehrungFeldName(element.kind, f)}</label>
+          <input type="number" step="${f.indexOf("ds") === 0 ? 2 : f.indexOf("n") === 0 ? 1 : 10}" min="1" data-bw="${element.id}" data-feld="${f}" value="${wert}"></span>`;
+      }).join("");
+
+      const positionen = b.positionen.map((pos) => `${pos.nr}. ${pos.anzahl}⌀${pos.ds}`).join(" · ");
+      const abweichung = ansatz > 0 ? istGrad / ansatz : 1;
+      const klasse = abweichung > 1.15 ? "u-fail" : abweichung < 0.6 ? "u-warn" : "u-ok";
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${betonBezeichnung(element)}</td>
+        <td>${typ.name}</td>
+        <td class="layer-cell">${felder}</td>
+        <td class="cut-labels">${positionen}</td>
+        <td><strong>${liste.gesamtMasse.toFixed(0)}</strong></td>
+        <td class="${klasse}">${istGrad.toFixed(0)}</td>
+        <td>${ansatz}</td>
+        <td><button class="tool-btn plain" data-plan="${element.id}" title="Bewehrungsplan mit Stahlliste">📐 Plan</button></td>`;
+      body.appendChild(tr);
+    });
+  }
+
+  function renderStahlliste() {
+    const body = document.getElementById("stahllisteBody");
+    const empty = document.getElementById("stahllisteEmpty");
+    body.innerHTML = "";
+    const liste = gesamteStahlliste();
+    empty.hidden = liste.zeilen.length > 0;
+
+    liste.zeilen.forEach((z) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${z.bauteil}</td>
+        <td>${z.pos}</td>
+        <td>${z.name}</td>
+        <td>${z.formName}</td>
+        <td>${z.ds}</td>
+        <td>${z.anzahl}</td>
+        <td>${z.einzelLaenge.toFixed(2)}</td>
+        <td>${z.gesamtLaenge.toFixed(2)}</td>
+        <td>${z.masseJeMeter.toFixed(3)}</td>
+        <td><strong>${z.masse.toFixed(1)}</strong></td>
+        <td>${z.biegerolle}</td>
+        <td class="cut-labels">${z.bemerkung || "–"}</td>`;
+      body.appendChild(tr);
+    });
+
+    if (liste.zeilen.length) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td colspan="9"><strong>Summe Betonstahl B500B</strong></td>
+        <td><strong>${liste.gesamtMasse.toFixed(1)}</strong></td><td></td><td></td>`;
+      body.appendChild(tr);
+    }
+
+    const auszug = document.getElementById("stahlauszugBody");
+    auszug.innerHTML = "";
+    liste.jeDurchmesser.forEach((e) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>⌀ ${e.ds}</td>
+        <td>${stabFlaeche(e.ds).toFixed(2)}</td>
+        <td>${e.stueck}</td>
+        <td>${e.laenge.toFixed(2)}</td>
+        <td>${stabMasse(e.ds).toFixed(3)}</td>
+        <td><strong>${e.masse.toFixed(1)}</strong></td>`;
+      auszug.appendChild(tr);
+    });
+    if (liste.jeDurchmesser.length) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td colspan="5"><strong>Summe</strong></td><td><strong>${liste.gesamtMasse.toFixed(1)} kg = ${(liste.gesamtMasse / 1000).toFixed(3)} t</strong></td>`;
+      auszug.appendChild(tr);
+    }
+  }
+
+  /** Masse des Betonstahls für den Kostenansatz, je nach gewählter Grundlage. */
+  function stahlKostenMasse() {
+    if (document.getElementById("stahllisteKosten").value !== "liste") return null;
+    return gesamteStahlliste().gesamtMasse;
+  }
+
+  function zeichneBewehrungsplan(elementId) {
+    const element = model.beton.get(elementId);
+    if (!element) return;
+    const typ = BETONTEILTYPEN[element.kind];
+    const b = bewehrungVon(element);
+    const ansichten = bewehrungAnsichten(element, b.geo, b.deckung, b.positionen);
+
+    const svg = bewehrungsplanSVG({
+      element, geo: b.geo, deckung: b.deckung,
+      bezeichnung: betonBezeichnung(element), typName: typ.name,
+      positionen: b.positionen, ansichten, hinweise: b.hinweise,
+      guete: element.guete, expo: element.expo,
+      volumen: b.geo.volumen * Math.max(1, element.anzahl || 1),
+      projekt: {
+        name: document.getElementById("projectName").value,
+        datum: document.getElementById("projectDate").value,
+        bearbeiter: "Oleksii Severyn",
+      },
+    });
+
+    sheetArt = "bewehrung";
+    bewehrungsplanId = elementId;
+    document.getElementById("sheetBody").innerHTML = svg;
+    document.getElementById("sheetTitle").textContent = `Bewehrungsplan ${betonBezeichnung(element)} · ${typ.name}`;
+    const ids = Array.from(model.beton.keys());
+    document.getElementById("sheetCounter").textContent = `${ids.indexOf(elementId) + 1} / ${ids.length}`;
+    document.getElementById("sheetOverlay").hidden = false;
+  }
+
+  let bewehrungsplanId = null;
+
+  document.getElementById("bewehrungBody").addEventListener("click", (e) => {
+    const id = e.target.getAttribute("data-plan");
+    if (id) zeichneBewehrungsplan(parseInt(id, 10));
+  });
+
+  document.getElementById("bewehrungBody").addEventListener("change", (e) => {
+    const id = parseInt(e.target.getAttribute("data-bw"), 10);
+    if (!id) return;
+    const element = model.beton.get(id);
+    if (!element) return;
+    const feld = e.target.getAttribute("data-feld");
+    if (!element.bewehrung) element.bewehrung = {};
+    if (feld === "obenAktiv") element.bewehrung.obenAktiv = e.target.checked;
+    else element.bewehrung[feld] = Math.max(1, parseFloat(e.target.value) || 1);
+    refreshAll();
+  });
+
+  ["lieferlaenge", "stossFaktor", "hakenAktiv", "stahllisteKosten"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", refreshAll);
+  });
 
   function renderBetonKosten() {
     const body = document.getElementById("betonKostenBody");
     body.innerHTML = "";
-    const positionen = betonAufstellung(Array.from(model.beton.values()), betonPreise(), arbeitsraumWert());
+    const positionen = betonAufstellung(Array.from(model.beton.values()), betonPreise(), arbeitsraumWert(), stahlKostenMasse());
     positionen.forEach((pos) => {
       const tr = document.createElement("tr");
       tr.innerHTML = `
@@ -1365,7 +1574,7 @@
   }
 
   function betonKosten() {
-    return betonAufstellung(Array.from(model.beton.values()), betonPreise(), arbeitsraumWert())
+    return betonAufstellung(Array.from(model.beton.values()), betonPreise(), arbeitsraumWert(), stahlKostenMasse())
       .reduce((s, p) => s + p.kosten, 0);
   }
 
@@ -1849,7 +2058,8 @@
       betonbau: {
         arbeitsraum: field("arbeitsraum"), preisBeton: field("preisBeton"),
         preisSchalung: field("preisSchalung"), preisBewehrung: field("preisBewehrung"),
-        preisAushub: field("preisAushub"),
+        preisAushub: field("preisAushub"), lieferlaenge: field("lieferlaenge"),
+        stossFaktor: field("stossFaktor"), haken: field("hakenAktiv"), stahlKosten: field("stahllisteKosten"),
       },
       flaechenregel: {
         regel: field("abzugRegel"), mindestFlaeche: field("grenzFlaeche"),
@@ -1905,6 +2115,10 @@
       set("preisSchalung", data.betonbau.preisSchalung, "45");
       set("preisBewehrung", data.betonbau.preisBewehrung, "1300");
       set("preisAushub", data.betonbau.preisAushub, "25");
+      set("lieferlaenge", data.betonbau.lieferlaenge, "12");
+      set("stossFaktor", data.betonbau.stossFaktor, "50");
+      set("hakenAktiv", data.betonbau.haken, "ja");
+      set("stahllisteKosten", data.betonbau.stahlKosten, "grad");
     }
     if (data.flaechenregel) {
       set("abzugRegel", data.flaechenregel.regel, "woflv");
@@ -2119,10 +2333,32 @@
           a.aushub.toFixed(2), (a.masse / 1000).toFixed(2), a.warnungen.join(" ")]);
       });
 
+      const liste = gesamteStahlliste();
+      if (liste.zeilen.length) {
+        const vorgabe = bewehrungVorgabe();
+        rows.push([]);
+        rows.push([`Stahlliste Betonstahl B500B nach DIN 488 (Regelbewehrung, Lieferlänge ${vorgabe.lieferlaenge.toFixed(2)} m, Stoß l0 = ${vorgabe.stossFaktor}·ds, ${vorgabe.haken ? "mit" : "ohne"} Endhaken; Längen ohne Abzug der Biegerollen)`]);
+        rows.push(["Bauteil", "Pos", "Bezeichnung", "Biegeform", "⌀ [mm]", "Anzahl", "Einzellänge [m]",
+          "Gesamtlänge [m]", "kg/m", "Masse [kg]", "Biegerolle D [mm]", "Bemerkung"]);
+        liste.zeilen.forEach((z) => {
+          rows.push([z.bauteil, z.pos, z.name, z.formName, z.ds, z.anzahl, z.einzelLaenge.toFixed(2),
+            z.gesamtLaenge.toFixed(2), z.masseJeMeter.toFixed(3), z.masse.toFixed(1), z.biegerolle, z.bemerkung || ""]);
+        });
+        rows.push(["Summe", "", "", "", "", "", "", "", "", liste.gesamtMasse.toFixed(1), "", ""]);
+
+        rows.push([]);
+        rows.push(["Stahlauszug nach Durchmessern"]);
+        rows.push(["⌀ [mm]", "Querschnitt [cm²]", "Stück", "Gesamtlänge [m]", "kg/m", "Masse [kg]"]);
+        liste.jeDurchmesser.forEach((e) => {
+          rows.push([e.ds, stabFlaeche(e.ds).toFixed(2), e.stueck, e.laenge.toFixed(2), stabMasse(e.ds).toFixed(3), e.masse.toFixed(1)]);
+        });
+        rows.push(["Summe", "", "", "", "", liste.gesamtMasse.toFixed(1)]);
+      }
+
       rows.push([]);
       rows.push(["Mengen und Kosten Betonbau"]);
       rows.push(["Position", "Menge", "Einheit", "Einheitspreis [€]", "Kosten [€]"]);
-      const positionen = betonAufstellung(Array.from(model.beton.values()), betonPreise(), raum);
+      const positionen = betonAufstellung(Array.from(model.beton.values()), betonPreise(), raum, stahlKostenMasse());
       positionen.forEach((pos) => {
         rows.push([pos.name, pos.menge.toFixed(2), pos.einheit, pos.preis.toFixed(2), pos.kosten.toFixed(2)]);
       });

@@ -321,9 +321,10 @@ function betonAuswertung(element, arbeitsraum) {
  * Kostenaufstellung aller Betonbauteile.
  * @param {Array} elements - Betonbauteile
  * @param {Object} preise - { beton, schalung, bewehrung, aushub } in €/m³, €/m², €/t, €/m³
+ * @param {number} [bewehrungMasse] - Betonstahlmasse [kg] aus der Stahlliste; ersetzt den Bewehrungsgrad
  * @returns {Array} Positionen mit Menge, Einheit, Preis und Kosten
  */
-function betonAufstellung(elements, preise, arbeitsraum) {
+function betonAufstellung(elements, preise, arbeitsraum, bewehrungMasse) {
   let volumen = 0, schalung = 0, bewehrung = 0, aushub = 0;
   elements.forEach((element) => {
     const a = betonAuswertung(element, arbeitsraum);
@@ -332,6 +333,8 @@ function betonAufstellung(elements, preise, arbeitsraum) {
     bewehrung += a.bewehrung;
     aushub += a.aushub;
   });
+  // Kostenansatz wahlweise aus der Stahlliste statt aus dem Bewehrungsgrad
+  if (Number.isFinite(bewehrungMasse)) bewehrung = bewehrungMasse;
   const p = preise || {};
   return [
     { key: "beton", name: "Beton (Lieferung und Einbau)", menge: volumen, einheit: "m³", preis: p.beton || 0, kosten: volumen * (p.beton || 0) },
