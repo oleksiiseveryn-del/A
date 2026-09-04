@@ -1,0 +1,19 @@
+{
+  "name": "Stahlbau- und Architektur-Konverter · HSD Hamburg GmbH",
+  "short_name": "HSD Konverter",
+  "description": "Skizze, Bemessung nach DIN EN 1993-1-1, Betonbau nach DIN EN 1992-1-1, Bewehrung, Schal-, Decken- und Positionspläne sowie Leistungsverzeichnis.",
+  "lang": "de",
+  "dir": "ltr",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0f2438",
+  "theme_color": "#0f2438",
+  "categories": ["productivity", "utilities", "business"],
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -136,54 +136,100 @@ class Scene3D {
 
   _bindEvents() {
     const el = this.renderer.domElement;
-    let dragging = false;
+    // Der Browser darf auf der Zeichenfläche weder scrollen noch zoomen –
+    // sonst laufen Wischen und Aufziehen an der Bedienung vorbei
+    el.style.touchAction = "none";
+
+    // Alle liegenden Zeiger (Maus, Stift, Finger). Zwei Finger bedeuten
+    // Aufziehen (Zoom) und Verschieben, ein Finger Drehen bzw. Antippen.
+    const zeiger = new Map();
     let moved = false;
-    let last = { x: 0, y: 0 };
     let button = 0;
+    let last = { x: 0, y: 0 };
+    let geste = null;        // { abstand, mitte } beim Zweifingerbeginn
+
+    const mitteUndAbstand = () => {
+      const p = Array.from(zeiger.values());
+      const mitte = { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
+      return { mitte, abstand: Math.max(Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y), 1) };
+    };
+    // Fingerkuppe statt Mauszeiger: größere Toleranz beim Tippen und Fangen
+    const grob = (e) => e.pointerType === "touch";
 
     el.addEventListener("contextmenu", (e) => e.preventDefault());
 
     el.addEventListener("pointerdown", (e) => {
-      dragging = true;
-      moved = false;
+      zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY });
       button = e.button;
       last = { x: e.clientX, y: e.clientY };
-      el.setPointerCapture(e.pointerId);
+      if (zeiger.size === 1) {
+        moved = false;
+        el.setPointerCapture(e.pointerId);
+      } else if (zeiger.size === 2) {
+        geste = mitteUndAbstand();
+        moved = true;                 // Zweifingergeste ist nie ein Antippen
+      }
     });
 
     el.addEventListener("pointermove", (e) => {
-      if (dragging) {
-        const dx = e.clientX - last.x;
-        const dy = e.clientY - last.y;
-        if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
-        last = { x: e.clientX, y: e.clientY };
+      if (!zeiger.has(e.pointerId)) {
+        if (this.interactive && this.options.onHover) this.options.onHover(e);
+        return;
+      }
+      zeiger.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-        // Zeichnen mit links: nur die rechte Maustaste bzw. der Navigationsmodus dreht
-        const orbiting = button === 2 || button === 1 || !this.interactive || this.mode === "orbit";
-        if (orbiting) {
-          this.view.azimuth -= dx * 0.006;
-          this.view.elevation = Math.max(-1.45, Math.min(1.45, this.view.elevation + dy * 0.006));
-          this._applyCamera();
-          this.onCameraChange(this.getCameraState());
-        } else if (e.shiftKey) {
-          this._pan(dx, dy);
-        }
-      } else if (this.interactive && this.options.onHover) {
-        this.options.onHover(e);
+      // ---- zwei Finger: aufziehen zoomt, verschieben schwenkt
+      if (zeiger.size >= 2 && geste) {
+        const jetzt = mitteUndAbstand();
+        const faktor = geste.abstand / jetzt.abstand;
+        this.view.distance = Math.max(1.5, Math.min(120, this.view.distance * faktor));
+        // _pan() setzt die Kamera und meldet den neuen Stand
+        this._pan(jetzt.mitte.x - geste.mitte.x, jetzt.mitte.y - geste.mitte.y);
+        geste = jetzt;
+        return;
+      }
+
+      // ---- ein Zeiger
+      const dx = e.clientX - last.x;
+      const dy = e.clientY - last.y;
+      const schwelle = grob(e) ? 8 : 2;
+      if (Math.abs(dx) + Math.abs(dy) > schwelle) moved = true;
+      last = { x: e.clientX, y: e.clientY };
+
+      // Maus: nur rechte/mittlere Taste oder Navigationsmodus dreht, damit das
+      // Zeichnen mit links frei bleibt. Finger und Stift drehen immer – auf dem
+      // Tablet gibt es keine zweite Taste, gezeichnet wird durch Antippen.
+      const orbiting = grob(e) || button === 2 || button === 1
+        || !this.interactive || this.mode === "orbit";
+      if (orbiting) {
+        this.view.azimuth -= dx * 0.006;
+        this.view.elevation = Math.max(-1.45, Math.min(1.45, this.view.elevation + dy * 0.006));
+        this._applyCamera();
+        this.onCameraChange(this.getCameraState());
+      } else if (e.shiftKey) {
+        this._pan(dx, dy);
       }
     });
 
-    el.addEventListener("pointerup", (e) => {
-      dragging = false;
-      el.releasePointerCapture(e.pointerId);
-      if (!moved && e.button === 0 && this.interactive) {
-        const snap = this.nearestSnapPoint(e, 14);
-        if (snap) this.onNodePick(snap, e);
-        else {
-          const point = this.pointOnWorkPlane(e);
-          if (point) this.onPlanePick(point, e);
-        }
+    const beenden = (e) => {
+      const warAllein = zeiger.size === 1;
+      zeiger.delete(e.pointerId);
+      if (zeiger.size < 2) geste = null;
+      if (el.hasPointerCapture && el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+      if (!warAllein) return;                       // Ende einer Zweifingergeste
+      if (moved || e.button !== 0 || !this.interactive) return;
+      const snap = this.nearestSnapPoint(e, grob(e) ? 26 : 14);
+      if (snap) this.onNodePick(snap, e);
+      else {
+        const point = this.pointOnWorkPlane(e);
+        if (point) this.onPlanePick(point, e);
       }
+    };
+
+    el.addEventListener("pointerup", beenden);
+    el.addEventListener("pointercancel", (e) => {
+      zeiger.delete(e.pointerId);
+      if (zeiger.size < 2) geste = null;
     });
 
     el.addEventListener("wheel", (e) => {

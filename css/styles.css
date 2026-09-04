@@ -110,6 +110,8 @@ header.app-header {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* ohne min-width sprengt der Inhalt (z. B. die Reiterleiste) die Rasterspalte */
+  min-width: 0;
 }
 
 .panel-header {
@@ -120,6 +122,8 @@ header.app-header {
   align-items: center;
   background: #fafcfd;
 }
+
+.panel-header > * { min-width: 0; }
 
 .panel-header h2 {
   font-size: 0.95rem;
@@ -558,7 +562,16 @@ table.members-table input {
 .tab-switch {
   display: flex;
   gap: 4px;
+  /* Die Reiter bleiben in einer Zeile und werden bei schmalem Fenster
+     waagerecht geschoben, statt das Fenster breiter zu machen */
+  overflow-x: auto;
+  min-width: 0;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
+
+.tab-btn { flex: 0 0 auto; white-space: nowrap; }
 
 .tab-btn {
   border: 1px solid var(--border);
@@ -1055,4 +1068,136 @@ button.tool-btn.primary:hover {
   body.printing-sheet .sheet-body { padding: 0; background: none; overflow: visible; }
   body.printing-sheet .sheet-body svg { box-shadow: none; }
   @page { size: A4 landscape; margin: 6mm; }
+}
+
+/* ============================================================ Tablet
+   Bedienung mit dem Finger auf iPad und Android-Tablet.
+
+   Grundlagen: Apple HIG und die Materialrichtlinie nennen 44 pt bzw. 48 dp
+   als kleinste sichere Trefferfläche; iOS Safari zoomt beim Antippen eines
+   Eingabefeldes hinein, sobald dessen Schrift kleiner als 16 px ist.
+   Der Zoom des Browsers bleibt bewusst erlaubt – Pläne müssen vergrößert
+   werden können.
+*/
+
+/* Ränder von Notch und Home-Anzeige freihalten (viewport-fit=cover) */
+header.app-header {
+  padding-left: max(24px, env(safe-area-inset-left));
+  padding-right: max(24px, env(safe-area-inset-right));
+  padding-top: max(14px, env(safe-area-inset-top));
+}
+
+.export-bar {
+  padding-bottom: max(10px, env(safe-area-inset-bottom));
+}
+
+/* Auf Zeigergeräten ohne feine Steuerung (Finger) gelten größere Maße.
+   Die Abfrage trifft Tablet und Telefon, nicht Maus- oder Stiftbetrieb. */
+@media (pointer: coarse) {
+  button.tool-btn,
+  .tab-btn,
+  .export-bar button,
+  .modal-actions button {
+    min-height: 44px;
+    padding-top: 9px;
+    padding-bottom: 9px;
+    font-size: 0.86rem;
+  }
+
+  button.tool-btn.plain { min-height: 40px; }
+  .row-remove { min-width: 44px; min-height: 40px; }
+
+  /* Kein Auswahlrahmen und kein Lupenmenü beim Halten auf Bedienelementen */
+  button, .tab-btn, .tool-group label, .masse-label {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* 16 px verhindert das Hineinzoomen von iOS Safari beim Antippen */
+  input, select, textarea,
+  table.members-table input,
+  table.members-table select,
+  .layer-row input,
+  .layer-row select,
+  .cutlist-controls input,
+  .project-bar input,
+  .project-bar select,
+  .tool-group input,
+  .tool-group select,
+  .tool-check input[type="number"],
+  .model-controls select,
+  .modal-box input {
+    font-size: 16px;
+    min-height: 38px;
+  }
+
+  /* Zahlenfelder brauchen mit 16 px etwas mehr Platz */
+  .tool-group input { width: 76px; }
+  .tool-check input[type="number"] { width: 68px; }
+  .layer-row input { width: 72px; }
+  #betonTable .layer-row input { width: 72px; }
+
+  table.members-table td { padding: 9px 7px; }
+  table.members-table th { padding: 9px 7px; }
+
+  /* Zeichenflächen gehören der Anwendung: kein Scrollen, kein Doppeltipp-Zoom */
+  .canvas-wrap, .model-view { touch-action: none; -webkit-touch-callout: none; }
+
+  /* Breite Tabellen mit Schwung schieben */
+  .result-panel-body { -webkit-overflow-scrolling: touch; }
+}
+
+/* Hochformat iPad (810–834 pt) und kleiner: ein Fenster unter dem anderen */
+@media (max-width: 1024px) {
+  .main-grid { grid-template-columns: 1fr; }
+
+  header.app-header { padding-top: max(10px, env(safe-area-inset-top)); padding-bottom: 10px; }
+  .brand h1 { font-size: 1.15rem; }
+  .header-contact { text-align: left; }
+
+  /* Beide Fenster bekommen eine feste, bildschirmbezogene Höhe, damit
+     Skizze und Modell nebeneinander nicht zusammenfallen */
+  .canvas-wrap, .model-view { min-height: 44vh; }
+  .main-grid { min-height: 0; }
+
+  .toolbar { gap: 8px; }
+  .basis-grid { grid-template-columns: 1fr; }
+}
+
+/* Querformat iPad: zwei Fenster bleiben, aber flacher */
+@media (min-width: 1025px) and (max-width: 1366px) and (pointer: coarse) {
+  .canvas-wrap, .model-view { min-height: 40vh; }
+  .main-grid { min-height: 0; }
+}
+
+/* Blattfenster: volle nutzbare Höhe, auch wenn iOS die Adressleiste einblendet */
+@supports (height: 100dvh) {
+  .sheet-box { max-height: 92dvh; }
+  .sheet-overlay { padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom)); }
+}
+
+/* Als Home-Bildschirm-App gestartet: keine Browserleiste, daher etwas
+   mehr Luft oben und unten */
+@media (display-mode: standalone) {
+  header.app-header { padding-top: max(18px, env(safe-area-inset-top)); }
+}
+
+/* Hilfeabschnitt für den Tabletbetrieb */
+.tablet-hilfe { background: #fbfdfe; }
+.tablet-hilfe h2 { margin-bottom: 12px; }
+.basis-schritte {
+  margin: 0 0 10px;
+  padding-left: 20px;
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+.basis-schritte li { margin-bottom: 4px; }
+.tablet-hilfe .basis-note { margin-top: 8px; }
+.tablet-hilfe code {
+  font-family: var(--font-data);
+  background: #eef4f9;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
 }

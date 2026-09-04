@@ -267,7 +267,14 @@
   });
   result.grid.material.opacity = 0.3;
 
-  window.addEventListener("resize", () => { sketch.resize(); result.resize(); });
+  const fensterAngepasst = () => { sketch.resize(); result.resize(); };
+  window.addEventListener("resize", fensterAngepasst);
+  // Beim Drehen des Tablets steht die endgültige Größe erst nach dem Umbruch
+  // fest; deshalb ein zweiter Durchgang kurz danach
+  window.addEventListener("orientationchange", () => {
+    fensterAngepasst();
+    window.setTimeout(fensterAngepasst, 350);
+  });
 
   function snapToGrid(point) {
     const step = parseFloat(document.getElementById("gridStep").value) || 0.5;
@@ -284,13 +291,23 @@
 
   let mode = "draw";
 
+  // Auf dem Tablet gibt es keine zweite Maustaste und kein Mausrad; die
+  // Hinweise nennen dort die Fingergesten.
+  const TABLET = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+  const tippen = TABLET ? "antippen" : "anklicken";
+  const NAVIGATION = TABLET
+    ? "Wischen dreht, Aufziehen mit zwei Fingern zoomt, Schieben mit zwei Fingern verschiebt."
+    : "Rechte Maustaste dreht das Modell, Mausrad zoomt, ESC bricht ab.";
+
   const MODE_HINTS = {
-    draw: "Zeichnen: Anfangs- und Endpunkt auf der Arbeitsebene anklicken. Rechte Maustaste dreht das Modell, Mausrad zoomt, ESC bricht ab.",
-    orbit: "Navigieren: Ziehen dreht das Modell, Umschalt+Ziehen verschiebt, Mausrad zoomt.",
-    support: "Auflager: Knoten anklicken – Festlager → Loslager → kein Lager.",
-    load: "Knotenlast: Knoten anklicken und Last in kN eingeben (positiv = nach unten).",
-    bauteil: "Bauteil: zwei Punkte auf der Arbeitsebene anklicken (Wand: Achse, Platte: gegenüberliegende Ecken). Einzelfundament: ein Punkt.",
-    beton: "Betonteil: Wand, Streifenfundament und Unterzug über die Achse (zwei Punkte), Platte über zwei gegenüberliegende Ecken, Fundament, Köcher, Stütze und Bohrpfahl über einen Punkt.",
+    draw: `Zeichnen: Anfangs- und Endpunkt auf der Arbeitsebene ${tippen}. ${NAVIGATION}`,
+    orbit: TABLET
+      ? "Navigieren: Wischen dreht das Modell, Aufziehen mit zwei Fingern zoomt, Schieben mit zwei Fingern verschiebt."
+      : "Navigieren: Ziehen dreht das Modell, Umschalt+Ziehen verschiebt, Mausrad zoomt.",
+    support: `Auflager: Knoten ${tippen} – Festlager → Loslager → kein Lager.`,
+    load: `Knotenlast: Knoten ${tippen} und Last in kN eingeben (positiv = nach unten).`,
+    bauteil: `Bauteil: zwei Punkte auf der Arbeitsebene ${tippen} (Wand: Achse, Platte: gegenüberliegende Ecken). Einzelfundament: ein Punkt.`,
+    beton: "Betonteil: Wand, Streifenfundament, Unterzug und Treppe über die Achse (zwei Punkte), Platte über zwei gegenüberliegende Ecken, Fundament, Köcher, Stütze und Bohrpfahl über einen Punkt.",
   };
 
   function setMode(next) {
@@ -1030,39 +1047,35 @@
     window.print();
     window.setTimeout(() => document.body.classList.remove("printing-sheet"), 500);
   });
-  document.getElementById("sheetSvg").addEventListener("click", () => {
+  /** Dateiname und Inhalt der gerade gezeigten Zeichnung. */
+  function aktuellesBlatt() {
     const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
-    const inhalt = document.getElementById("sheetBody").innerHTML;
-    if (sheetArt === "grundriss") {
-      saveFile(`Grundriss_${name}.svg`, inhalt, "image/svg+xml");
-      return;
-    }
+    const content = document.getElementById("sheetBody").innerHTML;
+    const blatt = (filename) => ({ filename, content, mime: "image/svg+xml" });
+
+    if (sheetArt === "grundriss") return blatt(`Grundriss_${name}.svg`);
     if (sheetArt === "bewehrung") {
       const beton = model.beton.get(bewehrungsplanId);
-      saveFile(`Bewehrungsplan_${name}_${beton ? betonBezeichnung(beton) : "Bauteil"}.svg`, inhalt, "image/svg+xml");
-      return;
+      return blatt(`Bewehrungsplan_${name}_${beton ? betonBezeichnung(beton) : "Bauteil"}.svg`);
     }
     if (sheetArt === "schalung") {
       const beton = model.beton.get(schalplanId);
-      saveFile(`Schalplan_${name}_${beton ? betonBezeichnung(beton) : "Bauteil"}.svg`, inhalt, "image/svg+xml");
-      return;
+      return blatt(`Schalplan_${name}_${beton ? betonBezeichnung(beton) : "Bauteil"}.svg`);
     }
-    if (sheetArt === "schaluebersicht") {
-      saveFile(`Schalplan_Uebersicht_${name}.svg`, inhalt, "image/svg+xml");
-      return;
-    }
-    if (sheetArt === "positionsplan") {
-      saveFile(`Positionsplan_${name}.svg`, inhalt, "image/svg+xml");
-      return;
-    }
+    if (sheetArt === "schaluebersicht") return blatt(`Schalplan_Uebersicht_${name}.svg`);
+    if (sheetArt === "positionsplan") return blatt(`Positionsplan_${name}.svg`);
     if (sheetArt === "deckenplan") {
-      saveFile(`Deckenplan_${name}_OK${(deckenplanEbene || 0).toFixed(2).replace(".", "_")}.svg`, inhalt, "image/svg+xml");
-      return;
+      return blatt(`Deckenplan_${name}_OK${(deckenplanEbene || 0).toFixed(2).replace(".", "_")}.svg`);
     }
     const element = ansichtsWaende()[sheetIndex];
-    if (!element) return;
-    saveFile(`Ansicht_${name}_${bauteilBezeichnung(element)}.svg`, inhalt, "image/svg+xml");
+    return element ? blatt(`Ansicht_${name}_${bauteilBezeichnung(element)}.svg`) : null;
+  }
+
+  document.getElementById("sheetSvg").addEventListener("click", () => {
+    const blatt = aktuellesBlatt();
+    if (blatt) saveFile(blatt.filename, blatt.content, blatt.mime);
   });
+  document.getElementById("sheetTeilen").addEventListener("click", () => teileDatei(aktuellesBlatt()));
   window.addEventListener("keydown", (e) => {
     if (document.getElementById("sheetOverlay").hidden) return;
     if (e.key === "Escape") document.getElementById("sheetOverlay").hidden = true;
@@ -2723,7 +2736,19 @@
     window.claude.use("downloads").then((api) => { platformDownloads = api; }).catch(() => {});
   }
 
+  /** Zuletzt erzeugte Datei – Grundlage für „Weitergeben". */
+  let letzteDatei = null;
+
+  /**
+   * Datei sichern. Auf iPadOS und Android muss der Anker im Dokument liegen
+   * und die Objekt-URL darf erst nach dem Klick freigegeben werden; sonst
+   * bricht der Browser den Download ab, ohne es zu melden.
+   */
   function saveFile(filename, content, mime) {
+    const typ = mime || "text/csv;charset=utf-8;";
+    letzteDatei = { filename, content, mime: typ };
+    aktualisiereTeilenKnopf();
+
     if (platformDownloads) {
       platformDownloads.save({ filename, data: content }).catch((err) => {
         if (err && err.code === "declined") return;
@@ -2731,14 +2756,60 @@
       });
       return;
     }
-    const blob = new Blob([content], { type: mime || "text/csv;charset=utf-8;" });
+    const blob = new Blob([content], { type: typ });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     a.download = filename;
+    a.rel = "noopener";
+    a.style.display = "none";
+    document.body.appendChild(a);
     a.click();
-    URL.revokeObjectURL(url);
+    window.setTimeout(() => {
+      if (a.parentNode) a.parentNode.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 4000);
   }
+
+  /** Kann der Browser Dateien über das Systemmenü weitergeben (iPadOS, Android)? */
+  function kannTeilen(datei) {
+    if (!datei || !navigator.canShare || !navigator.share) return false;
+    try {
+      return navigator.canShare({ files: [new File([datei.content], datei.filename, { type: datei.mime })] });
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /**
+   * Datei über das Systemmenü weitergeben: AirDrop an ein anderes Tablet,
+   * „In Dateien sichern", Mail, Teams. Muss unmittelbar aus dem Klick heraus
+   * aufgerufen werden, sonst verweigert der Browser die Freigabe.
+   */
+  function teileDatei(datei) {
+    if (!datei) return;
+    const file = new File([datei.content], datei.filename, { type: datei.mime });
+    navigator.share({ files: [file], title: datei.filename })
+      .catch((err) => {
+        if (err && (err.name === "AbortError" || err.name === "NotAllowedError")) return;
+        setStatus("Weitergeben nicht möglich – die Datei liegt im Ordner „Downloads“.", "error");
+      });
+  }
+
+  /** Beherrscht das Gerät die Dateiweitergabe überhaupt (iPadOS, Android)? */
+  const geraetKannTeilen = kannTeilen({
+    filename: "probe.txt", content: "probe", mime: "text/plain",
+  });
+
+  /** Der Knopf „Weitergeben" erscheint nur, wenn das Gerät es beherrscht. */
+  function aktualisiereTeilenKnopf() {
+    const knopf = document.getElementById("btnTeilen");
+    if (!knopf) return;
+    const moeglich = kannTeilen(letzteDatei);
+    knopf.hidden = !moeglich;
+    if (moeglich) knopf.title = `„${letzteDatei.filename}“ an ein anderes Gerät geben`;
+  }
+  document.getElementById("sheetTeilen").hidden = !geraetKannTeilen;
 
   function collectProject() {
     const field = (id) => document.getElementById(id).value;
@@ -2886,6 +2957,8 @@
     const name = document.getElementById("projectName").value || "Projekt";
     saveFile(`Stahlbau_${name.replace(/\s+/g, "_")}.json`, JSON.stringify(collectProject(), null, 2), "application/json");
   });
+
+  document.getElementById("btnTeilen").addEventListener("click", () => teileDatei(letzteDatei));
 
   const fileInput = document.getElementById("projectFileInput");
   document.getElementById("btnImportProject").addEventListener("click", () => fileInput.click());

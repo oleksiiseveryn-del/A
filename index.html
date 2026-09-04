@@ -2,8 +2,25 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- viewport-fit=cover: die Anwendung reicht auf dem iPad bis unter Notch und
+     Home-Anzeige; die Ränder hält das Stylesheet über env(safe-area-inset-*) frei.
+     Der Zoom bleibt erlaubt, damit Pläne vergrößert werden können. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>Stahlbau Skizzen-Konverter · HSD Hamburg GmbH</title>
+<meta name="description" content="Skizze, Bemessung nach DIN EN 1993-1-1, Betonbau nach DIN EN 1992-1-1, Bewehrung, Schal-, Decken- und Positionspläne der HSD Hamburg GmbH.">
+<meta name="theme-color" content="#0f2438">
+<meta name="color-scheme" content="light">
+
+<!-- Auf dem Home-Bildschirm des iPads wie eine App starten (ohne Browserleiste) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="HSD Konverter">
+<meta name="format-detection" content="telephone=no">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="manifest" href="manifest.webmanifest">
+
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="css/styles.css">
 <!-- three.js r128 (MIT), lokal eingebunden: die App läuft ohne Internetverbindung -->
@@ -843,6 +860,7 @@
       <button class="secondary" id="btnLoadProject" title="Zuletzt gespeichertes Projekt laden">📂 Projekt laden</button>
       <button class="secondary" id="btnExportProject" title="Projekt als Datei sichern (zum Weitergeben oder Archivieren)">⤓ Projektdatei</button>
       <button class="secondary" id="btnImportProject" title="Projektdatei öffnen">⤒ Datei öffnen</button>
+      <button class="secondary" id="btnTeilen" title="Zuletzt erzeugte Datei an ein anderes Gerät geben" hidden>↗ Weitergeben</button>
       <input type="file" id="projectFileInput" accept="application/json,.json" hidden>
     </div>
   </div>
@@ -860,6 +878,7 @@
         <button class="tool-btn" id="sheetNext" title="nächste Wand">▶</button>
         <button class="tool-btn" id="sheetPrint">🖨 Drucken</button>
         <button class="tool-btn" id="sheetSvg">⬇ SVG speichern</button>
+        <button class="tool-btn" id="sheetTeilen" title="Zeichnung an ein anderes Gerät geben" hidden>↗ Weitergeben</button>
         <button class="tool-btn danger" id="sheetClose">Schließen</button>
       </div>
     </div>
@@ -1020,6 +1039,60 @@
     abweichende Knicklängen in und aus der Fachwerkebene sind gesondert zu berücksichtigen.</p>
 </section>
 
+<section class="basis tablet-hilfe">
+  <h2>Auf dem Tablet: einrichten, herunterladen, weitergeben</h2>
+  <div class="basis-grid">
+    <div class="basis-col">
+      <h3>Auf dem iPad einrichten</h3>
+      <ol class="basis-schritte">
+        <li>Die Adresse der Anwendung in <strong>Safari</strong> öffnen.</li>
+        <li>Auf <strong>Teilen ↗ → Zum Home-Bildschirm</strong> tippen.</li>
+        <li>Die Anwendung startet danach als eigenes Symbol ohne Browserleiste und
+          <strong>arbeitet ohne Netz weiter</strong> – auf der Baustelle der Regelfall.</li>
+      </ol>
+      <p class="basis-note">Bedienung mit dem Finger: <strong>Antippen</strong> setzt einen Punkt,
+        <strong>Wischen</strong> dreht das Modell, <strong>Aufziehen mit zwei Fingern</strong> vergrößert,
+        <strong>Schieben mit zwei Fingern</strong> verschiebt den Ausschnitt. Der Apple Pencil arbeitet wie
+        der Finger. Breite Tabellen lassen sich waagerecht schieben.</p>
+      <p class="basis-note">Wird stattdessen die Einzeldatei
+        <code>stahlbau-konverter.html</code> verwendet, ist die vollständige Anwendung in einer Datei
+        enthalten. Sie lässt sich in <strong>Dateien</strong> ablegen, per AirDrop weitergeben und ohne
+        Netz öffnen.</p>
+    </div>
+
+    <div class="basis-col">
+      <h3>Was heruntergeladen werden kann</h3>
+      <ul>
+        <li><strong>Leistungsverzeichnis</strong> als CSV (Semikolon, Komma als Dezimalzeichen, UTF-8 mit
+          BOM) – öffnet in Excel und Numbers</li>
+        <li><strong>Zeichnungen</strong> als SVG im Blatt A4 quer: Wandansicht, Grundriss, Schalplan,
+          Schalplan-Übersicht, Bewehrungsplan, Deckenplan, Positionsplan</li>
+        <li><strong>Biegedaten</strong> als JSON für das Python-Werkzeug der Biegerei
+          (Biegeliste, Stahlauszug, Schneidplan, Bestellung, Etiketten)</li>
+        <li><strong>Projektdatei</strong> als JSON mit dem vollständigen Modell – Knoten, Stäbe,
+          Bauteile, Öffnungen, Betonteile, Treppen, Achsraster und Preise</li>
+        <li><strong>PDF</strong> über <em>Drucken</em> → im Druckdialog <em>In Dateien sichern</em>;
+          aus dem Blattfenster heraus kommt das Blatt allein auf das Papier</li>
+      </ul>
+    </div>
+
+    <div class="basis-col">
+      <h3>Auf ein anderes Tablet</h3>
+      <ul>
+        <li><strong>↗ Weitergeben</strong> öffnet das Systemmenü des Geräts: <strong>AirDrop</strong> an
+          ein anderes iPad, Mail, Nachrichten, Teams oder <em>In Dateien sichern</em>. Der Knopf steht
+          unten in der Leiste und im Blattfenster und erscheint nur auf Geräten, die das beherrschen.</li>
+        <li><strong>Projektdatei</strong> weitergeben und auf dem zweiten Tablet über
+          <strong>⤒ Datei öffnen</strong> einlesen – damit steht dort dasselbe Modell zur Weiterarbeit.</li>
+        <li><strong>💾 Projekt speichern</strong> legt den Stand nur im Browser <em>dieses</em> Geräts ab;
+          für den Weg auf ein anderes Tablet ist die Projektdatei zu verwenden.</li>
+        <li>Liegt die Anwendung auf einem Server im Firmennetz, genügt auf dem zweiten Tablet dieselbe
+          Adresse und <em>Zum Home-Bildschirm</em>.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
 <div class="disclaimer">
   Hinweis: Diese Anwendung dient der überschlägigen Vorbemessung in der Skizzenphase (Bauteilfindung nach DIN EN 1993-1-1,
   vereinfachtes Biegeknicken um die schwache Achse, Zug- und Biegenachweis am Bruttoquerschnitt). Sie ersetzt nicht die
@@ -1045,5 +1118,20 @@
 <script src="js/truss-solver.js"></script>
 <script src="js/scene3d.js"></script>
 <script src="js/app.js"></script>
+
+<!-- SW-ANFANG (in der Einzeldatei nicht enthalten) -->
+<script>
+/* Die Anwendung nach dem ersten Aufruf vollständig auf dem Gerät halten.
+   Der Service Worker ist nur über http(s) zulässig; beim Öffnen einer
+   Datei aus dem Dateisystem bleibt der Block wirkungslos. */
+if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("sw.js").catch((err) => {
+      window.console.warn("Offline-Betrieb nicht eingerichtet:", err.message);
+    });
+  });
+}
+</script>
+<!-- SW-ENDE -->
 </body>
 </html>
