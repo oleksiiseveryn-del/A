@@ -255,7 +255,7 @@ function positionsplanSVG(daten) {
   });
 
   // ---- Bauteile: Platten zuerst, dann Gründung, Wände, Stützen, Stahl
-  const rang = { archplatte: 0, platte: 1, fundament: 2, arch: 3, wandkoerper: 4, stuetzenkoerper: 5, stahl: 6 };
+  const rang = { archplatte: 0, platte: 1, fundament: 2, arch: 3, wandkoerper: 4, stuetzenkoerper: 5, treppenkoerper: 6, stahl: 7 };
   figuren.slice().sort((a, b) => (rang[a.klasse] || 0) - (rang[b.klasse] || 0)).forEach((f) => {
     if (f.art === "polygon") {
       const d = f.punkte.map((pt) => `${px(pt.x).toFixed(2)},${pz(pt.z).toFixed(2)}`).join(" ");
@@ -396,6 +396,7 @@ function positionsplanSVG(daten) {
   .fundament { fill: #e8e2d6; stroke: #1b2733; stroke-width: 0.3; stroke-dasharray: 1.8 1.2; }
   .arch { fill: #dfe6ea; stroke: #64707c; stroke-width: 0.3; }
   .wandkoerper { fill: #cdd5db; stroke: #1b2733; stroke-width: 0.35; }
+  .treppenkoerper { fill: #dee4e9; stroke: #1b2733; stroke-width: 0.35; }
   .stuetzenkoerper { fill: #8d9aa4; stroke: #1b2733; stroke-width: 0.35; }
   .stahl { stroke: #1f6b8f; stroke-width: 0.7; fill: none; }
   .stahlpunkt { fill: #1f6b8f; }

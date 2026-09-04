@@ -19,6 +19,7 @@ const SCHALUNGSARTEN = {
   seiten: { name: "Seitenschalung", beschreibung: "Wand-, Stützen- und Fundamentschalung" },
   boden: { name: "Deckenschalung (Untersicht)", beschreibung: "Deckentische, Unterstützung nach DIN EN 12812" },
   aussparung: { name: "Aussparungsschalung", beschreibung: "Köcher, Durchbrüche, Nischen" },
+  stufen: { name: "Stufenschalung", beschreibung: "Setzstufenbretter der Treppenläufe" },
 };
 
 /** Schalungsart, die das Bauteil überwiegend bestimmt. */
@@ -35,6 +36,7 @@ function schalungsSystem(kind) {
     stuetze: "Stützenschalung, vier Seiten",
     stuetze_rund: "Rundstützenschalung",
     unterzug: "Balkenschalung, Untersicht und zwei Seiten",
+    treppe: "Treppenschalung: Laufplattenuntersicht mit Unterstützung, Wangen und Stufenbretter",
   }[kind] || "Schalung nach Bauteilart";
 }
 
@@ -44,12 +46,12 @@ function schalungsSystem(kind) {
  */
 function schalungsAufstellung(elements, arbeitsraum, geometrieVon, bezeichnungVon) {
   const zeilen = [];
-  const jeArt = { seiten: 0, boden: 0, aussparung: 0 };
+  const jeArt = { seiten: 0, boden: 0, aussparung: 0, stufen: 0 };
   let gesamt = 0;
 
   elements.forEach((element) => {
     const geo = geometrieVon(element, arbeitsraum);
-    const teile = geo.schalungTeile || { seiten: geo.schalung, boden: 0, aussparung: 0 };
+    const teile = geo.schalungTeile || { seiten: geo.schalung, boden: 0, aussparung: 0, stufen: 0 };
     const anzahl = Math.max(1, element.anzahl || 1);
     Object.keys(SCHALUNGSARTEN).forEach((art) => {
       const einzel = teile[art] || 0;
@@ -76,6 +78,8 @@ function hoehenkoten(element, geo) {
   const typ = BETONTEILTYPEN[element.kind];
   const y = element.p1.y || 0;
   if (element.kind === "bohrpfahl") return { ok: y, uk: y - geo.hoehe };
+  // Treppe: UK am Antritt, OK am Austritt (Geschossebene darüber)
+  if (element.kind === "treppe") return { ok: y + geo.hoehe, uk: y };
   if (typ.form === "flaeche") {
     return typ.erdreich ? { ok: y, uk: y - geo.dicke } : { ok: y + geo.dicke, uk: y };
   }
@@ -131,6 +135,25 @@ function schalAnsichten(element, geo) {
       schnitt: { titel: "Querschnitt", breite: geo.breite, hoehe: geo.hoehe, schraffur: true },
     };
   }
+  if (kind === "treppe" && geo.treppe) {
+    const t = geo.treppe;
+    // Grundriss des Laufes mit den Stufenvorderkanten
+    const linien = [];
+    for (let i = 1; i <= t.auftritteJeLauf; i++) {
+      const x = i * t.auftritt;
+      linien.push({ x1: x, y1: 0, x2: x, y2: t.laufbreite });
+    }
+    return {
+      haupt: {
+        titel: "Grundriss Lauf", breite: t.lauflaenge, hoehe: t.laufbreite, linien,
+        text: treppeSteigungsText(t),
+      },
+      schnitt: {
+        titel: "Längsschnitt", breite: t.lauflaenge, hoehe: t.laufhoehe + t.dickeLotrecht,
+        polygon: treppeSchnittProfil(t), schraffur: true,
+      },
+    };
+  }
   if (kind === "stuetze_rund" || kind === "bohrpfahl") {
     return {
       haupt: { titel: kind === "bohrpfahl" ? "Ansicht Pfahl" : "Ansicht", breite: geo.laenge, hoehe: geo.hoehe },
@@ -160,8 +183,20 @@ function zeichneSchalAnsicht(ansicht, feld, nenner, koten) {
   const fuellung = ansicht.schraffur ? "beton-schnitt" : "beton";
   if (ansicht.rund) {
     svg += `<circle cx="${px(ansicht.breite / 2).toFixed(2)}" cy="${py(ansicht.hoehe / 2).toFixed(2)}" r="${(W / 2).toFixed(2)}" class="${fuellung}"/>`;
+  } else if (ansicht.polygon) {
+    const pts = ansicht.polygon.map((pt) => `${px(pt.x).toFixed(2)},${py(pt.y).toFixed(2)}`).join(" ");
+    svg += `<polygon points="${pts}" class="${fuellung}"/>`;
   } else {
     svg += `<rect x="${x0.toFixed(2)}" y="${(yUK - H).toFixed(2)}" width="${W.toFixed(2)}" height="${H.toFixed(2)}" class="${fuellung}"/>`;
+  }
+
+  // Zusatzlinien im Umriss (z. B. Stufenvorderkanten im Treppengrundriss)
+  (ansicht.linien || []).forEach((l) => {
+    svg += `<line x1="${px(l.x1).toFixed(2)}" y1="${py(l.y1).toFixed(2)}" `
+      + `x2="${px(l.x2).toFixed(2)}" y2="${py(l.y2).toFixed(2)}" class="kante-duenn"/>`;
+  });
+  if (ansicht.text) {
+    svg += `<text x="${(x0 + W / 2).toFixed(2)}" y="${(yUK - H / 2).toFixed(2)}" class="t-posklein">${ansicht.text}</text>`;
   }
 
   if (ansicht.aussparung) {
@@ -246,9 +281,11 @@ function schalplanSVG(daten) {
   ]);
 
   const schalZeilen = [];
-  if (teile.seiten > 0) schalZeilen.push(`Seitenschalung ${(teile.seiten * anzahl).toFixed(2)} m²`);
-  if (teile.boden > 0) schalZeilen.push(`Deckenschalung (Untersicht) ${(teile.boden * anzahl).toFixed(2)} m²`);
-  if (teile.aussparung > 0) schalZeilen.push(`Aussparungsschalung ${(teile.aussparung * anzahl).toFixed(2)} m²`);
+  Object.keys(SCHALUNGSARTEN).forEach((art) => {
+    if ((teile[art] || 0) > 0) {
+      schalZeilen.push(`${SCHALUNGSARTEN[art].name} ${(teile[art] * anzahl).toFixed(2)} m²`);
+    }
+  });
   schalZeilen.push(`Schalfläche gesamt ${(geo.schalung * anzahl).toFixed(2)} m²`);
   schalZeilen.push(schalungsSystem(element.kind));
   if (auswertung && auswertung.aushub > 0) schalZeilen.push(`Aushub ${auswertung.aushub.toFixed(2)} m³ mit Arbeitsraum nach DIN 4124`);
@@ -289,6 +326,8 @@ function schalBlatt(inhalt) {
   .platte { fill: #f6f4ef; stroke: #1b2733; stroke-width: 0.35; stroke-dasharray: 2.4 1.4; }
   .fundament { fill: #e8e2d6; stroke: #1b2733; stroke-width: 0.35; stroke-dasharray: 1.8 1.2; }
   .wandkoerper { fill: #cdd5db; stroke: #1b2733; stroke-width: 0.4; }
+  .treppenkoerper { fill: #dee4e9; stroke: #1b2733; stroke-width: 0.4; }
+  .kante-duenn { stroke: #1b2733; stroke-width: 0.22; }
   .stuetzenkoerper { fill: #8d9aa4; stroke: #1b2733; stroke-width: 0.4; }
   .aussparung { fill: #ffffff; stroke: #1b2733; stroke-width: 0.35; stroke-dasharray: 1.6 1.2; }
   .ml, .mhl, .mb { stroke: #1b2733; }
@@ -330,6 +369,21 @@ function betonGrundrissFiguren(elemente, geometrieVon, bezeichnungVon, arbeitsra
     const koten = hoehenkoten(element, geo);
     const basis = { element, geo, typ, koten, bezeichnung: bezeichnungVon(element) };
 
+    if (element.kind === "treppe" && geo.treppe && p2) {
+      // Rechteck des Laufes: Antritt an p1, Richtung nach p2
+      const dx = p2.x - p1.x, dz = p2.z - p1.z;
+      const len = Math.hypot(dx, dz) || 1;
+      const ex = dx / len, ez = dz / len;          // Laufrichtung
+      const nx = -ez, nz = ex;                     // quer zum Lauf
+      const L = geo.treppe.lauflaenge, b = geo.treppe.laufbreite;
+      const pkt = (u, v) => ({ x: p1.x + ex * u + nx * v, z: p1.z + ez * u + nz * v });
+      return Object.assign(basis, {
+        art: "polygon",
+        punkte: [pkt(0, 0), pkt(L, 0), pkt(L, b), pkt(0, b)],
+        mitte: pkt(L / 2, b / 2),
+        klasse: "treppenkoerper",
+      });
+    }
     if (typ.form === "linie" && p2) {
       const dx = p2.x - p1.x, dz = p2.z - p1.z;
       const laenge = Math.hypot(dx, dz) || 0.01;
@@ -407,7 +461,7 @@ function schalungsUebersichtSVG(daten) {
 
   let svg = "";
   // Reihenfolge: Platten, Fundamente, Wände, Stützen
-  const rang = { platte: 0, fundament: 1, wandkoerper: 2, stuetzenkoerper: 3 };
+  const rang = { platte: 0, fundament: 1, wandkoerper: 2, stuetzenkoerper: 3, treppenkoerper: 4 };
   figuren.slice().sort((a, b) => rang[a.klasse] - rang[b.klasse]).forEach((f) => {
     if (f.art === "polygon") {
       const d = f.punkte.map((pt) => `${px(pt.x).toFixed(2)},${pz(pt.z).toFixed(2)}`).join(" ");
@@ -471,7 +525,8 @@ function schalungsUebersichtSVG(daten) {
   svg += `<text x="${xL}" y="${yL}" class="t-th">Legende</text>`;
   yL += 4.4;
   [["platte", "Platte (Bodenplatte, Decke)"], ["fundament", "Gründungsbauteil unter Gelände"],
-   ["wandkoerper", "Wand, Balken"], ["stuetzenkoerper", "Stütze"]].forEach(([klasse, text]) => {
+   ["wandkoerper", "Wand, Balken"], ["stuetzenkoerper", "Stütze"],
+   ["treppenkoerper", "Treppe"]].forEach(([klasse, text]) => {
     svg += `<rect x="${xL}" y="${(yL - 2.6).toFixed(2)}" width="4" height="3" class="${klasse}"/>`;
     svg += `<text x="${(xL + 6).toFixed(2)}" y="${yL}" class="t-klein">${text}</text>`;
     yL += 4.4;

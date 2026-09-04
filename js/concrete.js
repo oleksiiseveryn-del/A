@@ -141,11 +141,33 @@ const BETONTEILTYPEN = {
     name: "Unterzug / Balken", kuerzel: "UZ", form: "linie", bewehrung: 140,
     felder: ["breite", "hoehe"], standard: { breite: 0.3, hoehe: 0.5 }, expo: "XC1",
   },
+  treppe: {
+    name: "Massivtreppe", kuerzel: "TR", form: "linie", bewehrung: 110,
+    felder: ["geschosshoehe", "steigungen", "auftritt", "laufbreite", "dicke", "laeufe"],
+    standard: {
+      geschosshoehe: 2.75, steigungen: 16, auftritt: 0.29,
+      laufbreite: 1.0, dicke: 0.20, laeufe: 1,
+    },
+    expo: "XC1", treppe: true, deckenschalung: true,
+    feldNamen: { dicke: "Laufplattendicke d [m]" },
+  },
+};
+
+/**
+ * Eingabeschritt der Maßfelder. Stückzahlen sind ganzzahlig, Längen in Metern.
+ */
+const BETON_FELD_SCHRITT = {
+  steigungen: { step: 1, min: 3 },
+  laeufe: { step: 1, min: 1 },
+  auftritt: { step: 0.01, min: 0.15 },
+  geschosshoehe: { step: 0.05, min: 0.5 },
 };
 
 const BETON_FELD_NAMEN = {
   laenge: "Länge a [m]", breite: "Breite b [m]", dicke: "Dicke d [m]", hoehe: "Höhe h [m]",
   durchmesser: "Durchmesser ⌀ [m]", koecherL: "Köcher a [m]", koecherB: "Köcher b [m]", koecherT: "Köcher t [m]",
+  geschosshoehe: "Geschosshöhe [m]", steigungen: "Steigungen n", auftritt: "Auftritt a [m]",
+  laufbreite: "Laufbreite [m]", laeufe: "Läufe", podestlaenge: "Podestlänge [m]",
 };
 
 /**
@@ -189,6 +211,26 @@ function betonGeometrie(element, arbeitsraum) {
 
   if (typ.form === "linie") {
     const laenge = achsLaenge || 1;
+    if (element.kind === "treppe") {
+      // Die Achse legt Antritt und Laufrichtung fest; die Lauflänge folgt aus
+      // Steigungszahl und Auftritt nach DIN 18065, nicht aus der Achslänge.
+      const t = treppeGeometrie({
+        geschosshoehe: wert("geschosshoehe", 2.75),
+        steigungen: wert("steigungen", 16),
+        auftritt: wert("auftritt", 0.29),
+        laufbreite: wert("laufbreite", 1.0),
+        dicke: wert("dicke", 0.2),
+        laeufe: wert("laeufe", 1),
+        podestlaenge: element.podestlaenge,
+        nutzung: element.nutzung,
+      });
+      return {
+        volumen: t.volumen, schalung: t.schalung, schalungTeile: t.schalungTeile,
+        aushub: 0, grundflaeche: t.grundflaeche, hoehe: t.geschosshoehe,
+        laenge: t.lauflaenge, breite: t.laufbreite, dicke: t.dicke,
+        treppe: t, achsLaenge: laenge, beschreibung: t.beschreibung,
+      };
+    }
     if (element.kind === "streifenfundament") {
       const b = wert("breite", 0.6), d = wert("dicke", 0.5);
       return {
@@ -323,6 +365,11 @@ function betonAuswertung(element, arbeitsraum) {
   if (element.kind === "koecherfundament" && geo.koecher && geo.koecher.t < 0.6) {
     warnungen.push("Köchertiefe unter 0,60 m – Einbindetiefe und Verbund der Fertigteilstütze nachweisen.");
   }
+  if (element.kind === "treppe" && geo.treppe) {
+    treppeNachweis(geo.treppe, { nutzung: element.nutzung, durchgangshoehe: element.durchgangshoehe })
+      .filter((z) => !z.erfuellt)
+      .forEach((z) => warnungen.push(`DIN 18065: ${z.regel} = ${z.wert}, gefordert ${z.grenze}.`));
+  }
 
   return {
     typ, typName: typ.name, geo, anzahl,
@@ -333,8 +380,13 @@ function betonAuswertung(element, arbeitsraum) {
     aushub: geo.aushub * anzahl,
     masse: volumen * STAHLBETON_DICHTE, // kg, Stahlbeton nach DIN EN 1991-1-1
     // Eigenlast flächiger Bauteile als Kennwert für die Lastannahmen
-    flaechenlast: typ.form === "flaeche" || typ.form === "linie"
-      ? (geo.dicke * STAHLBETON_DICHTE * 9.81) / 1000 : null,
+    flaechenlast: (typ.form === "flaeche" || typ.form === "linie") && element.kind !== "treppe"
+      ? (geo.dicke * STAHLBETON_DICHTE * 9.81) / 1000
+      // Treppe: Eigenlast der Laufplatte einschließlich der Stufen, auf die
+      // Grundrissfläche des Laufes bezogen
+      : element.kind === "treppe" && geo.treppe
+        ? (geo.treppe.volumen / Math.max(geo.treppe.grundflaeche, 0.01) * STAHLBETON_DICHTE * 9.81) / 1000
+        : null,
     kennwerte, deckung, warnungen,
   };
 }

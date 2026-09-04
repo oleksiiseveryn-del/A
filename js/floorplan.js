@@ -375,6 +375,8 @@ function grundrissSVG(daten) {
   const { waende, oeffnungenVon, geometrieVon, projekt } = daten;
   // Abzüge/Zuschläge je Raum (Index wie in der Raumliste); ohne Angabe ohne Wirkung
   const bilanzVon = daten.bilanzVon || (() => null);
+  // Treppen: [{ lage: { x0, z0, richtung }, geo, bezeichnung }] nach DIN 18065
+  const treppen = daten.treppen || [];
   if (!waende.length) return "";
 
   // Ausdehnung über alle Wände einschließlich Dicke
@@ -385,6 +387,17 @@ function grundrissSVG(daten) {
       minX = Math.min(minX, p.x - d); maxX = Math.max(maxX, p.x + d);
       minZ = Math.min(minZ, p.z - d); maxZ = Math.max(maxZ, p.z + d);
     });
+  });
+  treppen.forEach((t) => {
+    const rad = (t.lage.richtung * Math.PI) / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    [[0, 0], [t.geo.lauflaenge, 0], [t.geo.lauflaenge, t.geo.laufbreite], [0, t.geo.laufbreite]]
+      .forEach(([u, v]) => {
+        const x = t.lage.x0 + u * cos - v * sin;
+        const z = t.lage.z0 + u * sin + v * cos;
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+      });
   });
   const breiteM = Math.max(maxX - minX, 0.5);
   const tiefeM = Math.max(maxZ - minZ, 0.5);
@@ -550,6 +563,12 @@ function grundrissSVG(daten) {
     svg += `</g>`;
   });
 
+  // Treppen nach DIN 18065 über den Wänden: Lauf, Stufenvorderkanten,
+  // Lauflinie mit Antrittskreis und Pfeil sowie die Angabe „n STG s/a"
+  treppen.forEach((t) => {
+    svg += treppeGrundrissSVG(t.lage, t.geo, px, pz, t.bezeichnung || "");
+  });
+
   // Gesamtmaße unten und links nur, wenn die Außenwände keine eigenen
   // Maßketten tragen – sonst stünden die Maße doppelt im Blatt
   if (!wandketten) {
@@ -634,7 +653,7 @@ function grundrissSVG(daten) {
   svg += `<line x1="${sfX}" y1="${sfY + 19}" x2="${sfX + sfB}" y2="${sfY + 19}" class="schriftfeld"/>`;
   svg += `<line x1="${sfX + 62}" y1="${sfY + 19}" x2="${sfX + 62}" y2="${sfY + sfH}" class="schriftfeld"/>`;
   svg += `<text x="${sfX + 3}" y="${sfY + 6}" class="t-firma">HSD Hamburg GmbH</text>`;
-  svg += `<text x="${sfX + 3}" y="${sfY + 15}" class="t-klein">${projekt.name || "Projekt"} · Grundriss · ${waende.length} Wände</text>`;
+  svg += `<text x="${sfX + 3}" y="${sfY + 15}" class="t-klein">${projekt.name || "Projekt"} · Grundriss · ${waende.length} Wände${treppen.length ? ` · ${treppen.length} Treppe${treppen.length === 1 ? "" : "n"}` : ""}</text>`;
   svg += `<text x="${sfX + 3}" y="${sfY + 25}" class="t-klein">Bearbeiter: ${projekt.bearbeiter}</text>`;
   svg += `<text x="${sfX + 3}" y="${sfY + 28.5}" class="t-klein">Datum: ${projekt.datum}</text>`;
   svg += `<text x="${sfX + 65}" y="${sfY + 25}" class="t-massstab">M 1:${nenner}</text>`;
@@ -664,6 +683,13 @@ function grundrissSVG(daten) {
   .t-raum { font-size: 3.4px; text-anchor: middle; font-weight: 600; }
   .t-oeffnung-plan { font-size: 2.2px; text-anchor: middle; paint-order: stroke; stroke: #ffffff; stroke-width: 0.7; stroke-linejoin: round; }
   .t-wand { font-size: 2.3px; text-anchor: middle; fill: #46525e; }
+  .treppe { fill: #eef0f2; stroke: #1b2733; stroke-width: 0.4; }
+  .treppe-stufe { stroke: #1b2733; stroke-width: 0.25; }
+  .lauflinie { stroke: #1b2733; stroke-width: 0.3; }
+  .antritt { fill: none; stroke: #1b2733; stroke-width: 0.3; }
+  .pfeil { fill: #1b2733; stroke: none; }
+  .t-treppe { font-size: 2.4px; text-anchor: middle; font-weight: 600; paint-order: stroke; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: round; }
+  .t-treppe-mass { font-size: 2.3px; text-anchor: middle; paint-order: stroke; stroke: #ffffff; stroke-width: 0.8; stroke-linejoin: round; }
   .t-kopf { font-size: 3.2px; font-weight: 600; }
   .t-klein { font-size: 2.6px; }
   .t-firma { font-size: 4.5px; font-weight: 700; }

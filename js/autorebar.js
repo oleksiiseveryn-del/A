@@ -112,7 +112,9 @@ function automatischeBewehrung(element, geo, deckung, optionen) {
   const c = deckung.cNom;
 
   // ---- Platten, Fundamente und Bodenplatten
-  if (["decke", "bodenplatte", "einzelfundament", "koecherfundament", "streifenfundament"].indexOf(kind) >= 0) {
+  if (["decke", "bodenplatte", "einzelfundament", "koecherfundament", "streifenfundament", "treppe"].indexOf(kind) >= 0) {
+    // Die Treppenlaufplatte ist eine einachsig gespannte Platte; maßgebend
+    // ist die Plattendicke, nicht die Geschosshöhe
     const h = kind === "streifenfundament" ? geo.dicke : (geo.dicke || geo.hoehe);
     const mind = plattenMindestbewehrung(h, c, 12, kennwerte);
     const haupt = waehleMatte(mind.asMin, mind.sMaxHaupt);
@@ -127,10 +129,19 @@ function automatischeBewehrung(element, geo, deckung, optionen) {
     const parameter = { dsUnten: haupt.ds, sUnten: haupt.s };
     // Obere Lage konstruktiv mit mindestens 20 % der unteren Lage; die
     // Stützbewehrung durchlaufender Platten folgt aus der Bemessung
-    if (kind === "decke" || kind === "bodenplatte" || kind === "koecherfundament") {
+    if (kind === "decke" || kind === "bodenplatte" || kind === "koecherfundament" || kind === "treppe") {
       parameter.obenAktiv = true;
       parameter.dsOben = quer.ds;
       parameter.sOben = quer.s;
+    }
+    if (kind === "treppe") {
+      // Querbewehrung der Laufplatte: mindestens 20 % der Haupttragbewehrung
+      parameter.dsBuegel = quer.ds;
+      parameter.sBuegel = quer.s;
+      hinweise.push("Treppenlauf als einachsig gespannte Platte behandelt; die "
+        + "Haupttragbewehrung liegt in Laufrichtung, die Querbewehrung quer dazu.");
+      hinweise.push("Obere Lage an Antritt und Austritt ist konstruktiv angesetzt; "
+        + "die Zugkraft am einspringenden Knick folgt aus der Bemessung.");
     }
     if (kind === "streifenfundament") {
       parameter.dsLaengs = quer.ds;

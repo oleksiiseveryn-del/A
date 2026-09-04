@@ -91,7 +91,7 @@
         <input type="number" id="bauteilHoehe" step="0.05" min="0.1" value="2.75" title="Wandhöhe bzw. Breite des Streifenfundaments in Metern">
       </span>
       <span class="tool-group">
-        <button class="tool-btn plain" id="btnBetonteil" title="Betonbauteil auf der Arbeitsebene setzen; Abmessungen anschließend im Reiter Beton">▣ Betonteil</button>
+        <button class="tool-btn plain" id="btnBetonteil" title="Betonbauteil auf der Arbeitsebene setzen; Abmessungen anschließend im Reiter Beton. Treppe: erster Punkt = Antritt, zweiter Punkt = Laufrichtung">▣ Betonteil</button>
         <select id="betonTyp" title="Betonbauteil mit Regelabmessungen nach DIN EN 1992-1-1">
           <option value="einzelfundament" selected>Einzelfundament</option>
           <option value="streifenfundament">Streifenfundament</option>
@@ -104,6 +104,7 @@
           <option value="stuetze">Stütze rechteckig</option>
           <option value="stuetze_rund">Stütze rund</option>
           <option value="unterzug">Unterzug / Balken</option>
+          <option value="treppe">Massivtreppe (DIN 18065)</option>
         </select>
         <select id="betonGuete" title="Betonfestigkeitsklasse nach DIN EN 1992-1-1 Tab. 3.1">
           <option value="C20/25">C20/25</option>
@@ -426,6 +427,53 @@
         <tbody id="betonBody"></tbody>
       </table>
       <div class="empty-state" id="betonEmpty">Noch kein Betonbauteil gesetzt – links „▣ Betonteil“ wählen und auf der Arbeitsebene setzen.</div>
+
+      <h3 class="section-title">Treppen nach DIN 18065</h3>
+      <p class="view-note">Hauptmaße und Regeln gerader Massivtreppen: Schrittmaßregel 2&nbsp;s&nbsp;+&nbsp;a =
+        59 … 65&nbsp;cm (Zielwert 63&nbsp;cm), Sicherheitsregel s&nbsp;+&nbsp;a ≈ 46&nbsp;cm, Bequemlichkeitsregel
+        a&nbsp;−&nbsp;s ≈ 12&nbsp;cm, Steigung und Auftritt je Nutzungsart, nutzbare Laufbreite, lichte Durchgangshöhe
+        ≥ 2,00&nbsp;m und höchstens 18 Steigungen je Lauf. Alle Steigungen eines Laufes sind gleich; längere Läufe
+        werden durch ein Podest mit mindestens der Laufbreite geteilt. Die hinterlegten Grenzwerte sind Voreinstellung –
+        maßgebend sind die geltende Fassung der DIN 18065 und die Landesbauordnung. Handlauf, Geländer,
+        Absturzsicherung, Rutschhemmung, Trittschallschutz und Brandschutz sind gesondert nachzuweisen.</p>
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="treppeElement">Treppe</label>
+          <select id="treppeElement" title="Treppe, deren Nachweis angezeigt wird"></select>
+        </div>
+        <div class="field">
+          <label for="treppeNutzung">Nutzungsart</label>
+          <select id="treppeNutzung" title="Hauptmaße nach DIN 18065 je Nutzungsart"></select>
+        </div>
+        <div class="field">
+          <label for="treppeDurchgang">lichte Durchgangshöhe [m]</label>
+          <input type="number" id="treppeDurchgang" step="0.05" min="1.5" value="2.00"
+                 title="Senkrecht über der Lauflinie gemessen; nach DIN 18065 mindestens 2,00 m">
+        </div>
+        <div class="field">
+          <label for="treppePodest">Podestlänge [m]</label>
+          <input type="number" id="treppePodest" step="0.05" min="0.3" value="1.00"
+                 title="Nur bei mehreren Läufen; mindestens die nutzbare Laufbreite">
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnTreppeVorschlag" title="Steigungszahl und Auftritt zur Geschosshöhe nach der Schrittmaßregel vorschlagen">↧ Steigungen vorschlagen</button>
+        </div>
+      </div>
+      <table class="members-table" id="treppeTable">
+        <thead>
+          <tr>
+            <th>Regel nach DIN 18065</th>
+            <th>vorhanden</th>
+            <th>gefordert</th>
+            <th>Nachweis</th>
+            <th>Bemerkung</th>
+          </tr>
+        </thead>
+        <tbody id="treppeBody"></tbody>
+      </table>
+      <div class="empty-state" id="treppeEmpty">Keine Treppe vorhanden – links „▣ Betonteil“ mit der Art „Massivtreppe“ wählen, Antritt und Laufrichtung anklicken.</div>
+      <div class="layer-note" id="treppeKennwerte"></div>
 
       <h3 class="section-title">Decken und Deckenpläne</h3>
       <p class="view-note">Deckenspiegel je Geschossebene: Deckenplatten mit Dicke, Höhenkote, Spannrichtung und
@@ -897,6 +945,13 @@
           mit Übergreifungsstoß l<sub>0</sub> = x · d<sub>s</sub> (Richtwert). Massen nach DIN 488-1/-2
           (m = π/4 · d<sub>s</sub>² · 7850 kg/m³), Biegerollendurchmesser nach DIN EN 1992-1-1 Tab. 8.1N,
           Darstellung nach DIN 1356-1 und DIN EN ISO 3766. Stahlliste und Stahlauszug nach Durchmessern</li>
+        <li><strong>Treppen</strong> nach DIN 18065: Steigung s = Geschosshöhe/Steigungszahl, Lauflänge
+          (n − 1) · a, Steigungswinkel, Laufplattenvolumen einschließlich der Stufenkeile und Schalflächen
+          (Untersicht, Wangen, Stufenbretter); geprüft werden Steigung, Auftritt und nutzbare Laufbreite je
+          Nutzungsart, Schrittmaßregel 2 s + a = 59 … 65 cm, Sicherheitsregel s + a ≈ 46 cm,
+          Bequemlichkeitsregel a − s ≈ 12 cm, lichte Durchgangshöhe ≥ 2,00 m, höchstens 18 Steigungen je Lauf
+          und die Podestlänge ≥ Laufbreite. Die Steigungszahl wird auf Wunsch aus der Geschosshöhe
+          vorgeschlagen. Die Grenzwerte sind Voreinstellung nach DIN 18065 und im Bauteil überschreibbar</li>
         <li><strong>Raumflächen</strong> nach DIN 277-1: lichte Maße in Höhe der Fußbodenoberkante durch Versatz
           der Wandachsen um die halbe Wanddicke; Netto-Raumfläche NRF = lichte Fläche − Konstruktionsflächen
           (Stützen, Pfeiler, Vorlagen, Schächte, Schornsteine) + Nischen bis zum Fußboden. Wahlweise mit den
@@ -923,6 +978,12 @@
           Holz (DIN EN 1995), Feuchteschutz nach DIN 4108-3, Schallschutznachweis nach DIN 4109, Brandschutz
           sowie die Gebäudebilanz und die Höchstwerte der U-Werte nach GEG – der Zielwert in der Tabelle dient
           nur dem Abgleich. Bauteile gegen Erdreich sind nach DIN EN ISO 13370 zu bewerten.</li>
+        <li><strong>Treppen:</strong> Tragfähigkeit und Gebrauchstauglichkeit der Laufplatte nach DIN EN 1992-1-1,
+          Handlauf, Geländer und Absturzsicherung nach DIN 18065 mit DIN EN 1991-1-1, Rutschhemmung nach
+          DIN 51130 bzw. den Regeln der Unfallversicherungsträger, Trittschallschutz nach DIN 4109,
+          Brandschutz und die Anforderungen der Landesbauordnung an notwendige Treppen und Rettungswege.
+          Gewendelte Läufe, Lauflinienermittlung und Wendelmaße sind nicht enthalten – gerechnet werden gerade
+          Läufe mit Zwischenpodesten</li>
         <li><strong>Betonbau:</strong> sämtliche Nachweise nach DIN EN 1992-1-1 – Biegung mit Längskraft, Querkraft,
           Durchstanzen, Torsion, Knicknachweis schlanker Stützen, Rissbreiten und Verformungen, Verankerungs- und
           Übergreifungslängen, Mindest- und Höchstbewehrung, Fugen und Arbeitsfugen. Für die Gründung zusätzlich der
@@ -972,6 +1033,7 @@
 <script src="js/architecture.js"></script>
 <script src="js/elevation.js"></script>
 <script src="js/floorplan.js"></script>
+<script src="js/stairs.js"></script>
 <script src="js/concrete.js"></script>
 <script src="js/rebar.js"></script>
 <script src="js/autorebar.js"></script>

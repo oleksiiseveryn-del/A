@@ -105,7 +105,7 @@ cd python
 python -m unittest discover -s tests -v
 ```
 
-45 Prüfungen decken die Tabellenwerte des Betonstahls, die Mindestbewehrung, die
+46 Prüfungen decken die Tabellenwerte des Betonstahls, die Mindestbewehrung, die
 Biegeliste, den Schneidplan und die Dateiausgabe ab. Ein weiterer Test führt die
 Bewehrungswahl in Python **und** in der Weboberfläche aus und vergleicht beide
 Ergebnisse Stück für Stück – so bleibt es bei einer Rechenweise in zwei Umsetzungen.
@@ -119,7 +119,8 @@ Ergebnisse Stück für Stück – so bleibt es bei einer Rechenweise in zwei Ums
   (`d_s ≤ 16 mm → 4 d_s`, sonst `7 d_s`)
 * Konstruktive Mindestbewehrung nach DIN EN 1992-1-1, Abschnitt 9:
   Platten 9.2.1.1 und 9.3.1.1, Balken 9.2.2, Stützen 9.5.2 und 9.5.3,
-  Wände 9.6.2 und 9.6.3
+  Wände 9.6.2 und 9.6.3; die Treppenlaufplatte wird als einachsig gespannte
+  Platte geführt (maßgebend ist die Laufplattendicke, nicht die Geschosshöhe)
 * Schneidplan nach First-Fit-Decreasing; Wendeln und überlange Stäbe werden als
   Sonderlängen geführt, nicht aus Lagerlängen geschnitten
 

@@ -73,6 +73,7 @@ const BEWEHRUNG_STANDARD = {
   stuetze:           { dsLaengs: 16, nLaengs: 4, dsBuegel: 8, sBuegel: 200 },
   stuetze_rund:      { dsLaengs: 16, nLaengs: 6, dsBuegel: 8, sBuegel: 200 },
   unterzug:          { dsLaengs: 16, nLaengs: 3, dsOben: 12, nOben: 2, dsBuegel: 8, sBuegel: 200 },
+  treppe:            { dsUnten: 12, sUnten: 150, dsOben: 10, sOben: 150, obenAktiv: true, dsBuegel: 8, sBuegel: 250 },
 };
 
 /** Beschriftung der Bewehrungsparameter; je Bauteilart abweichend. */
@@ -89,6 +90,11 @@ const BEWEHRUNG_FELD_NAMEN_TYP = {
   unterzug: { dsLaengs: "⌀ unten [mm]", nLaengs: "n unten", dsOben: "⌀ oben [mm]" },
   bohrpfahl: { dsBuegel: "⌀ Wendel [mm]", sBuegel: "Steigung [mm]" },
   koecherfundament: { dsBuegel: "⌀ Köcherbügel [mm]", sBuegel: "e Köcherbügel [mm]" },
+  treppe: {
+    dsUnten: "⌀ längs unten [mm]", sUnten: "e längs unten [mm]",
+    dsOben: "⌀ oben (Knick) [mm]", sOben: "e oben [mm]",
+    dsBuegel: "⌀ quer [mm]", sBuegel: "e quer [mm]", obenAktiv: "obere Lage",
+  },
 };
 
 function bewehrungFeldName(kind, feld) {
@@ -268,6 +274,44 @@ function bewehrungPositionen(element, geo, deckung, vorgabe) {
     positionen.push(machePosition(nr++, "Bügel", "buegel", p.dsBuegel || 8,
       stabAnzahl(l, s(p.sBuegel, 200)), { b: bBuegel, h: hBuegel }, v, `e = ${(p.sBuegel || 200)} mm`));
     hinweise.push("Bügelabstände aus der Querkraftbemessung, Zulagen über den Auflagern ergänzen.");
+  } else if (element.kind === "treppe" && geo.treppe) {
+    const t = geo.treppe;
+    const breiteNetto = Math.max(t.laufbreite - 2 * c, 0.1);
+    // Haupttragrichtung liegt im Lauf; die Stäbe folgen der geneigten Platte
+    // und werden an beiden Enden verankert (Richtwert l_bd = Faktor · d_s)
+    const dsHaupt = p.dsUnten || 12;
+    const verankerung = ((v.stossFaktor || 50) * dsHaupt) / 1000;
+    const laengeHaupt = t.geneigt + 2 * verankerung;
+    const sq = s(p.sUnten, 150), sQuer = s(p.sBuegel, 250), so = s(p.sOben, 150);
+
+    positionen.push(machePosition(nr++, "Haupttragbewehrung unten, längs Lauf", "haken", dsHaupt,
+      stabAnzahl(breiteNetto, sq) * t.laeufe, { laenge: laengeHaupt }, v,
+      `e = ${(p.sUnten || 150)} mm, geneigte Länge einschließlich Verankerung`));
+    positionen.push(machePosition(nr++, "Querbewehrung unten", gerade, p.dsBuegel || 8,
+      stabAnzahl(t.geneigt, sQuer) * t.laeufe, { laenge: breiteNetto }, v,
+      `e = ${(p.sBuegel || 250)} mm`));
+    if (p.obenAktiv !== false) {
+      // Obere Lage an Antritt und Austritt: Zugkraft am einspringenden Knick
+      // muss oben verankert werden (Übergreifung über je 1/4 der Lauflänge)
+      const laengeKnick = Math.max(t.geneigt / 4 + 2 * verankerung, 0.5);
+      positionen.push(machePosition(nr++, "obere Lage an Antritt und Austritt", "haken", p.dsOben || 10,
+        2 * stabAnzahl(breiteNetto, so) * t.laeufe, { laenge: laengeKnick }, v,
+        `e = ${(p.sOben || 150)} mm, je Lauf an beiden Knicken`));
+      positionen.push(machePosition(nr++, "obere Querbewehrung", gerade, p.dsBuegel || 8,
+        2 * stabAnzahl(Math.max(t.geneigt / 4, 0.2), sQuer) * t.laeufe, { laenge: breiteNetto }, v,
+        `e = ${(p.sBuegel || 250)} mm`));
+    }
+    if (t.laeufe > 1) {
+      const podestNetto = Math.max(t.podestlaenge - 2 * c, 0.1);
+      positionen.push(machePosition(nr++, "Podestbewehrung, beide Richtungen", gerade, dsHaupt,
+        (stabAnzahl(breiteNetto, sq) + stabAnzahl(podestNetto, sq)) * (t.laeufe - 1),
+        { laenge: Math.max(podestNetto, breiteNetto) }, v, `e = ${(p.sUnten || 150)} mm`));
+    }
+    hinweise.push("Die Bewehrung am einspringenden Knick (Antritt und Austritt) ist nach "
+      + "DIN EN 1992-1-1 Abs. 8 und 9 zu verankern; gekreuzte Stäbe dürfen dort nicht "
+      + "auf der Zugseite außen liegen.");
+    hinweise.push("Auflagerbewehrung an Podest und Decke, Trittschalldämmung bzw. elastische "
+      + "Lagerung und die Befestigung des Geländers sind gesondert zu erfassen.");
   } else if (element.kind === "bohrpfahl") {
     const l = geo.hoehe;                       // Pfahllänge
     const dKorb = Math.max(geo.laenge - 2 * c, 0.1);
@@ -487,6 +531,47 @@ function bewehrungAnsichten(element, geo, deckung, positionen) {
     };
   }
 
+  // ---- Treppe: Längsschnitt mit Stufenprofil und Querschnitt des Laufes
+  if (kind === "treppe" && geo.treppe) {
+    const t = geo.treppe;
+    const H = t.laufhoehe + t.dickeLotrecht;
+    const pos1 = positionen[0], pos2 = positionen[1], pos3 = positionen[2];
+    // Untere Lage: parallel zur Laufplattenuntersicht, um c versetzt
+    linien.push({ x1: c, y1: c, x2: t.lauflaenge - c, y2: t.laufhoehe - t.dickeLotrecht + c, pos: 1 });
+    // Obere Lage an Antritt und Austritt
+    if (pos3) {
+      const viertel = t.lauflaenge / 4;
+      const steig = t.laufhoehe / t.lauflaenge;
+      linien.push({ x1: c, y1: t.dickeLotrecht - c, x2: viertel, y2: t.dickeLotrecht - c + viertel * steig, pos: 3 });
+      linien.push({
+        x1: t.lauflaenge - viertel, y1: H - c - viertel * steig,
+        x2: t.lauflaenge - c, y2: H - c, pos: 3,
+      });
+    }
+    if (pos1) marken.push({ pos: 1, x: t.lauflaenge / 2, y: t.laufhoehe / 2 - t.dickeLotrecht / 2, text: posText(pos1), ansicht: "haupt" });
+    if (pos3) marken.push({ pos: 3, x: t.lauflaenge / 4, y: t.dickeLotrecht + t.laufhoehe / 4, text: posText(pos3), ansicht: "haupt" });
+
+    // Querschnitt des Laufes: untere Lage als Punkte, Querbewehrung als Linie
+    const nQuer = zeichenAnzahl(pos1 ? Math.round(pos1.anzahl / Math.max(t.laeufe, 1)) : 6);
+    verteile(c, t.laufbreite - c, nQuer).forEach((x) =>
+      punkte.push({ x, y: c, ds: pos1 ? pos1.ds : 12, pos: 1 }));
+    const schnittLinien = [{ x1: c, y1: c, x2: t.laufbreite - c, y2: c, pos: 2 }];
+    if (pos3) schnittLinien.push({ x1: c, y1: t.dicke - c, x2: t.laufbreite - c, y2: t.dicke - c, pos: 3 });
+    if (pos2) marken.push({ pos: 2, x: t.laufbreite / 2, y: c, text: posText(pos2), ansicht: "schnitt" });
+
+    return {
+      haupt: {
+        titel: "Längsschnitt Lauf", breite: t.lauflaenge, hoehe: H, linien,
+        polygon: treppeSchnittProfil(t), beschriftungX: "Lauflänge", beschriftungY: "Laufhöhe",
+      },
+      schnitt: {
+        titel: "Querschnitt Laufplatte", breite: t.laufbreite, hoehe: t.dicke,
+        punkte, linien: schnittLinien,
+      },
+      marken,
+    };
+  }
+
   // ---- Bohrpfahl: Ansicht des Korbes und Querschnitt
   if (kind === "bohrpfahl") {
     const d = geo.laenge, l = geo.hoehe;
@@ -551,6 +636,9 @@ function zeichneBewehrungsAnsicht(ansicht, feld, nenner, deckung, marken) {
   // Bauteilumriss
   if (ansicht.rund) {
     svg += `<circle cx="${px(ansicht.breite / 2).toFixed(2)}" cy="${py(ansicht.hoehe / 2).toFixed(2)}" r="${(W / 2).toFixed(2)}" class="beton"/>`;
+  } else if (ansicht.polygon) {
+    const pts = ansicht.polygon.map((pt) => `${px(pt.x).toFixed(2)},${py(pt.y).toFixed(2)}`).join(" ");
+    svg += `<polygon points="${pts}" class="beton"/>`;
   } else {
     svg += `<rect x="${x0.toFixed(2)}" y="${(yUK - H).toFixed(2)}" width="${W.toFixed(2)}" height="${H.toFixed(2)}" class="beton"/>`;
   }
@@ -562,7 +650,7 @@ function zeichneBewehrungsAnsicht(ansicht, feld, nenner, deckung, marken) {
   }
 
   // Betondeckung als gestrichelte Hilfslinie
-  if (!ansicht.rund && m(c) > 0.4) {
+  if (!ansicht.rund && !ansicht.polygon && m(c) > 0.4) {
     svg += `<rect x="${px(c).toFixed(2)}" y="${py(ansicht.hoehe - c).toFixed(2)}" width="${(W - 2 * m(c)).toFixed(2)}" height="${(H - 2 * m(c)).toFixed(2)}" class="deckung"/>`;
   }
 

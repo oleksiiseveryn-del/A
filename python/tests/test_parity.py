@@ -22,7 +22,8 @@ from hsd_bewehrung import automatische_bewehrung
 
 WURZEL = Path(__file__).resolve().parents[2]
 JS_DATEIEN = [
-    "js/materials.js", "js/architecture.js", "js/concrete.js", "js/rebar.js", "js/autorebar.js",
+    "js/materials.js", "js/architecture.js", "js/stairs.js", "js/concrete.js",
+    "js/rebar.js", "js/autorebar.js",
 ]
 
 FAELLE = [
@@ -37,6 +38,9 @@ FAELLE = [
     ("stuetze", {"laenge_m": 0.3, "breite_m": 0.3, "hoehe_m": 3.0, "dicke_m": 0.3}, 25, "C25/30", 2500.0),
     ("stuetze_rund", {"laenge_m": 0.4, "breite_m": 0.4, "hoehe_m": 3.0, "dicke_m": 0.4}, 25, "C25/30", 0.0),
     ("unterzug", {"laenge_m": 6.0, "breite_m": 0.3, "hoehe_m": 0.5, "dicke_m": 0.3}, 25, "C25/30", 0.0),
+    # Treppenlaufplatte: laenge_m ist die Lauflänge, dicke_m die Laufplattendicke
+    ("treppe", {"laenge_m": 4.35, "breite_m": 1.0, "hoehe_m": 2.75, "dicke_m": 0.20}, 25, "C25/30", 0.0),
+    ("treppe", {"laenge_m": 4.05, "breite_m": 1.25, "hoehe_m": 3.104, "dicke_m": 0.24}, 25, "C30/37", 0.0),
 ]
 
 JS_TREIBER = r"""

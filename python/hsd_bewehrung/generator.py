@@ -27,8 +27,11 @@ from .norms import (
     wand_mindestbewehrung,
 )
 
-PLATTENARTEN = ("decke", "bodenplatte", "einzelfundament", "koecherfundament", "streifenfundament")
-OBERE_LAGE = ("decke", "bodenplatte", "koecherfundament")
+# Die Treppenlaufplatte wird wie eine einachsig gespannte Platte behandelt;
+# maßgebend ist die Laufplattendicke, nicht die Geschosshöhe.
+PLATTENARTEN = ("decke", "bodenplatte", "einzelfundament", "koecherfundament",
+                "streifenfundament", "treppe")
+OBERE_LAGE = ("decke", "bodenplatte", "koecherfundament", "treppe")
 
 
 @dataclass
@@ -88,6 +91,10 @@ def automatische_bewehrung(art: str, geometrie: dict, deckung_mm: float,
         if art == "streifenfundament":
             parameter["dsLaengs"] = quer.ds
             parameter["nLaengs"] = max(4, int((breite - 2 * deckung_mm / 1000) / (quer.s / 1000)) + 1)
+        if art == "treppe":
+            # Querbewehrung der Laufplatte: mindestens 20 % der Haupttragbewehrung
+            parameter["dsBuegel"] = quer.ds
+            parameter["sBuegel"] = quer.s
 
         return Vorschlag(
             art="Platte", parameter=parameter, as_min=mind["as_min"], as_vorh=haupt.as_vorh,

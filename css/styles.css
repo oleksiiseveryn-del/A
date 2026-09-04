@@ -787,6 +787,15 @@ button.tool-btn.plain.active { background: var(--hsd-blue); color: #fff; border-
 #rasterInfo { margin: 4px 0 10px; }
 #rasterFelderX, #rasterFelderZ { min-width: 150px; font-family: var(--font-data); }
 
+/* Treppen nach DIN 18065: Nachweistabelle */
+#treppeTable td:nth-child(2),
+#treppeTable td:nth-child(3) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
+#treppeTable td:nth-child(1) { min-width: 190px; }
+#treppeTable td:nth-child(5) { color: var(--text-muted); font-size: 0.74rem; }
+#treppeKennwerte { margin: 6px 0 4px; font-family: var(--font-data); }
+.ok-badge { color: var(--ok); font-weight: 600; font-size: 0.74rem; }
+#treppeTable .cut-warning { margin-top: 0; font-weight: 600; }
+
 #deckenTable td:nth-child(n+5):nth-child(-n+13) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
 #deckenTable td:nth-child(2), #deckenTable td:nth-child(3) { text-align: right; font-family: var(--font-data); }
 #aussparungTable td:nth-child(7) { text-align: right; font-family: var(--font-data); }

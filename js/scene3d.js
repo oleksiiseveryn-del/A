@@ -484,6 +484,46 @@ function buildConcreteElement(element, geo, opacity) {
   });
   const p1 = element.p1;
 
+  // Treppe: Laufplatte mit aufgesetzten Stufen, Antritt an p1
+  if (element.kind === "treppe" && geo.treppe) {
+    const t = geo.treppe;
+    const p2 = element.p2 || p1;
+    const dx = p2.x - p1.x, dz = p2.z - p1.z;
+    const richtung = -Math.atan2(dz, dx);
+    const gruppe = new THREE.Group();
+
+    for (let lauf = 0; lauf < t.laeufe; lauf++) {
+      const yFuss = p1.y + lauf * t.laufhoehe;
+      const uOffset = lauf * (t.lauflaenge + t.podestlaenge);
+      // geneigte Laufplatte
+      const platte = new THREE.Mesh(
+        new THREE.BoxGeometry(t.geneigt, t.dicke, t.laufbreite), material);
+      platte.position.set(uOffset + t.lauflaenge / 2, yFuss + t.laufhoehe / 2 - (t.dickeLotrecht / 2), t.laufbreite / 2);
+      platte.rotation.z = Math.atan2(t.laufhoehe, t.lauflaenge);
+      gruppe.add(platte);
+      // Stufen als Quader auf der Laufplatte
+      for (let i = 1; i <= t.steigungenJeLauf; i++) {
+        const stufe = new THREE.Mesh(
+          new THREE.BoxGeometry(t.auftritt, t.steigung, t.laufbreite), material);
+        stufe.position.set(uOffset + (i - 1) * t.auftritt + t.auftritt / 2,
+          yFuss + i * t.steigung - t.steigung / 2, t.laufbreite / 2);
+        gruppe.add(stufe);
+      }
+      // Zwischenpodest
+      if (lauf < t.laeufe - 1 && t.podestlaenge > 0) {
+        const podest = new THREE.Mesh(
+          new THREE.BoxGeometry(t.podestlaenge, t.dicke, t.laufbreite), material);
+        podest.position.set(uOffset + t.lauflaenge + t.podestlaenge / 2,
+          yFuss + t.laufhoehe - t.dicke / 2, t.laufbreite / 2);
+        gruppe.add(podest);
+      }
+    }
+    // Gruppe vom Antritt aus in Laufrichtung drehen und stellen
+    gruppe.rotation.y = richtung;
+    gruppe.position.set(p1.x, 0, p1.z);
+    return gruppe;
+  }
+
   if (typ.form === "linie") {
     const p2 = element.p2 || p1;
     const dx = p2.x - p1.x, dz = p2.z - p1.z;

@@ -984,6 +984,7 @@
       geometrieVon: bauteilGeometrie,
       bezeichnungVon: bauteilBezeichnung,
       bilanzVon: (i) => bilanzen[i] || null,
+      treppen: treppenFuerGrundriss(),
       regelText: abzugRegelText(),
       projekt: {
         name: document.getElementById("projectName").value,
@@ -1303,6 +1304,12 @@
       bewehrungsgrad: typ.bewehrung,
       anzahl: 1,
     };
+    if (typ.treppe) {
+      // Voreinstellung nach DIN 18065; im Reiter Beton überschreibbar
+      element.nutzung = document.getElementById("treppeNutzung").value || "wohnung2";
+      element.durchgangshoehe = DURCHGANGSHOEHE_MIN;
+      element.podestlaenge = element.masse.laufbreite;
+    }
     model.beton.set(element.id, element);
 
     const a = betonWertung(element);
@@ -1331,16 +1338,23 @@
       const typ = a.typ;
 
       const feldName = (f) => (typ.feldNamen && typ.feldNamen[f]) || BETON_FELD_NAMEN[f];
-      const felder = typ.felder.map((f) => `
+      const felder = typ.felder.map((f) => {
+        const schritt = BETON_FELD_SCHRITT[f] || { step: 0.05, min: 0.01 };
+        return `
         <span class="layer-row">
           <label class="masse-label" title="${feldName(f)}">${feldName(f).replace(/ \[m\]$/, "")}</label>
-          <input type="number" step="0.05" min="0.01" data-bt="${element.id}" data-mass="${f}" value="${element.masse[f]}">
-        </span>`).join("");
-      const achse = typ.form === "linie"
-        ? `<div class="layer-note">Achslänge ${a.geo.laenge.toFixed(2)} m</div>`
-        : typ.form === "flaeche"
-          ? `<div class="layer-note">Grundriss ${a.geo.laenge.toFixed(2)} × ${a.geo.breite.toFixed(2)} m</div>`
-          : "";
+          <input type="number" step="${schritt.step}" min="${schritt.min}" data-bt="${element.id}" data-mass="${f}" value="${element.masse[f]}">
+        </span>`;
+      }).join("");
+      const achse = element.kind === "treppe" && a.geo.treppe
+        ? `<div class="layer-note">Lauflänge ${zahl(a.geo.treppe.lauflaenge, 2)} m · `
+          + `s = ${zahl(a.geo.treppe.steigung * 100, 1)} cm · ${zahl(a.geo.treppe.winkel, 1)}° · `
+          + `2s+a = ${zahl(a.geo.treppe.schrittmass * 100, 1)} cm</div>`
+        : typ.form === "linie"
+          ? `<div class="layer-note">Achslänge ${a.geo.laenge.toFixed(2)} m</div>`
+          : typ.form === "flaeche"
+            ? `<div class="layer-note">Grundriss ${a.geo.laenge.toFixed(2)} × ${a.geo.breite.toFixed(2)} m</div>`
+            : "";
 
       const hinweise = a.warnungen.slice();
       if (element.kind === "bohrpfahl") {
@@ -1381,6 +1395,7 @@
       body.appendChild(tr);
     });
 
+    renderTreppenTabelle();
     renderDeckenTable();
     renderSchalungsliste();
     renderBewehrungTable();
@@ -1792,6 +1807,141 @@
   }
 
   /** Gewählte Deckenebene aus dem Auswahlfeld. */
+  /* -------------------------------------------- Treppen nach DIN 18065 */
+
+  /** Alle Treppenbauteile in Reihenfolge der Position. */
+  function treppenBauteile() {
+    return Array.from(model.beton.values()).filter((e) => e.kind === "treppe");
+  }
+
+  /** Aktuell im Abschnitt „Treppen" gewählte Treppe. */
+  function gewaehlteTreppe() {
+    const treppen = treppenBauteile();
+    if (!treppen.length) return null;
+    const id = parseInt(document.getElementById("treppeElement").value, 10);
+    return treppen.find((t) => t.id === id) || treppen[0];
+  }
+
+  /** Nutzungsarten in die Auswahlliste eintragen (einmalig beim Start). */
+  function fuelleTreppenNutzung() {
+    const feld = document.getElementById("treppeNutzung");
+    feld.innerHTML = Object.keys(TREPPEN_NUTZUNG).map((k) => {
+      const n = TREPPEN_NUTZUNG[k];
+      return `<option value="${k}">${n.name} · s ≤ ${(n.sMax * 100).toFixed(0)} cm, `
+        + `a ≥ ${(n.aMin * 100).toFixed(0)} cm, b ≥ ${(n.breiteMin * 100).toFixed(0)} cm</option>`;
+    }).join("");
+  }
+
+  /** Nachweistabelle und Kennwerte der gewählten Treppe. */
+  function renderTreppenTabelle() {
+    const treppen = treppenBauteile();
+    const auswahl = document.getElementById("treppeElement");
+    const body = document.getElementById("treppeBody");
+    const empty = document.getElementById("treppeEmpty");
+    const kennwerte = document.getElementById("treppeKennwerte");
+
+    empty.hidden = treppen.length > 0;
+    const vorher = auswahl.value;
+    auswahl.innerHTML = treppen.map((t) =>
+      `<option value="${t.id}">${betonBezeichnung(t)}</option>`).join("");
+    if (treppen.some((t) => String(t.id) === vorher)) auswahl.value = vorher;
+
+    body.innerHTML = "";
+    kennwerte.textContent = "";
+    const element = gewaehlteTreppe();
+    if (!element) return;
+
+    // Eingabefelder auf die gewählte Treppe stellen
+    document.getElementById("treppeNutzung").value = element.nutzung || "wohnung2";
+    document.getElementById("treppeDurchgang").value =
+      (element.durchgangshoehe || DURCHGANGSHOEHE_MIN).toFixed(2);
+    document.getElementById("treppePodest").value =
+      (element.podestlaenge || element.masse.laufbreite || 1).toFixed(2);
+
+    const geo = betonGeometrie(element, arbeitsraumWert());
+    const t = geo.treppe;
+    const zeilen = treppeNachweis(t, {
+      nutzung: element.nutzung,
+      durchgangshoehe: element.durchgangshoehe,
+    });
+
+    zeilen.forEach((z) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${z.regel}</td>
+        <td>${z.wert}</td>
+        <td>${z.grenze}</td>
+        <td>${z.erfuellt ? '<span class="ok-badge">erfüllt</span>' : '<span class="cut-warning">nicht erfüllt</span>'}</td>
+        <td>${z.hinweis}</td>`;
+      body.appendChild(tr);
+    });
+
+    const auswertung = betonWertung(element);
+    kennwerte.textContent =
+      `${betonBezeichnung(element)} · ${t.beschreibung} · Steigungswinkel ${zahl(t.winkel, 1)}° · `
+      + `geneigte Lauflänge ${zahl(t.geneigt, 2)} m · Grundfläche ${zahl(t.grundflaeche, 2)} m² · `
+      + `Beton ${zahl(auswertung.volumen, 2)} m³ · Schalung ${zahl(auswertung.schalung, 2)} m² · `
+      + `Betonstahl ${auswertung.bewehrung.toFixed(0)} kg · `
+      + `Eigenlast g_k = ${auswertung.flaechenlast ? zahl(auswertung.flaechenlast, 2) : "–"} kN/m² `
+      + "auf die Grundrissfläche des Laufes.";
+  }
+
+  /** Steigungszahl und Auftritt aus der Geschosshöhe vorschlagen. */
+  function treppeVorschlagen() {
+    const element = gewaehlteTreppe();
+    if (!element) {
+      setStatus("Keine Treppe vorhanden – zuerst ein Betonbauteil der Art „Massivtreppe“ setzen.", "error");
+      return;
+    }
+    const h = element.masse.geschosshoehe || 2.75;
+    const v = treppeVorschlag(h, element.nutzung || "wohnung2");
+    element.masse.steigungen = v.steigungen;
+    element.masse.auftritt = Math.round(v.auftritt * 100) / 100;
+    const geo = betonGeometrie(element, arbeitsraumWert());
+    setStatus(
+      `${betonBezeichnung(element)}: ${geo.treppe.beschreibung}`
+      + ` · 2s+a = ${zahl(geo.treppe.schrittmass * 100, 1)} cm`
+      + (v.treffer ? "" : " – Schrittmaßregel nicht einhaltbar, Geschosshöhe oder Nutzungsart prüfen"),
+      v.treffer ? "ok" : "error");
+    refreshAll();
+  }
+
+  document.getElementById("btnTreppeVorschlag").addEventListener("click", treppeVorschlagen);
+  document.getElementById("treppeElement").addEventListener("change", renderTreppenTabelle);
+  ["treppeNutzung", "treppeDurchgang", "treppePodest"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", () => {
+      const element = gewaehlteTreppe();
+      if (!element) return;
+      if (id === "treppeNutzung") element.nutzung = document.getElementById(id).value;
+      if (id === "treppeDurchgang") {
+        const v = parseFloat(document.getElementById(id).value);
+        element.durchgangshoehe = Number.isFinite(v) && v > 0 ? v : DURCHGANGSHOEHE_MIN;
+      }
+      if (id === "treppePodest") {
+        const v = parseFloat(document.getElementById(id).value);
+        element.podestlaenge = Number.isFinite(v) && v > 0 ? v : element.masse.laufbreite;
+      }
+      refreshAll();
+    });
+  });
+  fuelleTreppenNutzung();
+
+  /** Treppen als Grundrisssymbole: Antritt, Laufrichtung und Geometrie. */
+  function treppenFuerGrundriss() {
+    return treppenBauteile().map((element) => {
+      const geo = betonGeometrie(element, arbeitsraumWert());
+      const p1 = element.p1, p2 = element.p2 || { x: p1.x + 1, z: p1.z };
+      return {
+        lage: {
+          x0: p1.x, z0: p1.z,
+          richtung: (Math.atan2(p2.z - p1.z, p2.x - p1.x) * 180) / Math.PI,
+        },
+        geo: geo.treppe,
+        bezeichnung: betonBezeichnung(element),
+      };
+    }).filter((t) => t.geo);
+  }
+
   function gewaehlteEbene(ebenen) {
     const feld = document.getElementById("deckenEbene");
     const wert = feld.value;

@@ -220,6 +220,23 @@ class TestAutomatischeBewehrung(unittest.TestCase):
         self.assertGreaterEqual(v.as_vorh, v.as_min)
         self.assertLessEqual(v.parameter["sBuegel"], v.s_max)
 
+    def test_treppe_ist_einachsig_gespannte_platte(self):
+        # Laufplatte d = 20 cm, c_nom 25 mm -> d_nutz = 200 - 25 - 12/2 = 169 mm
+        # a_s,min = max(0,26 · f_ctm/f_yk ; 0,0013) · b · d = 2,25 cm²/m
+        v = automatische_bewehrung(
+            "treppe", {"laenge_m": 4.35, "breite_m": 1.0, "hoehe_m": 2.75, "dicke_m": 0.20},
+            25, "C25/30",
+        )
+        self.assertEqual(v.art, "Platte")
+        self.assertEqual(v.gewaehlt, "⌀8/200 mm")
+        self.assertAlmostEqual(v.as_min, 2.25, places=2)
+        self.assertGreaterEqual(v.as_vorh, v.as_min)
+        # obere Lage an Antritt und Austritt sowie Querbewehrung der Laufplatte
+        self.assertTrue(v.parameter["obenAktiv"])
+        self.assertIn("dsBuegel", v.parameter)
+        self.assertIn("sBuegel", v.parameter)
+        self.assertLessEqual(v.parameter["sUnten"], v.s_max)
+
     def test_bohrpfahl_bleibt_manuell(self):
         v = automatische_bewehrung(
             "bohrpfahl", {"laenge_m": 0.6, "breite_m": 0.6, "hoehe_m": 8.0, "dicke_m": 0.6}, 55
