@@ -787,6 +787,13 @@ button.tool-btn.plain.active { background: var(--hsd-blue); color: #fff; border-
 #rasterInfo { margin: 4px 0 10px; }
 #rasterFelderX, #rasterFelderZ { min-width: 150px; font-family: var(--font-data); }
 
+#deckenTable td:nth-child(n+5):nth-child(-n+13) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
+#deckenTable td:nth-child(2), #deckenTable td:nth-child(3) { text-align: right; font-family: var(--font-data); }
+#aussparungTable td:nth-child(7) { text-align: right; font-family: var(--font-data); }
+#aussparungTable input[type="number"] { width: 76px; }
+#aussparungTable input[type="text"] { min-width: 150px; }
+.section-title.small { font-size: 0.78rem; margin-top: 14px; }
+
 #schalungTable td:nth-child(3),
 #schalungTable td:nth-child(4),
 #schalungTable td:nth-child(5) { text-align: right; white-space: nowrap; font-family: var(--font-data); }

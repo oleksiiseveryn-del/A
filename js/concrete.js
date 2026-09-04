@@ -219,13 +219,24 @@ function betonGeometrie(element, arbeitsraum) {
     const lz = Math.abs(element.p2.z - element.p1.z) || 0.01;
     const d = wert("dicke", 0.2);
     const rand = 2 * (lx + lz) * d;
+    // Deckendurchbrüche mindern Fläche und Volumen und erzeugen Randschalung
+    const oeffnungen = (element.aussparungen || []).filter((o) => (o.b || 0) > 0 && (o.t || 0) > 0);
+    const oeffnungsFlaeche = oeffnungen.reduce((sum, o) => sum + o.b * o.t, 0);
+    const oeffnungsUmfang = oeffnungen.reduce((sum, o) => sum + 2 * (o.b + o.t), 0);
+    const brutto = lx * lz;
+    const netto = Math.max(brutto - oeffnungsFlaeche, 0.01);
+    const kantenschalung = oeffnungsUmfang * d;
     return {
-      volumen: lx * lz * d,
-      schalung: typ.deckenschalung ? lx * lz + rand : rand,
-      schalungTeile: { seiten: rand, boden: typ.deckenschalung ? lx * lz : 0, aussparung: 0 },
+      volumen: netto * d,
+      schalung: (typ.deckenschalung ? netto : 0) + rand + kantenschalung,
+      schalungTeile: {
+        seiten: rand, boden: typ.deckenschalung ? netto : 0, aussparung: kantenschalung,
+      },
       aushub: typ.erdreich ? (lx + 2 * a) * (lz + 2 * a) * (d + 0.05) : 0,
-      grundflaeche: lx * lz, hoehe: d, laenge: lx, breite: lz, dicke: d,
-      beschreibung: `${lx.toFixed(2)} × ${lz.toFixed(2)} × d ${d.toFixed(2)} m`,
+      grundflaeche: netto, bruttoFlaeche: brutto, oeffnungsFlaeche, oeffnungen,
+      hoehe: d, laenge: lx, breite: lz, dicke: d,
+      beschreibung: `${lx.toFixed(2)} × ${lz.toFixed(2)} × d ${d.toFixed(2)} m`
+        + (oeffnungsFlaeche > 0 ? `, ${oeffnungen.length} Aussparung${oeffnungen.length === 1 ? "" : "en"} −${oeffnungsFlaeche.toFixed(2)} m²` : ""),
     };
   }
 

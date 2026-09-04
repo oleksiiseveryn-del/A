@@ -424,6 +424,67 @@
       </table>
       <div class="empty-state" id="betonEmpty">Noch kein Betonbauteil gesetzt – links „▣ Betonteil“ wählen und auf der Arbeitsebene setzen.</div>
 
+      <h3 class="section-title">Decken und Deckenpläne</h3>
+      <p class="view-note">Deckenspiegel je Geschossebene: Deckenplatten mit Dicke, Höhenkote, Spannrichtung und
+        Stützweite, Deckendurchbrüche mit Abzug von Fläche und Volumen sowie die Bauteile unter der Decke als Auflager.
+        Die Zuordnung ein- oder zweiachsig folgt der Faustregel l<sub>max</sub>/l<sub>min</sub> &gt; 2 → einachsig;
+        maßgebend ist die Bemessung nach DIN EN 1992-1-1. Zulagen an Aussparungen, Durchstanzbewehrung und die
+        Auflagerausbildung sind gesondert nachzuweisen.</p>
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="deckenEbene">Deckenebene</label>
+          <select id="deckenEbene" title="Ebene, für die der Deckenplan gezeichnet wird"></select>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnDeckenplan" title="Deckenplan dieser Ebene mit Achsraster zeichnen">▦ Deckenplan zeichnen</button>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn" id="btnAddAussparung" title="Deckendurchbruch in der gewählten Decke anlegen">+ Aussparung</button>
+        </div>
+      </div>
+      <table class="members-table" id="deckenTable">
+        <thead>
+          <tr>
+            <th>Pos</th>
+            <th>OK [m]</th>
+            <th>d [cm]</th>
+            <th>Spannrichtung</th>
+            <th>l<sub>x</sub> / l<sub>z</sub> [m]</th>
+            <th>l<sub>max</sub>/l<sub>min</sub></th>
+            <th>Stützweite [m]</th>
+            <th>Fläche brutto [m²]</th>
+            <th>Aussparungen [m²]</th>
+            <th>Fläche netto [m²]</th>
+            <th>Volumen [m³]</th>
+            <th>Deckenschalung [m²]</th>
+            <th>g<sub>k</sub> [kN/m²]</th>
+          </tr>
+        </thead>
+        <tbody id="deckenBody"></tbody>
+      </table>
+      <div class="empty-state" id="deckenEmpty">Keine Deckenplatte vorhanden – Stahlbetondecke oder Bodenplatte anlegen.</div>
+
+      <h4 class="section-title small">Deckendurchbrüche</h4>
+      <table class="members-table" id="aussparungTable">
+        <thead>
+          <tr>
+            <th>Pos</th>
+            <th>Decke</th>
+            <th>x ab Plattenrand [m]</th>
+            <th>z ab Plattenrand [m]</th>
+            <th>Breite [m]</th>
+            <th>Tiefe [m]</th>
+            <th>Fläche [m²]</th>
+            <th>Bemerkung</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="aussparungBody"></tbody>
+      </table>
+      <div class="empty-state" id="aussparungEmpty">Keine Deckendurchbrüche erfasst.</div>
+
       <h3 class="section-title">Schalungsliste</h3>
       <p class="view-note">Schalflächen getrennt nach Seiten-, Decken- und Aussparungsschalung, weil sie unterschiedlich
         kalkuliert und abgerechnet werden. Ausschalfristen, Schalungsdruck und die Standsicherheit der Schalung und ihrer
@@ -769,6 +830,10 @@
           (α<sub>cc</sub> = 0,85, γ<sub>C</sub> = 1,50 nach NA); Abgleich der Festigkeitsklasse mit der
           Expositionsklasse nach DIN 1045-2. Die Werte der Betondeckung und der Mindestfestigkeitsklassen sind
           Richtwerte des Nationalen Anhangs und im Bauteil überschreibbar</li>
+        <li><strong>Deckenpläne</strong>: Deckenebenen aus den Höhenkoten der Platten, Deckendurchbrüche mit Abzug von
+          Fläche und Volumen und Zuschlag der Kantenschalung, Spannrichtung nach der Faustregel
+          l<sub>max</sub>/l<sub>min</sub> &gt; 2 → einachsig (überschreibbar), Stützweite in Spannrichtung, Eigenlast der
+          Rohdecke g<sub>k</sub> = d · 25 kN/m³ sowie der Deckenspiegel mit Flächen, Volumen und Schalung</li>
         <li><strong>Achsraster und Positionsplan</strong>: Achsen aus Nullpunkt und Feldweiten, Bezeichnung mit Ziffern
           in Richtung x und Buchstaben in Richtung z; automatischer Achsbezug jedes Bauteils aus der nächstgelegenen
           Achse mit Versatz in Zentimetern. Positionsplan im Grundriss über alle Gewerke mit Achsraster, Maßketten der
@@ -822,7 +887,9 @@
           darzustellen. Für die Schalung sind Ausschalfristen, Schalungsdruck, Standsicherheit und Unterstützung nach
           DIN EN 13670 mit DIN 1045-3 und DIN EN 12812 sowie die Nachbehandlung des Betons gesondert festzulegen.
           Die Positionsnummern dieser Anwendung sind eine fortlaufende Bauteilkennzeichnung und mit der
-          Positionsnummerierung der Statik abzugleichen</li>
+          Positionsnummerierung der Statik abzugleichen. Im Deckenplan sind Zulagen an Aussparungen, der
+          Durchstanznachweis, die Auflagerausbildung und die Deckenrandausbildung gesondert nachzuweisen; die
+          Spannrichtung ist eine Vorgabe für die Mengenermittlung und ersetzt nicht die Schnittgrößenermittlung</li>
         <li><strong>Flächen und Rauminhalte:</strong> Zuordnung der Grundflächen zu den Bereichen a/b/c nach
           DIN 277-1 (überdeckt, nicht überdeckt), Brutto-Rauminhalt, Zuordnung zu Nutzungsgruppen NUF 1–7 sowie
           die Wohnfläche nach WoFlV § 4 mit den Anrechnungsfaktoren aus der lichten Raumhöhe (unter 1 m ohne
@@ -859,6 +926,7 @@
 <script src="js/rebar.js"></script>
 <script src="js/formwork.js"></script>
 <script src="js/gridplan.js"></script>
+<script src="js/slabplan.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

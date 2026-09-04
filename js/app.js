@@ -23,8 +23,9 @@
     nextOpeningId: 1,
     abzuege: new Map(),   // id -> Abzug/Nische { id, raum, typ, breite, tiefe, hoehe, anzahl, bisFussboden, bemerkung }
     nextAbzugId: 1,
-    beton: new Map(),     // id -> Betonbauteil { id, kind, p1, p2, masse, guete, expo, ds, sauberkeit, bewehrungsgrad, anzahl }
+    beton: new Map(),     // id -> Betonbauteil { id, kind, p1, p2, masse, guete, expo, ds, sauberkeit, bewehrungsgrad, anzahl, spannrichtung, aussparungen }
     nextBetonId: 1,
+    nextAussparungId: 1,  // fortlaufende Nummer der Deckendurchbrüche
   };
 
   // Baustoffpreise [€/m³], vom Anwender überschreibbar
@@ -197,6 +198,7 @@
     model.nextAbzugId = 1;
     model.beton.clear();
     model.nextBetonId = 1;
+    model.nextAussparungId = 1;
     pendingBetonPoint = null;
     pendingElementPoint = null;
     model.supports.clear();
@@ -1012,6 +1014,7 @@
   function blaettereBlatt(schritt) {
     if (sheetArt === "bewehrung") blaettereBewehrung(schritt);
     else if (sheetArt === "schalung") blaettereSchalplan(schritt);
+    else if (sheetArt === "deckenplan") blaettereDeckenplan(schritt);
     else if (sheetArt === "ansicht") zeichneAnsicht(sheetIndex + schritt);
   }
 
@@ -1049,6 +1052,10 @@
     }
     if (sheetArt === "positionsplan") {
       saveFile(`Positionsplan_${name}.svg`, inhalt, "image/svg+xml");
+      return;
+    }
+    if (sheetArt === "deckenplan") {
+      saveFile(`Deckenplan_${name}_OK${(deckenplanEbene || 0).toFixed(2).replace(".", "_")}.svg`, inhalt, "image/svg+xml");
       return;
     }
     const element = ansichtsWaende()[sheetIndex];
@@ -1374,6 +1381,7 @@
       body.appendChild(tr);
     });
 
+    renderDeckenTable();
     renderSchalungsliste();
     renderBewehrungTable();
     renderStahlliste();
@@ -1621,6 +1629,197 @@
     const id = e.target.getAttribute("data-remove-bt");
     if (id) { model.beton.delete(parseInt(id, 10)); refreshAll(); }
   });
+
+  /* -------------------------------------------------------------- Decken */
+
+  /** Alle Deckenebenen mit ihren Platten und den Bauteilen darunter. */
+  function deckenEbenenAktuell() {
+    const raum = arbeitsraumWert();
+    const ebenen = deckenEbenen(Array.from(model.beton.values()), betonGeometrie, raum);
+    // Grundrissfiguren für die Darstellung der Auflager anhängen
+    const figuren = new Map();
+    betonGrundrissFiguren(Array.from(model.beton.values()), betonGeometrie, betonBezeichnung, raum)
+      .forEach((f) => figuren.set(f.element.id, f));
+    ebenen.forEach((ebene) => {
+      ebene.darunter.forEach((e) => { e.figur = figuren.get(e.element.id) || null; });
+    });
+    return ebenen;
+  }
+
+  /** Gewählte Deckenebene aus dem Auswahlfeld. */
+  function gewaehlteEbene(ebenen) {
+    const feld = document.getElementById("deckenEbene");
+    const wert = feld.value;
+    return ebenen.find((e) => e.ok.toFixed(3) === wert) || ebenen[0] || null;
+  }
+
+  function renderDeckenTable() {
+    const body = document.getElementById("deckenBody");
+    const empty = document.getElementById("deckenEmpty");
+    body.innerHTML = "";
+    const ebenen = deckenEbenenAktuell();
+    const platten = [];
+    ebenen.forEach((e) => e.platten.forEach((p) => platten.push({ ebene: e, platte: p })));
+    empty.hidden = platten.length > 0;
+
+    // Auswahlfeld der Ebenen auffrischen, gewählte Ebene beibehalten
+    const feld = document.getElementById("deckenEbene");
+    const vorher = feld.value;
+    feld.innerHTML = ebenen.map((e) =>
+      `<option value="${e.ok.toFixed(3)}">OK ${koteText(e.ok)} · ${e.platten.length} ${e.platten.length === 1 ? "Platte" : "Platten"}</option>`).join("");
+    if (ebenen.some((e) => e.ok.toFixed(3) === vorher)) feld.value = vorher;
+
+    platten.forEach(({ ebene, platte }) => {
+      const element = platte.element;
+      const geo = platte.geo;
+      const spann = spannweiten(element, geo);
+      const anzahl = Math.max(1, element.anzahl || 1);
+      const teile = geo.schalungTeile || { boden: 0 };
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${betonBezeichnung(element)}</td>
+        <td>${koteText(platte.koten.ok)}</td>
+        <td>${(geo.dicke * 100).toFixed(0)}</td>
+        <td>
+          <select data-decke="${element.id}" data-field="spannrichtung" title="automatisch: Faustregel l_max/l_min > 2 → einachsig">
+            ${Object.keys(SPANNRICHTUNGEN).map((k) => `<option value="${k}" ${k === (element.spannrichtung || "auto") ? "selected" : ""}>${SPANNRICHTUNGEN[k]}</option>`).join("")}
+          </select>
+        </td>
+        <td>${geo.laenge.toFixed(2)} / ${geo.breite.toFixed(2)}</td>
+        <td class="${spann.verhaeltnis > 2 ? "u-warn" : ""}">${spann.verhaeltnis.toFixed(2)}</td>
+        <td><strong>${spann.stuetzweite.toFixed(2)}</strong><div class="layer-note">${spann.richtungName}</div></td>
+        <td>${((geo.bruttoFlaeche || geo.grundflaeche) * anzahl).toFixed(2)}</td>
+        <td>${geo.oeffnungsFlaeche > 0 ? "−" + (geo.oeffnungsFlaeche * anzahl).toFixed(2) : "–"}</td>
+        <td><strong>${(geo.grundflaeche * anzahl).toFixed(2)}</strong></td>
+        <td>${(geo.volumen * anzahl).toFixed(2)}</td>
+        <td>${(teile.boden * anzahl).toFixed(2)}</td>
+        <td>${((geo.dicke * STAHLBETON_DICHTE * 9.81) / 1000).toFixed(2)}</td>`;
+      body.appendChild(tr);
+    });
+
+    renderAussparungTable(platten.map((p) => p.platte.element));
+  }
+
+  function renderAussparungTable(decken) {
+    const body = document.getElementById("aussparungBody");
+    const empty = document.getElementById("aussparungEmpty");
+    body.innerHTML = "";
+    let anzahl = 0;
+
+    decken.forEach((element) => {
+      (element.aussparungen || []).forEach((o) => {
+        anzahl++;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>D${o.id}</td>
+          <td>${betonBezeichnung(element)}</td>
+          <td><input type="number" step="0.05" min="0" data-aus="${o.id}" data-decke="${element.id}" data-field="x" value="${o.x}"></td>
+          <td><input type="number" step="0.05" min="0" data-aus="${o.id}" data-decke="${element.id}" data-field="z" value="${o.z}"></td>
+          <td><input type="number" step="0.05" min="0.05" data-aus="${o.id}" data-decke="${element.id}" data-field="b" value="${o.b}"></td>
+          <td><input type="number" step="0.05" min="0.05" data-aus="${o.id}" data-decke="${element.id}" data-field="t" value="${o.t}"></td>
+          <td>${(o.b * o.t).toFixed(3)}</td>
+          <td><input type="text" data-aus="${o.id}" data-decke="${element.id}" data-field="bemerkung" value="${o.bemerkung || ""}" placeholder="z. B. Schacht, Treppenauge"></td>
+          <td><button class="row-remove" data-remove-aus="${o.id}" data-decke="${element.id}" title="Aussparung löschen">✕</button></td>`;
+        body.appendChild(tr);
+      });
+    });
+    empty.hidden = anzahl > 0;
+  }
+
+  document.getElementById("deckenBody").addEventListener("change", (e) => {
+    const id = parseInt(e.target.getAttribute("data-decke"), 10);
+    if (!id) return;
+    const element = model.beton.get(id);
+    if (!element) return;
+    if (e.target.getAttribute("data-field") === "spannrichtung") element.spannrichtung = e.target.value;
+    refreshAll();
+  });
+
+  document.getElementById("aussparungBody").addEventListener("change", (e) => {
+    const deckeId = parseInt(e.target.getAttribute("data-decke"), 10);
+    const ausId = parseInt(e.target.getAttribute("data-aus"), 10);
+    const element = model.beton.get(deckeId);
+    if (!element || !ausId) return;
+    const o = (element.aussparungen || []).find((a) => a.id === ausId);
+    if (!o) return;
+    const field = e.target.getAttribute("data-field");
+    if (field === "bemerkung") o.bemerkung = e.target.value;
+    else o[field] = Math.max(0, parseFloat(e.target.value) || 0);
+    refreshAll();
+  });
+
+  document.getElementById("aussparungBody").addEventListener("click", (e) => {
+    const deckeId = parseInt(e.target.getAttribute("data-decke"), 10);
+    const ausId = parseInt(e.target.getAttribute("data-remove-aus"), 10);
+    const element = model.beton.get(deckeId);
+    if (!element || !ausId) return;
+    element.aussparungen = (element.aussparungen || []).filter((a) => a.id !== ausId);
+    refreshAll();
+  });
+
+  document.getElementById("btnAddAussparung").addEventListener("click", () => {
+    const ebenen = deckenEbenenAktuell();
+    const ebene = gewaehlteEbene(ebenen);
+    const platte = ebene && ebene.platten[0];
+    if (!platte) {
+      setStatus("Zuerst eine Decke oder Bodenplatte anlegen.", "error");
+      return;
+    }
+    const element = platte.element;
+    if (!element.aussparungen) element.aussparungen = [];
+    element.aussparungen.push({
+      id: model.nextAussparungId++, x: 0.5, z: 0.5, b: 1.0, t: 1.0, bemerkung: "",
+    });
+    setStatus(`Aussparung in ${betonBezeichnung(element)} angelegt – Lage und Maße in der Tabelle eingeben.`, "ok");
+    refreshAll();
+  });
+
+  document.getElementById("deckenEbene").addEventListener("change", () => renderDeckenTable());
+
+  function zeichneDeckenplan() {
+    const ebenen = deckenEbenenAktuell();
+    const ebene = gewaehlteEbene(ebenen);
+    if (!ebene) {
+      setStatus("Für den Deckenplan zuerst eine Decke oder Bodenplatte anlegen.", "error");
+      return;
+    }
+    // Architektur-Wände unter der Decke als zusätzliche Auflager
+    const architektur = architekturGrundrissFiguren(
+      Array.from(model.elements.values()), bauteilGeometrie, bauteilBezeichnung
+    ).filter((f) => f.klasse === "arch");
+
+    const svg = deckenplanSVG({
+      ebene, achsen: aktuelleAchsen(), bezeichnungVon: betonBezeichnung,
+      aufstellung: deckenAufstellung(ebene, betonBezeichnung), architektur,
+      projekt: {
+        name: document.getElementById("projectName").value,
+        datum: document.getElementById("projectDate").value,
+        bearbeiter: "Oleksii Severyn",
+      },
+    });
+
+    sheetArt = "deckenplan";
+    deckenplanEbene = ebene.ok;
+    document.getElementById("sheetBody").innerHTML = svg;
+    document.getElementById("sheetTitle").textContent = `Deckenplan OK ${koteText(ebene.ok)}`;
+    document.getElementById("sheetCounter").textContent =
+      `${ebene.platten.length} ${ebene.platten.length === 1 ? "Platte" : "Platten"} · ${ebene.darunter.length} Bauteile darunter`;
+    document.getElementById("sheetOverlay").hidden = false;
+  }
+
+  let deckenplanEbene = null;
+
+  /** Blättern zwischen den Deckenebenen. */
+  function blaettereDeckenplan(schritt) {
+    const ebenen = deckenEbenenAktuell();
+    if (!ebenen.length) return;
+    const i = ebenen.findIndex((e) => e.ok === deckenplanEbene);
+    const naechste = ebenen[(((i < 0 ? 0 : i + schritt) % ebenen.length) + ebenen.length) % ebenen.length];
+    document.getElementById("deckenEbene").value = naechste.ok.toFixed(3);
+    zeichneDeckenplan();
+  }
+
+  document.getElementById("btnDeckenplan").addEventListener("click", zeichneDeckenplan);
 
   /* ------------------------------------------------------------ Schalung */
 
@@ -2274,6 +2473,7 @@
       naechsteAbzugId: model.nextAbzugId,
       betonteile: Array.from(model.beton.values()),
       naechsteBetonId: model.nextBetonId,
+      naechsteAussparungId: model.nextAussparungId,
       achsraster: rasterVorgabe(),
       betonbau: {
         arbeitsraum: field("arbeitsraum"), preisBeton: field("preisBeton"),
@@ -2307,6 +2507,7 @@
     model.nextAbzugId = data.naechsteAbzugId || (model.abzuege.size + 1);
     (data.betonteile || []).forEach((b) => model.beton.set(b.id, b));
     model.nextBetonId = data.naechsteBetonId || (model.beton.size + 1);
+    model.nextAussparungId = data.naechsteAussparungId || 1;
     Object.keys(materialPreise).forEach((k) => delete materialPreise[k]);
     Object.assign(materialPreise, data.baustoffpreise || {});
 
@@ -2573,6 +2774,41 @@
           a.volumen.toFixed(2), a.schalung.toFixed(2), a.bewehrungsgrad, a.bewehrung.toFixed(0),
           a.aushub.toFixed(2), (a.masse / 1000).toFixed(2), a.warnungen.join(" ")]);
       });
+
+      const ebenen = deckenEbenenAktuell();
+      if (ebenen.length) {
+        rows.push([]);
+        rows.push(["Deckenspiegel je Ebene (Spannrichtung nach Faustregel l_max/l_min > 2 einachsig; maßgebend ist die Bemessung)"]);
+        rows.push(["Ebene OK [m]", "Pos", "d [cm]", "Spannrichtung", "lx [m]", "lz [m]", "l_max/l_min", "Stützweite [m]",
+          "Fläche brutto [m²]", "Aussparungen [m²]", "Fläche netto [m²]", "Volumen [m³]", "Deckenschalung [m²]",
+          "Randschalung [m²]", "g_k [kN/m²]"]);
+        ebenen.forEach((ebene) => {
+          const auf = deckenAufstellung(ebene, betonBezeichnung);
+          auf.zeilen.forEach((z) => {
+            rows.push([z.koten.ok.toFixed(2), z.bauteil, (z.dicke * 100).toFixed(0), z.spann.richtungName,
+              z.spann.lx.toFixed(2), z.spann.lz.toFixed(2), z.spann.verhaeltnis.toFixed(2), z.spann.stuetzweite.toFixed(2),
+              z.bruttoFlaeche.toFixed(2), z.oeffnungsFlaeche.toFixed(2), z.nettoFlaeche.toFixed(2),
+              z.volumen.toFixed(2), z.deckenschalung.toFixed(2), z.randschalung.toFixed(2), z.gk.toFixed(2)]);
+          });
+          rows.push([`Summe OK ${ebene.ok.toFixed(2)}`, "", "", "", "", "", "", "",
+            auf.summe.bruttoFlaeche.toFixed(2), auf.summe.oeffnungsFlaeche.toFixed(2), auf.summe.nettoFlaeche.toFixed(2),
+            auf.summe.volumen.toFixed(2), auf.summe.deckenschalung.toFixed(2), auf.summe.randschalung.toFixed(2), ""]);
+        });
+
+        const durchbrueche = [];
+        model.beton.forEach((element) => {
+          (element.aussparungen || []).forEach((o) => durchbrueche.push({ element, o }));
+        });
+        if (durchbrueche.length) {
+          rows.push([]);
+          rows.push(["Deckendurchbrüche"]);
+          rows.push(["Pos", "Decke", "x ab Plattenrand [m]", "z ab Plattenrand [m]", "Breite [m]", "Tiefe [m]", "Fläche [m²]", "Bemerkung"]);
+          durchbrueche.forEach(({ element, o }) => {
+            rows.push(["D" + o.id, betonBezeichnung(element), (o.x || 0).toFixed(2), (o.z || 0).toFixed(2),
+              (o.b || 0).toFixed(2), (o.t || 0).toFixed(2), ((o.b || 0) * (o.t || 0)).toFixed(3), o.bemerkung || ""]);
+          });
+        }
+      }
 
       const schal = schalungsAufstellung(Array.from(model.beton.values()), raum, betonGeometrie, betonBezeichnung);
       if (schal.zeilen.length) {
