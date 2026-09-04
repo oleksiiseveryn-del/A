@@ -161,6 +161,7 @@
         <button class="tab-btn" id="tabArch">Architektur</button>
         <button class="tab-btn" id="tabBeton">Beton</button>
         <button class="tab-btn" id="tabPositionen">Positionen</button>
+        <button class="tab-btn" id="tabBaustelle">Baustelle</button>
         <button class="tab-btn" id="tabCutList">Stückliste</button>
       </div>
     </div>
@@ -772,6 +773,220 @@
       <div class="empty-state" id="positionsEmpty">Noch keine Bauteile – Stäbe, Betonbauteile oder Architektur-Bauteile anlegen.</div>
     </div>
 
+    <div class="result-panel-body" id="viewBaustelle" hidden>
+
+      <h3 class="section-title">Aufmaß nach VOB/B § 14</h3>
+      <p class="view-note">Aufmaßblätter je LV-Position. Jede Zeile wird als <strong>Anzahl · Länge · Breite · Höhe</strong>
+        gerechnet; welche Maße gebraucht werden, folgt aus der Einheit. Zugang und Abzug werden getrennt geführt.
+        Öffnungen und Aussparungen bis zur <strong>Übermessungsgrenze</strong> der jeweiligen ATV werden nicht abgezogen,
+        sondern übermessen – die Grenze steht in der Position und ist überschreibbar. Die Voreinstellungen folgen den
+        Abrechnungsregeln (Abschnitt 5) der ATV; maßgebend ist die geltende Fassung der VOB/C.
+        <strong>Nicht enthalten</strong> sind die Prüfung gegen den LV-Text, Abschlagsrechnungen nach § 16 VOB/B,
+        Stundenlohnarbeiten nach § 15 VOB/B und der Datenaustausch nach REB-VB 23.003 bzw. GAEB.</p>
+
+      <div class="arch-actions">
+        <button class="tool-btn primary" id="btnAufmassNeu" title="Neues Aufmaßblatt für eine LV-Position anlegen">+ Aufmaßblatt</button>
+        <button class="tool-btn" id="btnAufmassAusBauteilen" title="Aufmaßblätter aus den erfassten Beton- und Architektur-Bauteilen vorbereiten">⤓ Aus Bauteilen übernehmen</button>
+        <button class="tool-btn" id="btnAufmassCsv" title="Alle Aufmaßblätter als CSV für Excel">⬇ Aufmaß (CSV)</button>
+      </div>
+
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="aufmassBlatt">Aufmaßblatt</label>
+          <select id="aufmassBlatt" title="Blatt, dessen Zeilen unten stehen"></select>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn" id="btnAufmassZeile" title="Aufmaßzeile anfügen">+ Zeile</button>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnAufmassblatt" title="Aufmaßblatt als A4-Blatt mit Unterschriftenfeldern">📐 Aufmaßblatt zeichnen</button>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn danger" id="btnAufmassLoeschen" title="Angezeigtes Aufmaßblatt löschen">🗑 Blatt löschen</button>
+        </div>
+      </div>
+
+      <table class="members-table" id="aufmassKopfTable">
+        <thead>
+          <tr>
+            <th>LV-Position</th>
+            <th>Kurztext</th>
+            <th>Einheit</th>
+            <th>Gewerk (ATV)</th>
+            <th>Übermessung [m²]</th>
+            <th>EP [€]</th>
+            <th>Aufmaßdatum</th>
+            <th>Aufgenommen</th>
+            <th>Anerkannt</th>
+          </tr>
+        </thead>
+        <tbody id="aufmassKopfBody"></tbody>
+      </table>
+
+      <h4 class="section-title small">Aufmaßzeilen</h4>
+      <table class="members-table" id="aufmassTable">
+        <thead>
+          <tr>
+            <th>Nr</th>
+            <th>±</th>
+            <th>Bezug (Bauteil, Achse, Geschoss)</th>
+            <th>Anzahl</th>
+            <th>Länge [m]</th>
+            <th>Breite [m]</th>
+            <th>Höhe [m]</th>
+            <th>Formel</th>
+            <th>Einzelgröße</th>
+            <th>Menge</th>
+            <th>wirksam</th>
+            <th>Bemerkung</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="aufmassBody"></tbody>
+      </table>
+      <div class="empty-state" id="aufmassEmpty">Noch kein Aufmaßblatt – „+ Aufmaßblatt“ anlegen oder aus den Bauteilen übernehmen.</div>
+      <div class="layer-note" id="aufmassSumme"></div>
+
+      <h4 class="section-title small">Zusammenstellung aller Aufmaßblätter</h4>
+      <table class="members-table" id="aufmassSummeTable">
+        <thead>
+          <tr>
+            <th>Pos</th>
+            <th>Kurztext</th>
+            <th>ATV</th>
+            <th>Zeilen</th>
+            <th>Zugang</th>
+            <th>Abzug</th>
+            <th>übermessen</th>
+            <th>Aufmaßsumme</th>
+            <th>EP [€]</th>
+            <th>Betrag [€]</th>
+          </tr>
+        </thead>
+        <tbody id="aufmassSummeBody"></tbody>
+      </table>
+
+      <h3 class="section-title">Bautagebuch</h3>
+      <p class="view-note">Tagesbericht je Bautag: Witterung, Arbeitszeit, anwesende Firmen mit Personalstärke,
+        Geräte, ausgeführte Leistungen, Lieferungen und besondere Vorkommnisse. Zu jedem Vorkommnis nennt der Bericht
+        die Vorschrift und die Frist – <strong>Behinderung</strong> nach VOB/B § 6 Abs. 1, <strong>Anordnung des
+        Auftraggebers</strong> nach § 1 Abs. 3 und 4 mit Nachtrag nach § 2 Abs. 5 und 6, <strong>Bedenken</strong>
+        nach § 4 Abs. 3, <strong>Arbeitsunfall</strong> nach SGB VII § 193.
+        <strong>Das Bautagebuch ersetzt diese Anzeigen nicht</strong>: Es hält fest, dass und wann etwas eingetreten
+        ist; die Anzeige selbst ist gesondert schriftlich an den Auftraggeber zu richten.</p>
+
+      <div class="arch-actions">
+        <button class="tool-btn primary" id="btnTagNeu" title="Neuen Bautag anlegen">+ Bautag</button>
+        <button class="tool-btn" id="btnTagebuchCsv" title="Bautagebuch als CSV für Excel">⬇ Bautagebuch (CSV)</button>
+      </div>
+
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="tagAuswahl">Bautag</label>
+          <select id="tagAuswahl" title="Tag, dessen Bericht unten steht"></select>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnTagesbericht" title="Tagesbericht als A4-Blatt">📄 Tagesbericht zeichnen</button>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn danger" id="btnTagLoeschen" title="Angezeigten Bautag löschen">🗑 Bautag löschen</button>
+        </div>
+      </div>
+
+      <table class="members-table" id="tagKopfTable">
+        <thead>
+          <tr>
+            <th>Datum</th>
+            <th>Bauabschnitt</th>
+            <th>von</th>
+            <th>bis</th>
+            <th>Pause</th>
+            <th>Wetter</th>
+            <th>T morgens [°C]</th>
+            <th>T mittags [°C]</th>
+            <th>Niederschlag [mm]</th>
+            <th>Wind</th>
+            <th>Bauleiter</th>
+          </tr>
+        </thead>
+        <tbody id="tagKopfBody"></tbody>
+      </table>
+      <div class="empty-state" id="tagEmpty">Noch kein Bautag erfasst – „+ Bautag“ anlegen.</div>
+
+      <div id="tagDetail" hidden>
+        <h4 class="section-title small">Firmen und Personalstärke <button class="tool-btn" id="btnTagFirma">+ Firma</button></h4>
+        <table class="members-table" id="tagFirmenTable">
+          <thead>
+            <tr>
+              <th>Firma</th>
+              <th>Gewerk</th>
+              <th>Poliere</th>
+              <th>Facharbeiter</th>
+              <th>Helfer</th>
+              <th>Azubi</th>
+              <th>Σ Personen</th>
+              <th>Stunden je Person</th>
+              <th>Mannstunden</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="tagFirmenBody"></tbody>
+        </table>
+
+        <h4 class="section-title small">Geräte <button class="tool-btn" id="btnTagGeraet">+ Gerät</button></h4>
+        <table class="members-table" id="tagGeraeteTable">
+          <thead>
+            <tr><th>Gerät</th><th>Anzahl</th><th>Einsatzstunden</th><th></th></tr>
+          </thead>
+          <tbody id="tagGeraeteBody"></tbody>
+        </table>
+
+        <h4 class="section-title small">Ausgeführte Leistungen <button class="tool-btn" id="btnTagLeistung">+ Leistung</button></h4>
+        <table class="members-table" id="tagLeistungTable">
+          <thead>
+            <tr><th>Bereich / Achse</th><th>LV-Position</th><th>Ausgeführte Leistung</th><th></th></tr>
+          </thead>
+          <tbody id="tagLeistungBody"></tbody>
+        </table>
+
+        <h4 class="section-title small">Lieferungen und Stoffe <button class="tool-btn" id="btnTagLieferung">+ Lieferung</button></h4>
+        <table class="members-table" id="tagLieferungTable">
+          <thead>
+            <tr><th>Lieferung</th><th>Lieferschein</th><th></th></tr>
+          </thead>
+          <tbody id="tagLieferungBody"></tbody>
+        </table>
+
+        <h4 class="section-title small">Besondere Vorkommnisse <button class="tool-btn" id="btnTagEreignis">+ Vorkommnis</button></h4>
+        <table class="members-table" id="tagEreignisTable">
+          <thead>
+            <tr><th>Art</th><th>Vorgang</th><th>Folge</th><th>Vorschrift und Frist</th><th></th></tr>
+          </thead>
+          <tbody id="tagEreignisBody"></tbody>
+        </table>
+
+        <h4 class="section-title small">Bemerkung</h4>
+        <textarea id="tagBemerkung" rows="2" placeholder="Freie Bemerkung zum Bautag"></textarea>
+        <div class="layer-note" id="tagHinweise"></div>
+      </div>
+
+      <h4 class="section-title small">Auswertung des Zeitraums</h4>
+      <p class="view-note">Grundlage für den Nachweis von Bauzeitverlängerung und Nachträgen: Arbeits-, Ausfall-,
+        Regen- und Frosttage sowie die Tage mit Behinderung und mit Anordnung des Auftraggebers.</p>
+      <div class="summary-bar" id="tagebuchKennzahlen"></div>
+      <table class="members-table" id="tagebuchFirmenTable">
+        <thead>
+          <tr><th>Firma</th><th>Gewerk</th><th>Einsatztage</th><th>größte Personalstärke</th><th>Mannstunden</th></tr>
+        </thead>
+        <tbody id="tagebuchFirmenBody"></tbody>
+      </table>
+    </div>
+
     <div class="result-panel-body" id="viewCutList" hidden>
       <div class="cutlist-controls">
         <div class="field">
@@ -1113,6 +1328,8 @@
 <script src="js/formwork.js"></script>
 <script src="js/gridplan.js"></script>
 <script src="js/slabplan.js"></script>
+<script src="js/measure.js"></script>
+<script src="js/sitelog.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

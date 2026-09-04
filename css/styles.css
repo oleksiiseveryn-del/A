@@ -1201,3 +1201,31 @@ header.app-header {
   border-radius: 3px;
   padding: 0 4px;
 }
+
+/* Baustelle: Aufmaß und Bautagebuch */
+#aufmassTable td:nth-child(9), #aufmassTable td:nth-child(10), #aufmassTable td:nth-child(11) {
+  text-align: right; white-space: nowrap; font-family: var(--font-data);
+}
+#aufmassTable td.formel { font-family: var(--font-data); white-space: nowrap; }
+#aufmassTable td.leer { text-align: center; color: var(--text-muted); }
+#aufmassTable input { width: 82px; }
+#aufmassTable input[data-feld="bezug"], #aufmassTable input[data-feld="bemerkung"] { width: 100%; min-width: 130px; }
+#aufmassTable tr.uebermessen td { color: var(--text-muted); }
+.uebermessen-marke { color: var(--warn); font-weight: 600; white-space: nowrap; }
+#aufmassKopfTable input[type="text"] { min-width: 120px; }
+#aufmassSummeTable td:nth-child(n+4) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
+#aufmassSumme { margin: 6px 0 4px; font-family: var(--font-data); }
+
+#tagKopfTable input[type="text"] { min-width: 90px; }
+#tagFirmenTable td:nth-child(n+3) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
+#tagFirmenTable input[type="number"], #tagFirmenTable input[inputmode] { width: 72px; }
+#tagGeraeteTable input[type="number"], #tagGeraeteTable input[inputmode] { width: 82px; }
+#tagLeistungTable input, #tagLieferungTable input, #tagEreignisTable input { width: 100%; min-width: 130px; }
+#tagEreignisTable tr.vorkommnis-anzeige td:first-child { border-left: 3px solid var(--err); }
+#tagEreignisTable td:nth-child(4) { min-width: 220px; }
+#tagBemerkung {
+  width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
+  font-family: var(--font-ui); font-size: 0.82rem; resize: vertical;
+}
+#tagHinweise { margin: 6px 0; }
+#tagebuchKennzahlen { border-top: none; padding-left: 0; background: none; }

@@ -26,6 +26,10 @@
     beton: new Map(),     // id -> Betonbauteil { id, kind, p1, p2, masse, guete, expo, ds, sauberkeit, bewehrungsgrad, anzahl, spannrichtung, aussparungen }
     nextBetonId: 1,
     nextAussparungId: 1,  // fortlaufende Nummer der Deckendurchbrüche
+    aufmass: new Map(),   // id -> Aufmaßblatt { id, pos, kurztext, einheit, gewerk, grenze, ep, datum, aufgenommen, anerkannt, zeilen }
+    nextAufmassId: 1,
+    bautagebuch: new Map(), // id -> Bautag { id, datum, abschnitt, von, bis, pause, wetter, tempFrueh, …, firmen, geraete, leistungen, lieferungen, ereignisse }
+    nextTagId: 1,
   };
 
   // Baustoffpreise [€/m³], vom Anwender überschreibbar
@@ -199,6 +203,10 @@
     model.beton.clear();
     model.nextBetonId = 1;
     model.nextAussparungId = 1;
+    model.aufmass.clear();
+    model.nextAufmassId = 1;
+    model.bautagebuch.clear();
+    model.nextTagId = 1;
     pendingBetonPoint = null;
     pendingElementPoint = null;
     model.supports.clear();
@@ -1034,6 +1042,19 @@
     else if (sheetArt === "schalung") blaettereSchalplan(schritt);
     else if (sheetArt === "deckenplan") blaettereDeckenplan(schritt);
     else if (sheetArt === "ansicht") zeichneAnsicht(sheetIndex + schritt);
+    else if (sheetArt === "aufmass") blaettereListe(aufmassBlaetter(), aufmassBlattId, schritt,
+      "aufmassBlatt", "btnAufmassblatt");
+    else if (sheetArt === "tagesbericht") blaettereListe(bautage(), tagesberichtId, schritt,
+      "tagAuswahl", "btnTagesbericht");
+  }
+
+  /** Im Blattfenster durch eine Liste blättern: Auswahlfeld setzen, neu zeichnen. */
+  function blaettereListe(liste, aktuelleId, schritt, auswahlId, knopfId) {
+    if (!liste.length) return;
+    const index = liste.findIndex((e) => e.id === aktuelleId);
+    const naechste = liste[(index + schritt + liste.length) % liste.length];
+    document.getElementById(auswahlId).value = String(naechste.id);
+    document.getElementById(knopfId).click();
   }
 
   document.getElementById("sheetPrev").addEventListener("click", () => blaettereBlatt(-1));
@@ -1066,6 +1087,14 @@
     if (sheetArt === "positionsplan") return blatt(`Positionsplan_${name}.svg`);
     if (sheetArt === "deckenplan") {
       return blatt(`Deckenplan_${name}_OK${(deckenplanEbene || 0).toFixed(2).replace(".", "_")}.svg`);
+    }
+    if (sheetArt === "aufmass") {
+      const am = model.aufmass.get(aufmassBlattId);
+      return blatt(`Aufmassblatt_${name}_${(am && am.pos ? am.pos : "Position").replace(/[^\w.-]+/g, "_")}.svg`);
+    }
+    if (sheetArt === "tagesbericht") {
+      const tag = model.bautagebuch.get(tagesberichtId);
+      return blatt(`Tagesbericht_${name}_${(tag && tag.datum) || "Bautag"}.svg`);
     }
     const element = ansichtsWaende()[sheetIndex];
     return element ? blatt(`Ansicht_${name}_${bauteilBezeichnung(element)}.svg`) : null;
@@ -2605,6 +2634,7 @@
     arch: { button: document.getElementById("tabArch"), view: document.getElementById("viewArch") },
     beton: { button: document.getElementById("tabBeton"), view: document.getElementById("viewBeton") },
     positionen: { button: document.getElementById("tabPositionen"), view: document.getElementById("viewPositionen") },
+    baustelle: { button: document.getElementById("tabBaustelle"), view: document.getElementById("viewBaustelle") },
     cutlist: { button: document.getElementById("tabCutList"), view: document.getElementById("viewCutList") },
   };
 
@@ -2617,6 +2647,7 @@
     if (which === "arch") renderArchTable();
     if (which === "beton") renderBetonTable();
     if (which === "positionen") renderPositionsTable();
+    if (which === "baustelle") renderBaustelle();
     if (which === "cutlist") renderCutList();
     if (which === "model") { result.resize(); renderModel(); }
   }
@@ -2631,8 +2662,655 @@
     if (!TABS.arch.view.hidden) renderArchTable();
     if (!TABS.beton.view.hidden) renderBetonTable();
     if (!TABS.positionen.view.hidden) renderPositionsTable();
+    if (!TABS.baustelle.view.hidden) renderBaustelle();
     if (!TABS.cutlist.view.hidden) renderCutList();
   }
+
+  /** Zeilen als CSV für Excel: Semikolon als Trennzeichen, Anführungszeichen verdoppelt. */
+  function zuCsv(rows) {
+    return rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\r\n");
+  }
+
+  /** Kopfangaben, die in jedem Blatt stehen. */
+  function projektKopf() {
+    return {
+      name: document.getElementById("projectName").value,
+      datum: document.getElementById("projectDate").value,
+      bearbeiter: "Oleksii Severyn",
+    };
+  }
+
+  /* ============================================== Aufmaß nach VOB/B § 14 */
+
+  let aufmassBlattId = null;   // Aufmaßblatt im Blattfenster
+  let tagesberichtId = null;   // Bautag im Blattfenster
+
+  /** Alle Aufmaßblätter in der Reihenfolge ihrer Anlage. */
+  function aufmassBlaetter() {
+    return Array.from(model.aufmass.values());
+  }
+
+  /** Aktuell gewähltes Aufmaßblatt. */
+  function gewaehltesAufmass() {
+    const blaetter = aufmassBlaetter();
+    if (!blaetter.length) return null;
+    const id = parseInt(document.getElementById("aufmassBlatt").value, 10);
+    return blaetter.find((b) => b.id === id) || blaetter[0];
+  }
+
+  /** Leeres Aufmaßblatt anlegen. */
+  function neuesAufmass(vorgabe) {
+    const blatt = Object.assign({
+      id: model.nextAufmassId++,
+      pos: "", kurztext: "", einheit: "m²", gewerk: "din18299",
+      grenze: "", ep: "", datum: document.getElementById("projectDate").value || "",
+      aufgenommen: "Oleksii Severyn", anerkannt: "",
+      zeilen: [],
+    }, vorgabe || {});
+    model.aufmass.set(blatt.id, blatt);
+    return blatt;
+  }
+
+  /** Aufmaßzeile anfügen. */
+  function neueAufmassZeile(blatt, vorgabe) {
+    blatt.zeilen.push(Object.assign({
+      art: "zugang", bezug: "", anzahl: "1", laenge: "", breite: "", hoehe: "", bemerkung: "",
+    }, vorgabe || {}));
+  }
+
+  /**
+   * Aufmaßblätter aus den erfassten Bauteilen vorbereiten.
+   *
+   * Aus jedem Betonbauteil wird eine Zeile für Beton [m³] und eine für
+   * Schalung [m²], aus jeder Architektur-Wand eine Zeile für die Wandfläche;
+   * Fenster und Türen werden als Abzug eingetragen und damit von der
+   * Übermessungsregel der ATV erfasst. Die Zeilen sind ein Vorschlag aus dem
+   * Modell und ersetzen das Aufmaß am Bauwerk nicht.
+   */
+  function aufmassAusBauteilen() {
+    const raum = arbeitsraumWert();
+    let neu = 0;
+
+    const blattFuer = (schluessel, vorgabe) => {
+      const vorhanden = aufmassBlaetter().find((b) => b.herkunft === schluessel);
+      if (vorhanden) return vorhanden;
+      neu += 1;
+      return neuesAufmass(Object.assign({ herkunft: schluessel }, vorgabe));
+    };
+
+    if (model.beton.size) {
+      const beton = blattFuer("beton-volumen", {
+        pos: "Beton", kurztext: "Beton liefern und einbauen", einheit: "m³", gewerk: "din18331",
+      });
+      const schalung = blattFuer("beton-schalung", {
+        pos: "Schalung", kurztext: "Schalung stellen und ausschalen", einheit: "m²", gewerk: "din18331",
+      });
+      beton.zeilen = [];
+      schalung.zeilen = [];
+      model.beton.forEach((element) => {
+        const a = betonWertung(element);
+        const name = `${betonBezeichnung(element)} ${a.typName}`;
+        // Mengen aus dem Modell: Anzahl × Einzelmenge, Maße stehen im Bezug
+        beton.zeilen.push({
+          art: "zugang", bezug: name, anzahl: String(a.anzahl),
+          laenge: (a.geo.volumen).toFixed(3).replace(".", ","), breite: "1", hoehe: "1",
+          bemerkung: a.geo.beschreibung,
+        });
+        if (a.geo.schalung > 0) {
+          schalung.zeilen.push({
+            art: "zugang", bezug: name, anzahl: String(a.anzahl),
+            laenge: (a.geo.schalung).toFixed(3).replace(".", ","), breite: "1",
+            bemerkung: `Schalflächen aus der Bauteilgeometrie`,
+          });
+        }
+      });
+      void raum;
+    }
+
+    const waende = Array.from(model.elements.values()).filter((e) => BAUTEILTYPEN[e.kind].form === "linie");
+    if (waende.length) {
+      const wand = blattFuer("arch-wand", {
+        pos: "Wandfläche", kurztext: "Wandfläche nach Ansichtsfläche", einheit: "m²", gewerk: "din18330",
+      });
+      wand.zeilen = [];
+      waende.forEach((element) => {
+        const geo = bauteilGeometrie(element);
+        wand.zeilen.push({
+          art: "zugang", bezug: `${bauteilBezeichnung(element)} ${BAUTEILTYPEN[element.kind].name}`,
+          anzahl: String(element.anzahl || 1),
+          laenge: geo.laenge.toFixed(3).replace(".", ","),
+          breite: geo.hoehe.toFixed(3).replace(".", ","),
+          bemerkung: "Ansichtsfläche aus Achslänge × Höhe",
+        });
+        oeffnungenVon(element.id).forEach((o) => {
+          const typ = OEFFNUNGSTYPEN[o.typ];
+          wand.zeilen.push({
+            art: "abzug", bezug: `${bauteilBezeichnung(element)} · ${typ ? typ.name : o.typ}`,
+            anzahl: String(o.anzahl || 1),
+            laenge: Number(o.breite).toFixed(3).replace(".", ","),
+            breite: Number(o.hoehe).toFixed(3).replace(".", ","),
+            bemerkung: "Öffnung – Übermessung nach ATV prüfen",
+          });
+        });
+      });
+    }
+
+    if (!model.beton.size && !waende.length) {
+      setStatus("Keine Bauteile vorhanden, aus denen ein Aufmaß übernommen werden könnte.", "error");
+      return;
+    }
+    setStatus(`Aufmaßblätter aus dem Modell übernommen${neu ? ` · ${neu} Blatt neu angelegt` : ""}. `
+      + "Die Zeilen sind ein Vorschlag aus dem Modell und ersetzen das Aufmaß am Bauwerk nicht.", "ok");
+    refreshAll();
+  }
+
+  function renderAufmass() {
+    const blaetter = aufmassBlaetter();
+    const auswahl = document.getElementById("aufmassBlatt");
+    const vorher = auswahl.value;
+    auswahl.innerHTML = blaetter.map((b) =>
+      `<option value="${b.id}">${b.pos || "ohne Position"}${b.kurztext ? " · " + b.kurztext : ""}</option>`).join("");
+    if (blaetter.some((b) => String(b.id) === vorher)) auswahl.value = vorher;
+
+    document.getElementById("aufmassEmpty").hidden = blaetter.length > 0;
+    const kopf = document.getElementById("aufmassKopfBody");
+    const body = document.getElementById("aufmassBody");
+    kopf.innerHTML = "";
+    body.innerHTML = "";
+    document.getElementById("aufmassSumme").textContent = "";
+
+    const blatt = gewaehltesAufmass();
+    if (blatt) {
+      const a = aufmassPosition(blatt);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input type="text" data-am="${blatt.id}" data-feld="pos" value="${blatt.pos || ""}" placeholder="01.02.030"></td>
+        <td><input type="text" data-am="${blatt.id}" data-feld="kurztext" value="${blatt.kurztext || ""}" placeholder="Kurztext der LV-Position"></td>
+        <td>
+          <select data-am="${blatt.id}" data-feld="einheit">
+            ${Object.keys(AUFMASS_EINHEITEN).map((k) => `<option value="${k}" ${k === blatt.einheit ? "selected" : ""}>${AUFMASS_EINHEITEN[k].name}</option>`).join("")}
+          </select>
+        </td>
+        <td>
+          <select data-am="${blatt.id}" data-feld="gewerk" title="Bestimmt die Abrechnungsregel und die Übermessungsgrenze">
+            ${Object.keys(AUFMASS_GEWERKE).map((k) => `<option value="${k}" ${k === blatt.gewerk ? "selected" : ""}>${AUFMASS_GEWERKE[k].atv} – ${AUFMASS_GEWERKE[k].name}</option>`).join("")}
+          </select>
+        </td>
+        <td><input type="number" step="0.1" min="0" data-am="${blatt.id}" data-feld="grenze" value="${blatt.grenze || ""}" placeholder="${a.grenze}" title="Leer = Voreinstellung der ATV">
+          <div class="layer-note">${a.quelle}</div></td>
+        <td><input type="number" step="0.01" min="0" data-am="${blatt.id}" data-feld="ep" value="${blatt.ep || ""}" placeholder="0,00"></td>
+        <td><input type="date" data-am="${blatt.id}" data-feld="datum" value="${blatt.datum || ""}"></td>
+        <td><input type="text" data-am="${blatt.id}" data-feld="aufgenommen" value="${blatt.aufgenommen || ""}"></td>
+        <td><input type="text" data-am="${blatt.id}" data-feld="anerkannt" value="${blatt.anerkannt || ""}" placeholder="Bauleitung AG"></td>`;
+      kopf.appendChild(tr);
+
+      const eh = AUFMASS_EINHEITEN[a.einheit] || AUFMASS_EINHEITEN["m²"];
+      const feld = (i, name) => {
+        if (eh.masse.indexOf(name) < 0) return "<td class=\"leer\">–</td>";
+        return `<td><input type="text" inputmode="decimal" data-amz="${blatt.id}" data-zeile="${i}" data-feld="${name}" value="${blatt.zeilen[i][name] || ""}"></td>`;
+      };
+
+      a.zeilen.forEach((z, i) => {
+        const zr = document.createElement("tr");
+        zr.className = z.uebermisst ? "uebermessen" : "";
+        zr.innerHTML = `
+          <td>${i + 1}</td>
+          <td>
+            <select data-amz="${blatt.id}" data-zeile="${i}" data-feld="art" title="Zugang oder Abzug">
+              <option value="zugang" ${z.art !== "abzug" ? "selected" : ""}>+</option>
+              <option value="abzug" ${z.art === "abzug" ? "selected" : ""}>−</option>
+            </select>
+          </td>
+          <td><input type="text" data-amz="${blatt.id}" data-zeile="${i}" data-feld="bezug" value="${blatt.zeilen[i].bezug || ""}" placeholder="Achse A, EG"></td>
+          ${feld(i, "anzahl")}${feld(i, "laenge")}${feld(i, "breite")}${feld(i, "hoehe")}
+          <td class="formel">${aufmassFormel(blatt.zeilen[i], a.einheit)}</td>
+          <td>${z.einzel > 0 ? z.einzel.toFixed(3).replace(".", ",") : "–"}</td>
+          <td>${z.menge.toFixed(3).replace(".", ",")}</td>
+          <td>${z.uebermisst
+            ? `<span class="uebermessen-marke" title="Einzelgröße bis ${a.grenze.toFixed(2).replace(".", ",")} m² – ${a.atv}">übermessen</span>`
+            : `<strong>${(z.wirksam < 0 ? "−" : "")}${Math.abs(z.wirksam).toFixed(3).replace(".", ",")}</strong>`}</td>
+          <td><input type="text" data-amz="${blatt.id}" data-zeile="${i}" data-feld="bemerkung" value="${blatt.zeilen[i].bemerkung || ""}"></td>
+          <td><button class="row-remove" data-amz-remove="${blatt.id}" data-zeile="${i}" title="Zeile löschen">✕</button></td>`;
+        body.appendChild(zr);
+      });
+
+      const zahl = (w, n) => w.toFixed(n === undefined ? 3 : n).replace(".", ",");
+      document.getElementById("aufmassSumme").innerHTML =
+        `Zugang ${zahl(a.zugang)} ${a.einheit} − Abzug ${zahl(a.abzug)} ${a.einheit}`
+        + (a.uebermessen > 0 ? ` (übermessen ${zahl(a.uebermessen)} ${a.einheit})` : "")
+        + ` = <strong>Aufmaßsumme ${zahl(a.summe)} ${a.einheit}</strong>`
+        + (a.ep > 0 ? ` · ${zahl(a.ep, 2)} €/${a.einheit} = <strong>${zahl(a.betrag, 2)} €</strong>` : "")
+        + a.hinweise.map((h) => `<div class="cut-warning">${h}</div>`).join("");
+    }
+
+    const summeBody = document.getElementById("aufmassSummeBody");
+    summeBody.innerHTML = "";
+    const aufstellung = aufmassAufstellung(blaetter);
+    aufstellung.zeilen.forEach((z) => {
+      const zahl = (w, n) => w.toFixed(n === undefined ? 3 : n).replace(".", ",");
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${z.pos || "–"}</td><td>${z.kurztext || "–"}</td><td>${z.atv}</td>
+        <td>${z.anzahlZeilen}</td>
+        <td>${zahl(z.zugang)}</td><td>${zahl(z.abzug)}</td>
+        <td>${z.uebermessen > 0 ? zahl(z.uebermessen) : "–"}</td>
+        <td><strong>${zahl(z.summe)} ${z.einheit}</strong></td>
+        <td>${z.ep > 0 ? zahl(z.ep, 2) : "–"}</td>
+        <td>${z.wert > 0 ? zahl(z.wert, 2) : "–"}</td>`;
+      summeBody.appendChild(tr);
+    });
+    if (aufstellung.betrag > 0) {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td colspan="9"><strong>Summe Aufmaß</strong></td>`
+        + `<td><strong>${aufstellung.betrag.toFixed(2).replace(".", ",")}</strong></td>`;
+      summeBody.appendChild(tr);
+    }
+  }
+
+  /* ==================================================== Bautagebuch */
+
+  /** Bautage nach Datum sortiert, neueste zuerst. */
+  function bautage() {
+    return Array.from(model.bautagebuch.values())
+      .sort((a, b) => String(b.datum || "").localeCompare(String(a.datum || "")));
+  }
+
+  function gewaehlterTag() {
+    const tage = bautage();
+    if (!tage.length) return null;
+    const id = parseInt(document.getElementById("tagAuswahl").value, 10);
+    return tage.find((t) => t.id === id) || tage[0];
+  }
+
+  const WOCHENTAGE = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+
+  /** Wochentag zu einem Datum im Format JJJJ-MM-TT. */
+  function wochentagVon(datum) {
+    if (!datum) return "";
+    const d = new Date(datum + "T12:00:00");
+    return Number.isNaN(d.getTime()) ? "" : WOCHENTAGE[d.getDay()];
+  }
+
+  function neuerBautag() {
+    const heute = new Date();
+    const vorhanden = new Set(Array.from(model.bautagebuch.values()).map((t) => t.datum));
+    // Nächster freier Tag ab heute rückwärts, damit kein Datum doppelt entsteht
+    let datum = heute.toISOString().slice(0, 10);
+    let versatz = 0;
+    while (vorhanden.has(datum) && versatz < 400) {
+      versatz += 1;
+      datum = new Date(heute.getTime() - versatz * 86400000).toISOString().slice(0, 10);
+    }
+    const tag = {
+      id: model.nextTagId++, datum,
+      abschnitt: "", von: "07:00", bis: "16:30", pause: "45 min",
+      wetter: "bewoelkt", tempFrueh: "", tempMittag: "", niederschlag: "", wind: "",
+      bauleiter: "Oleksii Severyn", bemerkung: "",
+      firmen: [], geraete: [], leistungen: [], lieferungen: [], ereignisse: [],
+    };
+    model.bautagebuch.set(tag.id, tag);
+    document.getElementById("tagAuswahl").value = String(tag.id);
+    setStatus(`Bautag ${datum} angelegt.`, "ok");
+    refreshAll();
+    document.getElementById("tagAuswahl").value = String(tag.id);
+    renderBautagebuch();
+  }
+
+  /** Eine Zeile einer Unterliste des Bautages anfügen. */
+  function tagListeAnfuegen(liste, vorgabe) {
+    const tag = gewaehlterTag();
+    if (!tag) { setStatus("Zuerst einen Bautag anlegen.", "error"); return; }
+    tag[liste].push(Object.assign({}, vorgabe));
+    renderBautagebuch();
+  }
+
+  function renderBautagebuch() {
+    const tage = bautage();
+    const auswahl = document.getElementById("tagAuswahl");
+    const vorher = auswahl.value;
+    auswahl.innerHTML = tage.map((t) =>
+      `<option value="${t.id}">${t.datum || "ohne Datum"}${wochentagVon(t.datum) ? " · " + wochentagVon(t.datum) : ""}</option>`).join("");
+    if (tage.some((t) => String(t.id) === vorher)) auswahl.value = vorher;
+
+    document.getElementById("tagEmpty").hidden = tage.length > 0;
+    document.getElementById("tagDetail").hidden = !tage.length;
+    const kopf = document.getElementById("tagKopfBody");
+    kopf.innerHTML = "";
+
+    const tag = gewaehlterTag();
+    if (tag) {
+      const a = bautagebuchTag(tag);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input type="date" data-tag="${tag.id}" data-feld="datum" value="${tag.datum || ""}">
+          <div class="layer-note">${wochentagVon(tag.datum)}</div></td>
+        <td><input type="text" data-tag="${tag.id}" data-feld="abschnitt" value="${tag.abschnitt || ""}" placeholder="BA 1, Achse A–D"></td>
+        <td><input type="time" data-tag="${tag.id}" data-feld="von" value="${tag.von || ""}"></td>
+        <td><input type="time" data-tag="${tag.id}" data-feld="bis" value="${tag.bis || ""}"></td>
+        <td><input type="text" data-tag="${tag.id}" data-feld="pause" value="${tag.pause || ""}" placeholder="45 min"></td>
+        <td>
+          <select data-tag="${tag.id}" data-feld="wetter">
+            ${Object.keys(WETTER_LAGEN).map((k) => `<option value="${k}" ${k === tag.wetter ? "selected" : ""}>${WETTER_LAGEN[k].zeichen} ${WETTER_LAGEN[k].name}</option>`).join("")}
+          </select>
+        </td>
+        <td><input type="text" inputmode="decimal" data-tag="${tag.id}" data-feld="tempFrueh" value="${tag.tempFrueh || ""}" placeholder="3,5"></td>
+        <td><input type="text" inputmode="decimal" data-tag="${tag.id}" data-feld="tempMittag" value="${tag.tempMittag || ""}" placeholder="8,0"></td>
+        <td><input type="text" inputmode="decimal" data-tag="${tag.id}" data-feld="niederschlag" value="${tag.niederschlag || ""}" placeholder="0"></td>
+        <td><input type="text" data-tag="${tag.id}" data-feld="wind" value="${tag.wind || ""}" placeholder="Bft 4"></td>
+        <td><input type="text" data-tag="${tag.id}" data-feld="bauleiter" value="${tag.bauleiter || ""}"></td>`;
+      kopf.appendChild(tr);
+
+      // ---- Firmen
+      const firmen = document.getElementById("tagFirmenBody");
+      firmen.innerHTML = "";
+      a.firmen.forEach((f, i) => {
+        const zahlFeld = (feld) => `<td><input type="number" step="1" min="0" data-tagl="firmen" data-i="${i}" data-feld="${feld}" value="${tag.firmen[i][feld] || ""}"></td>`;
+        const tr2 = document.createElement("tr");
+        tr2.innerHTML = `
+          <td><input type="text" data-tagl="firmen" data-i="${i}" data-feld="name" value="${tag.firmen[i].name || ""}" placeholder="Firma"></td>
+          <td><input type="text" data-tagl="firmen" data-i="${i}" data-feld="gewerk" value="${tag.firmen[i].gewerk || ""}" placeholder="Rohbau"></td>
+          ${zahlFeld("poliere")}${zahlFeld("facharbeiter")}${zahlFeld("helfer")}${zahlFeld("azubi")}
+          <td><strong>${f.kopfzahl}</strong></td>
+          <td><input type="text" inputmode="decimal" data-tagl="firmen" data-i="${i}" data-feld="stunden" value="${tag.firmen[i].stunden || ""}" placeholder="8,5"></td>
+          <td>${f.mannstunden.toFixed(1).replace(".", ",")}</td>
+          <td><button class="row-remove" data-tagl-remove="firmen" data-i="${i}">✕</button></td>`;
+        firmen.appendChild(tr2);
+      });
+
+      // ---- Geräte
+      const geraete = document.getElementById("tagGeraeteBody");
+      geraete.innerHTML = "";
+      a.geraete.forEach((g, i) => {
+        const tr2 = document.createElement("tr");
+        tr2.innerHTML = `
+          <td><input type="text" data-tagl="geraete" data-i="${i}" data-feld="name" value="${tag.geraete[i].name || ""}" placeholder="Turmdrehkran 40 mt"></td>
+          <td><input type="number" step="1" min="0" data-tagl="geraete" data-i="${i}" data-feld="anzahl" value="${tag.geraete[i].anzahl || ""}"></td>
+          <td><input type="text" inputmode="decimal" data-tagl="geraete" data-i="${i}" data-feld="stunden" value="${tag.geraete[i].stunden || ""}"></td>
+          <td><button class="row-remove" data-tagl-remove="geraete" data-i="${i}">✕</button></td>`;
+        geraete.appendChild(tr2);
+      });
+
+      // ---- Leistungen
+      const leistungen = document.getElementById("tagLeistungBody");
+      leistungen.innerHTML = "";
+      tag.leistungen.forEach((l, i) => {
+        const tr2 = document.createElement("tr");
+        tr2.innerHTML = `
+          <td><input type="text" data-tagl="leistungen" data-i="${i}" data-feld="bereich" value="${l.bereich || ""}" placeholder="Achse A–C"></td>
+          <td><input type="text" data-tagl="leistungen" data-i="${i}" data-feld="lvPos" value="${l.lvPos || ""}" placeholder="01.02.030"></td>
+          <td><input type="text" data-tagl="leistungen" data-i="${i}" data-feld="text" value="${l.text || ""}" placeholder="Ausgeführte Leistung mit Menge"></td>
+          <td><button class="row-remove" data-tagl-remove="leistungen" data-i="${i}">✕</button></td>`;
+        leistungen.appendChild(tr2);
+      });
+
+      // ---- Lieferungen
+      const lieferungen = document.getElementById("tagLieferungBody");
+      lieferungen.innerHTML = "";
+      tag.lieferungen.forEach((l, i) => {
+        const tr2 = document.createElement("tr");
+        tr2.innerHTML = `
+          <td><input type="text" data-tagl="lieferungen" data-i="${i}" data-feld="text" value="${l.text || ""}" placeholder="Transportbeton C25/30, 18 m³"></td>
+          <td><input type="text" data-tagl="lieferungen" data-i="${i}" data-feld="lieferschein" value="${l.lieferschein || ""}" placeholder="Nr."></td>
+          <td><button class="row-remove" data-tagl-remove="lieferungen" data-i="${i}">✕</button></td>`;
+        lieferungen.appendChild(tr2);
+      });
+
+      // ---- Vorkommnisse
+      const ereignisse = document.getElementById("tagEreignisBody");
+      ereignisse.innerHTML = "";
+      a.ereignisse.forEach((e, i) => {
+        const tr2 = document.createElement("tr");
+        tr2.className = e.regel.anzeige ? "vorkommnis-anzeige" : "";
+        tr2.innerHTML = `
+          <td>
+            <select data-tagl="ereignisse" data-i="${i}" data-feld="art">
+              ${Object.keys(EREIGNIS_ARTEN).map((k) => `<option value="${k}" ${k === tag.ereignisse[i].art ? "selected" : ""}>${EREIGNIS_ARTEN[k].name}</option>`).join("")}
+            </select>
+          </td>
+          <td><input type="text" data-tagl="ereignisse" data-i="${i}" data-feld="text" value="${tag.ereignisse[i].text || ""}" placeholder="Vorgang"></td>
+          <td><input type="text" data-tagl="ereignisse" data-i="${i}" data-feld="folge" value="${tag.ereignisse[i].folge || ""}" placeholder="Stillstand 3,5 h"></td>
+          <td class="cut-labels">${e.vorschrift !== "–" ? `<strong>${e.vorschrift}</strong><br>` : ""}
+            ${e.regel.anzeige ? `<span class="cut-warning">${e.frist}</span>` : e.frist !== "–" ? e.frist : ""}
+            <div class="layer-note">${e.regel.text}</div></td>
+          <td><button class="row-remove" data-tagl-remove="ereignisse" data-i="${i}">✕</button></td>`;
+        ereignisse.appendChild(tr2);
+      });
+
+      document.getElementById("tagBemerkung").value = tag.bemerkung || "";
+      document.getElementById("tagHinweise").innerHTML =
+        `<strong>${a.personal} Beschäftigte · ${a.mannstunden.toFixed(1).replace(".", ",")} Mannstunden</strong>`
+        + (a.wetter.regentag ? " · Regentag" : "") + (a.wetter.frosttag ? " · Frosttag" : "")
+        + a.hinweise.map((h) => `<div class="cut-warning">${h}</div>`).join("");
+    }
+
+    // ---- Auswertung des Zeitraums
+    const z = bautagebuchZeitraum(Array.from(model.bautagebuch.values()));
+    const kennzahl = (label, wert) =>
+      `<div class="stat"><span class="label">${label}</span><span class="value">${wert}</span></div>`;
+    document.getElementById("tagebuchKennzahlen").innerHTML = z.tage
+      ? kennzahl("Zeitraum", `${z.von} – ${z.bis}`)
+        + kennzahl("erfasste Tage", z.tage)
+        + kennzahl("Arbeitstage", z.arbeitstage)
+        + kennzahl("Ausfalltage", z.ausfalltage)
+        + kennzahl("Regentage", z.regentage)
+        + kennzahl("Frosttage", z.frosttage)
+        + kennzahl("Behinderung", z.behinderungstage)
+        + kennzahl("Anordnung AG", z.nachtragstage)
+        + kennzahl("Mannstunden", z.mannstunden.toFixed(1).replace(".", ","))
+      : "";
+
+    const firmenBody = document.getElementById("tagebuchFirmenBody");
+    firmenBody.innerHTML = "";
+    z.firmen.forEach((f) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${f.name}</td><td>${f.gewerk || "–"}</td><td>${f.tage}</td>`
+        + `<td>${f.maxKopf}</td><td>${f.mannstunden.toFixed(1).replace(".", ",")}</td>`;
+      firmenBody.appendChild(tr);
+    });
+  }
+
+  function renderBaustelle() {
+    renderAufmass();
+    renderBautagebuch();
+  }
+
+  /* ------------------------------------------- Bedienung der Baustelle */
+
+  document.getElementById("btnAufmassNeu").addEventListener("click", () => {
+    const blatt = neuesAufmass();
+    neueAufmassZeile(blatt);
+    renderAufmass();
+    document.getElementById("aufmassBlatt").value = String(blatt.id);
+    renderAufmass();
+    setStatus("Aufmaßblatt angelegt – LV-Position, Einheit und Gewerk eintragen.", "ok");
+  });
+  document.getElementById("btnAufmassAusBauteilen").addEventListener("click", aufmassAusBauteilen);
+  document.getElementById("btnAufmassZeile").addEventListener("click", () => {
+    const blatt = gewaehltesAufmass();
+    if (!blatt) { setStatus("Zuerst ein Aufmaßblatt anlegen.", "error"); return; }
+    neueAufmassZeile(blatt);
+    renderAufmass();
+  });
+  document.getElementById("btnAufmassLoeschen").addEventListener("click", () => {
+    const blatt = gewaehltesAufmass();
+    if (!blatt) return;
+    model.aufmass.delete(blatt.id);
+    renderAufmass();
+    setStatus(`Aufmaßblatt ${blatt.pos || blatt.id} gelöscht.`, "ok");
+  });
+  document.getElementById("aufmassBlatt").addEventListener("change", renderAufmass);
+
+  // Kopfdaten und Zeilen des Aufmaßblattes
+  document.getElementById("viewBaustelle").addEventListener("change", (e) => {
+    const ziel = e.target;
+    if (ziel.dataset.am) {
+      const blatt = model.aufmass.get(parseInt(ziel.dataset.am, 10));
+      if (blatt) { blatt[ziel.dataset.feld] = ziel.value; renderAufmass(); }
+      return;
+    }
+    if (ziel.dataset.amz) {
+      const blatt = model.aufmass.get(parseInt(ziel.dataset.amz, 10));
+      const zeile = blatt && blatt.zeilen[parseInt(ziel.dataset.zeile, 10)];
+      if (zeile) { zeile[ziel.dataset.feld] = ziel.value; renderAufmass(); }
+      return;
+    }
+    if (ziel.dataset.tag) {
+      const tag = model.bautagebuch.get(parseInt(ziel.dataset.tag, 10));
+      if (tag) { tag[ziel.dataset.feld] = ziel.value; renderBautagebuch(); }
+      return;
+    }
+    if (ziel.dataset.tagl) {
+      const tag = gewaehlterTag();
+      const eintrag = tag && tag[ziel.dataset.tagl][parseInt(ziel.dataset.i, 10)];
+      if (eintrag) { eintrag[ziel.dataset.feld] = ziel.value; renderBautagebuch(); }
+    }
+  });
+
+  document.getElementById("viewBaustelle").addEventListener("click", (e) => {
+    const zeileWeg = e.target.dataset.amzRemove;
+    if (zeileWeg) {
+      const blatt = model.aufmass.get(parseInt(zeileWeg, 10));
+      if (blatt) { blatt.zeilen.splice(parseInt(e.target.dataset.zeile, 10), 1); renderAufmass(); }
+      return;
+    }
+    const listeWeg = e.target.dataset.taglRemove;
+    if (listeWeg) {
+      const tag = gewaehlterTag();
+      if (tag) { tag[listeWeg].splice(parseInt(e.target.dataset.i, 10), 1); renderBautagebuch(); }
+    }
+  });
+
+  document.getElementById("btnTagNeu").addEventListener("click", neuerBautag);
+  document.getElementById("tagAuswahl").addEventListener("change", renderBautagebuch);
+  document.getElementById("btnTagLoeschen").addEventListener("click", () => {
+    const tag = gewaehlterTag();
+    if (!tag) return;
+    model.bautagebuch.delete(tag.id);
+    renderBautagebuch();
+    setStatus(`Bautag ${tag.datum} gelöscht.`, "ok");
+  });
+  document.getElementById("btnTagFirma").addEventListener("click", () =>
+    tagListeAnfuegen("firmen", { name: "HSD Hamburg GmbH", gewerk: "", stunden: "8" }));
+  document.getElementById("btnTagGeraet").addEventListener("click", () =>
+    tagListeAnfuegen("geraete", { name: "", anzahl: "1", stunden: "" }));
+  document.getElementById("btnTagLeistung").addEventListener("click", () =>
+    tagListeAnfuegen("leistungen", { bereich: "", lvPos: "", text: "" }));
+  document.getElementById("btnTagLieferung").addEventListener("click", () =>
+    tagListeAnfuegen("lieferungen", { text: "", lieferschein: "" }));
+  document.getElementById("btnTagEreignis").addEventListener("click", () =>
+    tagListeAnfuegen("ereignisse", { art: "behinderung", text: "", folge: "" }));
+  document.getElementById("tagBemerkung").addEventListener("change", (e) => {
+    const tag = gewaehlterTag();
+    if (tag) tag.bemerkung = e.target.value;
+  });
+
+  /* ---- Blätter zeichnen */
+
+  document.getElementById("btnAufmassblatt").addEventListener("click", () => {
+    const blatt = gewaehltesAufmass();
+    if (!blatt) { setStatus("Zuerst ein Aufmaßblatt anlegen.", "error"); return; }
+    aufmassBlattId = blatt.id;
+    const svg = aufmassblattSVG({
+      position: blatt, auswertung: aufmassPosition(blatt),
+      blattNr: aufmassBlaetter().indexOf(blatt) + 1,
+      projekt: projektKopf(),
+    });
+    sheetArt = "aufmass";
+    document.getElementById("sheetBody").innerHTML = svg;
+    document.getElementById("sheetTitle").textContent = `Aufmaßblatt ${blatt.pos || ""} · ${blatt.kurztext || ""}`.trim();
+    document.getElementById("sheetCounter").textContent =
+      `${blatt.zeilen.length} Zeilen · Blatt ${aufmassBlaetter().indexOf(blatt) + 1} von ${model.aufmass.size}`;
+    document.getElementById("sheetOverlay").hidden = false;
+  });
+
+  document.getElementById("btnTagesbericht").addEventListener("click", () => {
+    const tag = gewaehlterTag();
+    if (!tag) { setStatus("Zuerst einen Bautag anlegen.", "error"); return; }
+    tagesberichtId = tag.id;
+    const alle = bautage();
+    const svg = bautagebuchSVG({
+      eintrag: Object.assign({}, tag, { wochentag: wochentagVon(tag.datum) }),
+      auswertung: bautagebuchTag(tag),
+      nummer: alle.length - alle.indexOf(tag),
+      projekt: projektKopf(),
+    });
+    sheetArt = "tagesbericht";
+    document.getElementById("sheetBody").innerHTML = svg;
+    document.getElementById("sheetTitle").textContent = `Tagesbericht ${tag.datum}`;
+    document.getElementById("sheetCounter").textContent =
+      `Bautag ${alle.indexOf(tag) + 1} von ${alle.length}`;
+    document.getElementById("sheetOverlay").hidden = false;
+  });
+
+  /* ---- Ausgabe als CSV */
+
+  document.getElementById("btnAufmassCsv").addEventListener("click", () => {
+    if (!model.aufmass.size) { setStatus("Kein Aufmaß vorhanden.", "error"); return; }
+    const rows = [["Aufmaß nach VOB/B § 14 – " + (document.getElementById("projectName").value || "Projekt")]];
+    aufmassBlaetter().forEach((blatt) => {
+      const a = aufmassPosition(blatt);
+      rows.push([]);
+      rows.push([`Position ${blatt.pos || "–"}`, blatt.kurztext || "", `Einheit ${a.einheit}`,
+        a.atv, `Übermessung bis ${a.grenze.toFixed(2)} m² (${a.quelle})`]);
+      rows.push(["Nr", "±", "Bezug", "Anzahl", "Länge", "Breite", "Höhe", "Formel",
+        "Einzelgröße", "Menge", "wirksam", "Bemerkung"]);
+      a.zeilen.forEach((z, i) => {
+        rows.push([i + 1, z.istAbzug ? "−" : "+", z.bezug || "", z.anzahl || "", z.laenge || "",
+          z.breite || "", z.hoehe || "", aufmassFormel(z, a.einheit),
+          z.einzel > 0 ? z.einzel.toFixed(3) : "", z.menge.toFixed(3),
+          z.uebermisst ? "übermessen" : z.wirksam.toFixed(3), z.bemerkung || ""]);
+      });
+      rows.push(["", "", "Zugang", "", "", "", "", "", "", a.zugang.toFixed(3), "", ""]);
+      rows.push(["", "", "Abzug", "", "", "", "", "", "", a.abzug.toFixed(3), "", ""]);
+      if (a.uebermessen > 0) rows.push(["", "", "übermessen", "", "", "", "", "", "", a.uebermessen.toFixed(3), "", ""]);
+      rows.push(["", "", "Aufmaßsumme", "", "", "", "", "", "", a.summe.toFixed(3), a.einheit, ""]);
+      if (a.ep > 0) rows.push(["", "", "Einheitspreis", a.ep.toFixed(2), "", "", "", "", "", a.betrag.toFixed(2), "€", ""]);
+    });
+    const gesamt = aufmassAufstellung(aufmassBlaetter());
+    rows.push([]);
+    rows.push(["Summe aller Aufmaßblätter", "", "", "", "", "", "", "", "", gesamt.betrag.toFixed(2), "€"]);
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Aufmass_${name}.csv`, "\ufeff" + zuCsv(rows), "text/csv;charset=utf-8;");
+  });
+
+  document.getElementById("btnTagebuchCsv").addEventListener("click", () => {
+    if (!model.bautagebuch.size) { setStatus("Kein Bautag erfasst.", "error"); return; }
+    const rows = [["Bautagebuch – " + (document.getElementById("projectName").value || "Projekt")]];
+    rows.push([]);
+    rows.push(["Datum", "Wochentag", "Bauabschnitt", "von", "bis", "Pause", "Wetter",
+      "T morgens", "T mittags", "Niederschlag [mm]", "Wind", "Personen", "Mannstunden",
+      "Regentag", "Frosttag", "Bauleiter"]);
+    const alle = Array.from(model.bautagebuch.values())
+      .sort((a, b) => String(a.datum || "").localeCompare(String(b.datum || "")));
+    alle.forEach((tag) => {
+      const a = bautagebuchTag(tag);
+      rows.push([tag.datum || "", wochentagVon(tag.datum), tag.abschnitt || "", tag.von || "",
+        tag.bis || "", tag.pause || "", a.wetter.lage.name,
+        tag.tempFrueh || "", tag.tempMittag || "", tag.niederschlag || "", tag.wind || "",
+        a.personal, a.mannstunden.toFixed(1), a.wetter.regentag ? "ja" : "nein",
+        a.wetter.frosttag ? "ja" : "nein", tag.bauleiter || ""]);
+      a.firmen.forEach((f) => rows.push(["", "Firma", f.name || "", f.gewerk || "",
+        `${f.kopfzahl} Personen`, `${f.stunden} h/Person`, `${f.mannstunden.toFixed(1)} Mannstunden`]));
+      a.geraete.forEach((g) => rows.push(["", "Gerät", g.name || "", g.anzahl, `${g.stunden} h`]));
+      a.leistungen.forEach((l) => rows.push(["", "Leistung", l.bereich || "", l.lvPos || "", l.text || ""]));
+      a.lieferungen.forEach((l) => rows.push(["", "Lieferung", l.text || "", l.lieferschein || ""]));
+      a.ereignisse.forEach((e) => rows.push(["", "Vorkommnis", e.artName, e.text || "", e.folge || "",
+        e.vorschrift, e.frist]));
+      if (tag.bemerkung) rows.push(["", "Bemerkung", tag.bemerkung]);
+    });
+    const z = bautagebuchZeitraum(alle);
+    rows.push([]);
+    rows.push(["Auswertung", `${z.von} bis ${z.bis}`]);
+    rows.push(["erfasste Tage", z.tage, "Arbeitstage", z.arbeitstage, "Ausfalltage", z.ausfalltage]);
+    rows.push(["Regentage", z.regentage, "Frosttage", z.frosttage,
+      "Tage mit Behinderung", z.behinderungstage, "Tage mit Anordnung des AG", z.nachtragstage]);
+    rows.push(["Mannstunden gesamt", z.mannstunden.toFixed(1)]);
+    rows.push([]);
+    rows.push(["Firma", "Gewerk", "Einsatztage", "größte Personalstärke", "Mannstunden"]);
+    z.firmen.forEach((f) => rows.push([f.name, f.gewerk || "", f.tage, f.maxKopf, f.mannstunden.toFixed(1)]));
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Bautagebuch_${name}.csv`, "\ufeff" + zuCsv(rows), "text/csv;charset=utf-8;");
+  });
 
   /* --------------------------------------------------------- Werkzeugleiste */
 
@@ -2838,6 +3516,10 @@
       abzuege: Array.from(model.abzuege.values()),
       naechsteAbzugId: model.nextAbzugId,
       betonteile: Array.from(model.beton.values()),
+      aufmass: Array.from(model.aufmass.values()),
+      naechsteAufmassId: model.nextAufmassId,
+      bautagebuch: Array.from(model.bautagebuch.values()),
+      naechsteTagId: model.nextTagId,
       naechsteBetonId: model.nextBetonId,
       naechsteAussparungId: model.nextAussparungId,
       achsraster: rasterVorgabe(),
@@ -2873,6 +3555,12 @@
     model.nextAbzugId = data.naechsteAbzugId || (model.abzuege.size + 1);
     (data.betonteile || []).forEach((b) => model.beton.set(b.id, b));
     model.nextBetonId = data.naechsteBetonId || (model.beton.size + 1);
+    (data.aufmass || []).forEach((a) => model.aufmass.set(a.id, a));
+    model.nextAufmassId = data.naechsteAufmassId
+      || (Math.max(0, ...(data.aufmass || []).map((a) => a.id)) + 1);
+    (data.bautagebuch || []).forEach((t) => model.bautagebuch.set(t.id, t));
+    model.nextTagId = data.naechsteTagId
+      || (Math.max(0, ...(data.bautagebuch || []).map((t) => t.id)) + 1);
     model.nextAussparungId = data.naechsteAussparungId || 1;
     Object.keys(materialPreise).forEach((k) => delete materialPreise[k]);
     Object.assign(materialPreise, data.baustoffpreise || {});
@@ -3224,7 +3912,7 @@
       rows.push(["Summe Betonbau", "", "", "", positionen.reduce((sum, pos) => sum + pos.kosten, 0).toFixed(2)]);
     }
 
-    const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\r\n");
+    const csv = zuCsv(rows);
     const projectName = document.getElementById("projectName").value || "Projekt";
     saveFile(`LV_Stahlbau_${projectName.replace(/\s+/g, "_")}.csv`, "﻿" + csv);
   });
