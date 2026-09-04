@@ -23,12 +23,15 @@
     nextOpeningId: 1,
     abzuege: new Map(),   // id -> Abzug/Nische { id, raum, typ, breite, tiefe, hoehe, anzahl, bisFussboden, bemerkung }
     nextAbzugId: 1,
+    beton: new Map(),     // id -> Betonbauteil { id, kind, p1, p2, masse, guete, expo, ds, sauberkeit, bewehrungsgrad, anzahl }
+    nextBetonId: 1,
   };
 
   // Baustoffpreise [€/m³], vom Anwender überschreibbar
   const materialPreise = {};
 
   let pendingElementPoint = null; // erster Eckpunkt beim Aufziehen eines Bauteils
+  let pendingBetonPoint = null;   // erster Punkt beim Aufziehen eines Betonbauteils
 
   let lastSolution = null;
   let selfWeightLoads = [];
@@ -192,6 +195,9 @@
     model.nextOpeningId = 1;
     model.abzuege.clear();
     model.nextAbzugId = 1;
+    model.beton.clear();
+    model.nextBetonId = 1;
+    pendingBetonPoint = null;
     pendingElementPoint = null;
     model.supports.clear();
     model.loads.clear();
@@ -282,6 +288,7 @@
     support: "Auflager: Knoten anklicken – Festlager → Loslager → kein Lager.",
     load: "Knotenlast: Knoten anklicken und Last in kN eingeben (positiv = nach unten).",
     bauteil: "Bauteil: zwei Punkte auf der Arbeitsebene anklicken (Wand: Achse, Platte: gegenüberliegende Ecken). Einzelfundament: ein Punkt.",
+    beton: "Betonteil: Wand, Streifenfundament und Unterzug über die Achse (zwei Punkte), Platte über zwei gegenüberliegende Ecken, Fundament, Köcher, Stütze und Bohrpfahl über einen Punkt.",
   };
 
   function setMode(next) {
@@ -289,10 +296,11 @@
     pendingStart = null;
     sketch.mode = next === "orbit" ? "orbit" : "draw";
     pendingElementPoint = null;
-    ["btnDraw", "btnOrbit", "btnSupport", "btnLoad", "btnBauteil"].forEach((id) => {
+    pendingBetonPoint = null;
+    ["btnDraw", "btnOrbit", "btnSupport", "btnLoad", "btnBauteil", "btnBetonteil"].forEach((id) => {
       document.getElementById(id).classList.remove("active");
     });
-    const button = { draw: "btnDraw", orbit: "btnOrbit", support: "btnSupport", load: "btnLoad", bauteil: "btnBauteil" }[next];
+    const button = { draw: "btnDraw", orbit: "btnOrbit", support: "btnSupport", load: "btnLoad", bauteil: "btnBauteil", beton: "btnBetonteil" }[next];
     if (button) document.getElementById(button).classList.add("active");
     document.getElementById("hintBox").textContent = MODE_HINTS[next] || MODE_HINTS.draw;
     renderSketch();
@@ -327,6 +335,11 @@
 
     if (mode === "bauteil") {
       handleBauteilPick(point);
+      return;
+    }
+
+    if (mode === "beton") {
+      handleBetonPick(point);
       return;
     }
 
@@ -398,10 +411,14 @@
       }
     });
 
-    // Architektur-Bauteile halbtransparent, damit die Achsen sichtbar bleiben
+    // Architektur- und Betonbauteile halbtransparent, damit die Achsen sichtbar bleiben
     renderArchElements(sketch, true);
+    renderBetonElements(sketch, true);
     if (pendingElementPoint) {
       sketch.contentGroup.add(buildNodeMarker(pendingElementPoint, 0xffb020, 0.1));
+    }
+    if (pendingBetonPoint) {
+      sketch.contentGroup.add(buildNodeMarker(pendingBetonPoint, 0xffb020, 0.1));
     }
 
     // Vorschaulinie zwischen gesetztem Anfangspunkt und Mauszeiger
@@ -439,6 +456,7 @@
     });
 
     renderArchElements(result, false);
+    renderBetonElements(result, false);
 
     model.nodes.forEach((node, i) => {
       const support = model.supports.get(i);
@@ -1191,6 +1209,200 @@
     document.getElementById(id).addEventListener("change", refreshAll);
   });
 
+  /* --------------------------------------------------------- Betonbauteile */
+
+  /** Arbeitsraum je Seite für den Aushub; Mindestmaß 0,50 m nach DIN 4124. */
+  function arbeitsraumWert() {
+    const v = parseFloat(document.getElementById("arbeitsraum").value);
+    return Number.isFinite(v) && v >= 0 ? v : ARBEITSRAUM_DIN4124;
+  }
+
+  function betonPreise() {
+    const v = (id) => parseFloat(document.getElementById(id).value) || 0;
+    return { beton: v("preisBeton"), schalung: v("preisSchalung"), bewehrung: v("preisBewehrung"), aushub: v("preisAushub") };
+  }
+
+  function betonBezeichnung(element) {
+    const typ = BETONTEILTYPEN[element.kind];
+    return (typ ? typ.kuerzel : "BT") + element.id;
+  }
+
+  function betonWertung(element) {
+    return betonAuswertung(element, arbeitsraumWert());
+  }
+
+  function handleBetonPick(point) {
+    const kind = document.getElementById("betonTyp").value;
+    const typ = BETONTEILTYPEN[kind];
+
+    if (typ.form === "punkt") {
+      erzeugeBetonteil(kind, point, null);
+      return;
+    }
+    if (!pendingBetonPoint) {
+      pendingBetonPoint = point;
+      setStatus(`${typ.name}: zweiten Punkt anklicken.`, "info");
+      renderSketch();
+      return;
+    }
+    erzeugeBetonteil(kind, pendingBetonPoint, point);
+    pendingBetonPoint = null;
+  }
+
+  function erzeugeBetonteil(kind, p1, p2) {
+    const typ = BETONTEILTYPEN[kind];
+    const element = {
+      id: model.nextBetonId++,
+      kind,
+      p1: { ...p1 },
+      p2: p2 ? { ...p2 } : null,
+      masse: { ...typ.standard },
+      guete: document.getElementById("betonGuete").value || "C25/30",
+      expo: typ.expo,
+      ds: 12,
+      sauberkeit: true,
+      bewehrungsgrad: typ.bewehrung,
+      anzahl: 1,
+    };
+    model.beton.set(element.id, element);
+
+    const a = betonWertung(element);
+    setStatus(`${typ.name} ${betonBezeichnung(element)} gesetzt: ${a.geo.beschreibung} · `
+      + `${a.volumen.toFixed(2)} m³ Beton, ${a.schalung.toFixed(2)} m² Schalung, `
+      + `${a.bewehrung.toFixed(0)} kg Betonstahl, c_nom = ${a.deckung.cNom} mm`, "ok");
+    refreshAll();
+  }
+
+  function renderBetonElements(scene, transparent) {
+    const raum = arbeitsraumWert();
+    model.beton.forEach((element) => {
+      const geo = betonGeometrie(element, raum);
+      scene.contentGroup.add(buildConcreteElement(element, geo, transparent ? 0.5 : 1));
+    });
+  }
+
+  function renderBetonTable() {
+    const body = document.getElementById("betonBody");
+    const empty = document.getElementById("betonEmpty");
+    body.innerHTML = "";
+    empty.hidden = model.beton.size > 0;
+
+    model.beton.forEach((element) => {
+      const a = betonWertung(element);
+      const typ = a.typ;
+
+      const feldName = (f) => (typ.feldNamen && typ.feldNamen[f]) || BETON_FELD_NAMEN[f];
+      const felder = typ.felder.map((f) => `
+        <span class="layer-row">
+          <label class="masse-label" title="${feldName(f)}">${feldName(f).replace(/ \[m\]$/, "")}</label>
+          <input type="number" step="0.05" min="0.01" data-bt="${element.id}" data-mass="${f}" value="${element.masse[f]}">
+        </span>`).join("");
+      const achse = typ.form === "linie"
+        ? `<div class="layer-note">Achslänge ${a.geo.laenge.toFixed(2)} m</div>`
+        : typ.form === "flaeche"
+          ? `<div class="layer-note">Grundriss ${a.geo.laenge.toFixed(2)} × ${a.geo.breite.toFixed(2)} m</div>`
+          : "";
+
+      const hinweise = a.warnungen.slice();
+      if (element.kind === "bohrpfahl") {
+        hinweise.push("Betondeckung und Herstellung nach DIN EN 1536, Tragfähigkeit nach DIN EN 1997-1 mit DIN 1054 prüfen.");
+      }
+      if (a.flaechenlast) {
+        hinweise.push(`Eigenlast g_k = ${a.flaechenlast.toFixed(2)} kN/m².`);
+      }
+
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${betonBezeichnung(element)}</td>
+        <td>${typ.name}<div class="layer-note">f_cd = ${a.kennwerte.fcd.toFixed(1)} N/mm² · E_cm = ${(a.kennwerte.Ecm / 1000).toFixed(0)} GPa</div></td>
+        <td class="layer-cell">${felder}${achse}</td>
+        <td><input type="number" step="1" min="1" data-bt="${element.id}" data-field="anzahl" value="${element.anzahl}"></td>
+        <td>
+          <select data-bt="${element.id}" data-field="guete">
+            ${Object.keys(BETONGUETEN).map((k) => `<option value="${k}" ${k === element.guete ? "selected" : ""}>${k}</option>`).join("")}
+          </select>
+        </td>
+        <td>
+          <select data-bt="${element.id}" data-field="expo" title="Expositionsklasse nach DIN EN 206-1 / DIN 1045-2">
+            ${Object.keys(EXPOSITIONSKLASSEN).map((k) => `<option value="${k}" ${k === element.expo ? "selected" : ""}>${EXPOSITIONSKLASSEN[k].name}</option>`).join("")}
+          </select>
+          ${typ.erdreich ? `<label class="tool-check small"><input type="checkbox" data-bt="${element.id}" data-field="sauberkeit" ${element.sauberkeit !== false ? "checked" : ""}> Sauberkeitsschicht</label>` : ""}
+        </td>
+        <td><input type="number" step="2" min="6" max="40" data-bt="${element.id}" data-field="ds" value="${element.ds}" title="Größter Stabdurchmesser; c_min,b nach DIN EN 1992-1-1 Abs. 4.4.1.2"></td>
+        <td><strong>${a.deckung.cNom}</strong><div class="layer-note">${a.deckung.massgebend}</div></td>
+        <td>${a.volumen.toFixed(2)}</td>
+        <td>${a.schalung.toFixed(2)}</td>
+        <td><input type="number" step="5" min="0" data-bt="${element.id}" data-field="bewehrungsgrad" value="${a.bewehrungsgrad}" title="Erfahrungswert für die Kostenschätzung"></td>
+        <td>${a.bewehrung.toFixed(0)}</td>
+        <td>${a.aushub > 0 ? a.aushub.toFixed(2) : "–"}</td>
+        <td>${(a.masse / 1000).toFixed(2)}</td>
+        <td class="cut-labels">${hinweise.map((h) => (a.warnungen.indexOf(h) >= 0 ? `<span class="cut-warning">${h}</span>` : h)).join(" ")}</td>
+        <td><button class="row-remove" data-remove-bt="${element.id}" title="Betonbauteil löschen">✕</button></td>`;
+      body.appendChild(tr);
+    });
+
+    renderBetonKosten();
+  }
+
+  function renderBetonKosten() {
+    const body = document.getElementById("betonKostenBody");
+    body.innerHTML = "";
+    const positionen = betonAufstellung(Array.from(model.beton.values()), betonPreise(), arbeitsraumWert());
+    positionen.forEach((pos) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${pos.name}</td>
+        <td>${pos.menge.toFixed(2)}</td>
+        <td>${pos.einheit}</td>
+        <td>${pos.preis.toFixed(2)}</td>
+        <td><strong>${pos.kosten.toFixed(2)}</strong></td>`;
+      body.appendChild(tr);
+    });
+    const summe = positionen.reduce((s, p) => s + p.kosten, 0);
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td><strong>Summe Betonbau</strong></td><td></td><td></td><td></td><td><strong>${summe.toFixed(2)}</strong></td>`;
+    body.appendChild(tr);
+  }
+
+  function betonKosten() {
+    return betonAufstellung(Array.from(model.beton.values()), betonPreise(), arbeitsraumWert())
+      .reduce((s, p) => s + p.kosten, 0);
+  }
+
+  document.getElementById("btnBetonteil").addEventListener("click", () => setMode("beton"));
+  document.getElementById("betonTyp").addEventListener("change", () => { if (mode === "beton") setMode("beton"); });
+
+  document.getElementById("betonBody").addEventListener("change", (e) => {
+    const id = parseInt(e.target.getAttribute("data-bt"), 10);
+    if (!id) return;
+    const element = model.beton.get(id);
+    if (!element) return;
+    const massFeld = e.target.getAttribute("data-mass");
+    const field = e.target.getAttribute("data-field");
+
+    if (massFeld) {
+      element.masse[massFeld] = Math.max(0.01, parseFloat(e.target.value) || 0.01);
+    } else if (field === "anzahl") {
+      element.anzahl = Math.max(1, parseInt(e.target.value, 10) || 1);
+    } else if (field === "ds" || field === "bewehrungsgrad") {
+      element[field] = Math.max(0, parseFloat(e.target.value) || 0);
+    } else if (field === "sauberkeit") {
+      element.sauberkeit = e.target.checked;
+    } else if (field) {
+      element[field] = e.target.value;
+    }
+    refreshAll();
+  });
+
+  document.getElementById("betonBody").addEventListener("click", (e) => {
+    const id = e.target.getAttribute("data-remove-bt");
+    if (id) { model.beton.delete(parseInt(id, 10)); refreshAll(); }
+  });
+
+  ["arbeitsraum", "preisBeton", "preisSchalung", "preisBewehrung", "preisAushub"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", refreshAll);
+  });
+
   /* ------------------------------------------------------------- Tabellen */
 
   const tbody = document.getElementById("membersBody");
@@ -1282,13 +1494,15 @@
     const storage = totalWeight * value("storagePerKg");
     const arch = architekturKosten();
     const fenster = oeffnungsKosten();
+    const beton = betonKosten();
+    document.getElementById("costConcrete").textContent = beton.toFixed(2) + " €";
     document.getElementById("costArch").textContent = arch.toFixed(2) + " €";
     document.getElementById("costOpenings").textContent = fenster.toFixed(2) + " €";
     document.getElementById("costMaterial").textContent = material.toFixed(2) + " €";
     document.getElementById("costProcessing").textContent = processing.toFixed(2) + " €";
     document.getElementById("costTransport").textContent = transport.toFixed(2) + " €";
     document.getElementById("costStorage").textContent = storage.toFixed(2) + " €";
-    document.getElementById("costTotal").textContent = (material + processing + transport + storage + arch + fenster).toFixed(2) + " €";
+    document.getElementById("costTotal").textContent = (material + processing + transport + storage + arch + fenster + beton).toFixed(2) + " €";
   }
 
   ["pricePerKg", "processingPerKg", "transportFlat", "storagePerKg"].forEach((id) => {
@@ -1457,6 +1671,7 @@
     members: { button: document.getElementById("tabMembers"), view: document.getElementById("viewMembers") },
     nodes: { button: document.getElementById("tabNodes"), view: document.getElementById("viewNodes") },
     arch: { button: document.getElementById("tabArch"), view: document.getElementById("viewArch") },
+    beton: { button: document.getElementById("tabBeton"), view: document.getElementById("viewBeton") },
     cutlist: { button: document.getElementById("tabCutList"), view: document.getElementById("viewCutList") },
   };
 
@@ -1467,6 +1682,7 @@
     });
     if (which === "nodes") renderNodeTable();
     if (which === "arch") renderArchTable();
+    if (which === "beton") renderBetonTable();
     if (which === "cutlist") renderCutList();
     if (which === "model") { result.resize(); renderModel(); }
   }
@@ -1479,6 +1695,7 @@
     if (!TABS.model.view.hidden) renderModel();
     if (!TABS.nodes.view.hidden) renderNodeTable();
     if (!TABS.arch.view.hidden) renderArchTable();
+    if (!TABS.beton.view.hidden) renderBetonTable();
     if (!TABS.cutlist.view.hidden) renderCutList();
   }
 
@@ -1627,6 +1844,13 @@
       naechsteOeffnungId: model.nextOpeningId,
       abzuege: Array.from(model.abzuege.values()),
       naechsteAbzugId: model.nextAbzugId,
+      betonteile: Array.from(model.beton.values()),
+      naechsteBetonId: model.nextBetonId,
+      betonbau: {
+        arbeitsraum: field("arbeitsraum"), preisBeton: field("preisBeton"),
+        preisSchalung: field("preisSchalung"), preisBewehrung: field("preisBewehrung"),
+        preisAushub: field("preisAushub"),
+      },
       flaechenregel: {
         regel: field("abzugRegel"), mindestFlaeche: field("grenzFlaeche"),
         mindestHoehe: field("grenzHoehe"), mindestNischentiefe: field("grenzTiefe"),
@@ -1651,6 +1875,8 @@
     model.nextOpeningId = data.naechsteOeffnungId || (model.openings.size + 1);
     (data.abzuege || []).forEach((a) => model.abzuege.set(a.id, a));
     model.nextAbzugId = data.naechsteAbzugId || (model.abzuege.size + 1);
+    (data.betonteile || []).forEach((b) => model.beton.set(b.id, b));
+    model.nextBetonId = data.naechsteBetonId || (model.beton.size + 1);
     Object.keys(materialPreise).forEach((k) => delete materialPreise[k]);
     Object.assign(materialPreise, data.baustoffpreise || {});
 
@@ -1672,6 +1898,13 @@
       set("cutAllowance", data.werkstatt.zugabe);
       set("stockLength", data.werkstatt.lagerlaenge);
       set("sawKerf", data.werkstatt.saegeschnitt);
+    }
+    if (data.betonbau) {
+      set("arbeitsraum", data.betonbau.arbeitsraum, "0.50");
+      set("preisBeton", data.betonbau.preisBeton, "130");
+      set("preisSchalung", data.betonbau.preisSchalung, "45");
+      set("preisBewehrung", data.betonbau.preisBewehrung, "1300");
+      set("preisAushub", data.betonbau.preisAushub, "25");
     }
     if (data.flaechenregel) {
       set("abzugRegel", data.flaechenregel.regel, "woflv");
@@ -1868,6 +2101,32 @@
       materialAufstellung(Array.from(model.elements.values()), materialPreise, oeffnungenVon).forEach((e) => {
         rows.push([e.gruppe, e.name, e.rho, e.volumen.toFixed(2), (e.masse / 1000).toFixed(2), e.preis, e.kosten.toFixed(2)]);
       });
+    }
+
+    if (model.beton.size) {
+      const raum = arbeitsraumWert();
+      rows.push([]);
+      rows.push([`Betonbauteile (Mengen nach Geometrie, Betondeckung nach DIN EN 1992-1-1 Abs. 4.4.1, Aushub mit ${raum.toFixed(2)} m Arbeitsraum nach DIN 4124)`]);
+      rows.push(["Pos", "Typ", "Abmessungen", "Stück", "Betongüte", "f_cd [N/mm²]", "Expositionsklasse", "Sauberkeitsschicht",
+        "Stabdurchmesser [mm]", "c_min [mm]", "Δc_dev [mm]", "c_nom [mm]", "maßgebend", "Beton [m³]", "Schalung [m²]",
+        "Bewehrungsgrad [kg/m³]", "Betonstahl [kg]", "Aushub [m³]", "Masse [t]", "Hinweise"]);
+      model.beton.forEach((element) => {
+        const a = betonWertung(element);
+        rows.push([betonBezeichnung(element), a.typName, a.geo.beschreibung, a.anzahl, element.guete,
+          a.kennwerte.fcd.toFixed(2), element.expo, a.typ.erdreich ? (element.sauberkeit === false ? "nein" : "ja") : "-",
+          element.ds, a.deckung.cMin, a.deckung.deltaC, a.deckung.cNom, a.deckung.massgebend,
+          a.volumen.toFixed(2), a.schalung.toFixed(2), a.bewehrungsgrad, a.bewehrung.toFixed(0),
+          a.aushub.toFixed(2), (a.masse / 1000).toFixed(2), a.warnungen.join(" ")]);
+      });
+
+      rows.push([]);
+      rows.push(["Mengen und Kosten Betonbau"]);
+      rows.push(["Position", "Menge", "Einheit", "Einheitspreis [€]", "Kosten [€]"]);
+      const positionen = betonAufstellung(Array.from(model.beton.values()), betonPreise(), raum);
+      positionen.forEach((pos) => {
+        rows.push([pos.name, pos.menge.toFixed(2), pos.einheit, pos.preis.toFixed(2), pos.kosten.toFixed(2)]);
+      });
+      rows.push(["Summe Betonbau", "", "", "", positionen.reduce((sum, pos) => sum + pos.kosten, 0).toFixed(2)]);
     }
 
     const csv = rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(";")).join("\r\n");

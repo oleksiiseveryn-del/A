@@ -753,6 +753,34 @@ button.tool-btn.plain.active { background: var(--hsd-blue); color: #fff; border-
   font-size: 0.72rem;
 }
 
+/* Betonbauteile: Abmessungsfelder und Tabelle */
+.masse-label {
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.tool-check.small {
+  display: inline-flex;
+  border: none;
+  background: none;
+  padding: 2px 0 0;
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  gap: 4px;
+}
+
+#betonTable td:nth-child(n+8):nth-child(-n+14) { text-align: right; white-space: nowrap; }
+#betonTable .layer-cell { min-width: 260px; }
+#betonTable .layer-row input { width: 56px; }
+#betonTable select { max-width: 155px; }
+#betonTable td:nth-child(15) { min-width: 170px; }
+#betonKostenTable td:nth-child(2),
+#betonKostenTable td:nth-child(4),
+#betonKostenTable td:nth-child(5) { text-align: right; font-family: var(--font-data); white-space: nowrap; }
+
 .force-chip {
   display: inline-block;
   font-family: var(--font-data);

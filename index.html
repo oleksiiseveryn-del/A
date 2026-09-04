@@ -90,6 +90,28 @@
         </select>
         <input type="number" id="bauteilHoehe" step="0.05" min="0.1" value="2.75" title="Wandhöhe bzw. Breite des Streifenfundaments in Metern">
       </span>
+      <span class="tool-group">
+        <button class="tool-btn plain" id="btnBetonteil" title="Betonbauteil auf der Arbeitsebene setzen; Abmessungen anschließend im Reiter Beton">▣ Betonteil</button>
+        <select id="betonTyp" title="Betonbauteil mit Regelabmessungen nach DIN EN 1992-1-1">
+          <option value="einzelfundament" selected>Einzelfundament</option>
+          <option value="streifenfundament">Streifenfundament</option>
+          <option value="koecherfundament">Köcherfundament</option>
+          <option value="bohrpfahl">Bohrpfahl</option>
+          <option value="bodenplatte">Bodenplatte</option>
+          <option value="decke">Stahlbetondecke</option>
+          <option value="wand">Stahlbetonwand</option>
+          <option value="kellerwand">Kellerwand (erdberührt)</option>
+          <option value="stuetze">Stütze rechteckig</option>
+          <option value="stuetze_rund">Stütze rund</option>
+          <option value="unterzug">Unterzug / Balken</option>
+        </select>
+        <select id="betonGuete" title="Betonfestigkeitsklasse nach DIN EN 1992-1-1 Tab. 3.1">
+          <option value="C20/25">C20/25</option>
+          <option value="C25/30" selected>C25/30</option>
+          <option value="C30/37">C30/37</option>
+          <option value="C35/45">C35/45</option>
+        </select>
+      </span>
       <button class="tool-btn" id="btnSupport" title="Knoten anklicken: Festlager → Loslager → kein Lager">△ Auflager</button>
       <button class="tool-btn" id="btnLoad" title="Knoten anklicken und Knotenlast in kN eingeben">↓ Knotenlast</button>
       <button class="tool-btn primary" id="btnSolve" title="Stabkräfte aus Geometrie, Auflagern und Lasten berechnen">Σ Stabkräfte berechnen</button>
@@ -119,6 +141,7 @@
         <button class="tab-btn" id="tabMembers">Bauteile</button>
         <button class="tab-btn" id="tabNodes">Knoten / Anschlüsse</button>
         <button class="tab-btn" id="tabArch">Architektur</button>
+        <button class="tab-btn" id="tabBeton">Beton</button>
         <button class="tab-btn" id="tabCutList">Stückliste</button>
       </div>
     </div>
@@ -340,6 +363,80 @@
       </table>
     </div>
 
+    <div class="result-panel-body" id="viewBeton" hidden>
+      <p class="view-note">Betonbauteile mit Mengen für das Leistungsverzeichnis: Betonvolumen, Schalungsfläche,
+        Bewehrungsmasse aus dem Bewehrungsgrad und Aushub mit Arbeitsraum nach DIN 4124. Betondeckung nach
+        DIN EN 1992-1-1 Abs. 4.4.1 mit den Werten des Nationalen Anhangs, Kennwerte der Festigkeitsklasse nach Tab. 3.1.
+        <strong>Die Bemessung nach DIN EN 1992-1-1</strong> (Biegung, Querkraft, Durchstanzen, Rissbreiten, Knicknachweis)
+        und die Pfahltragfähigkeit nach DIN EN 1997-1 mit DIN 1054 sind gesondert zu führen.</p>
+
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="arbeitsraum">Arbeitsraum [m]</label>
+          <input type="number" id="arbeitsraum" step="0.05" min="0" value="0.50" title="Breite des Arbeitsraums je Seite für den Aushub; Mindestmaß 0,50 m nach DIN 4124">
+        </div>
+        <div class="field">
+          <label for="preisBeton">Beton €/m³</label>
+          <input type="number" id="preisBeton" step="5" min="0" value="130">
+        </div>
+        <div class="field">
+          <label for="preisSchalung">Schalung €/m²</label>
+          <input type="number" id="preisSchalung" step="1" min="0" value="45">
+        </div>
+        <div class="field">
+          <label for="preisBewehrung">Betonstahl €/t</label>
+          <input type="number" id="preisBewehrung" step="10" min="0" value="1300">
+        </div>
+        <div class="field">
+          <label for="preisAushub">Aushub €/m³</label>
+          <input type="number" id="preisAushub" step="1" min="0" value="25">
+        </div>
+      </div>
+
+      <h3 class="section-title">Betonbauteile</h3>
+      <table class="members-table" id="betonTable">
+        <thead>
+          <tr>
+            <th>Pos</th>
+            <th>Typ</th>
+            <th>Abmessungen [m]</th>
+            <th>Stück</th>
+            <th>Güte</th>
+            <th>Expositionsklasse</th>
+            <th>⌀ Stab [mm]</th>
+            <th>c<sub>nom</sub> [mm]</th>
+            <th>Beton [m³]</th>
+            <th>Schalung [m²]</th>
+            <th>Bewehrung [kg/m³]</th>
+            <th>Betonstahl [kg]</th>
+            <th>Aushub [m³]</th>
+            <th>Masse [t]</th>
+            <th>Hinweis</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="betonBody"></tbody>
+      </table>
+      <div class="empty-state" id="betonEmpty">Noch kein Betonbauteil gesetzt – links „▣ Betonteil“ wählen und auf der Arbeitsebene setzen.</div>
+
+      <h3 class="section-title">Mengen und Kosten Betonbau</h3>
+      <table class="members-table" id="betonKostenTable">
+        <thead>
+          <tr>
+            <th>Position</th>
+            <th>Menge</th>
+            <th>Einheit</th>
+            <th>Einheitspreis [€]</th>
+            <th>Kosten [€]</th>
+          </tr>
+        </thead>
+        <tbody id="betonKostenBody"></tbody>
+      </table>
+      <p class="view-note">Einheitspreise sind Richtwerte und im Angebot durch die aktuellen Nachunternehmer- und
+        Lieferantenpreise zu ersetzen. Der Bewehrungsgrad ist ein Erfahrungswert je Bauteilart und ersetzt keine
+        Bewehrungsermittlung.</p>
+    </div>
+
     <div class="result-panel-body" id="viewCutList" hidden>
       <div class="cutlist-controls">
         <div class="field">
@@ -417,6 +514,7 @@
       <div class="stat"><span class="label">Lagerung</span><span class="value" id="costStorage">0.00 €</span></div>
       <div class="stat"><span class="label">Architektur (Material)</span><span class="value" id="costArch">0.00 €</span></div>
       <div class="stat"><span class="label">Fenster und Türen</span><span class="value" id="costOpenings">0.00 €</span></div>
+      <div class="stat"><span class="label">Betonbau</span><span class="value" id="costConcrete">0.00 €</span></div>
       <div class="stat"><span class="label">Gesamt (Kostenschätzung)</span><span class="value" id="costTotal">0.00 €</span></div>
     </div>
 
@@ -487,6 +585,14 @@
           Anhang A, Wärmeleitfähigkeiten nach DIN 4108-4; U-Wert nach DIN EN ISO 6946
           (U = 1/(R<sub>si</sub> + Σ d/λ + R<sub>se</sub>)) mit Wärmeübergangswiderständen nach Tab. 7;
           flächenbezogene Masse als Kennwert</li>
+        <li><strong>Betonbauteile</strong>: Mengen aus der Geometrie (Betonvolumen, Schalungsfläche, Aushub mit
+          Arbeitsraum nach DIN 4124), Bewehrungsmasse aus dem Bewehrungsgrad als Erfahrungswert; Betondeckung nach
+          DIN EN 1992-1-1 Abs. 4.4.1: c<sub>min</sub> = max(c<sub>min,b</sub>; c<sub>min,dur</sub>; 10 mm),
+          c<sub>nom</sub> = c<sub>min</sub> + Δc<sub>dev</sub>, für Ortbeton gegen Boden c<sub>min</sub> ≥ 40 mm auf
+          Sauberkeitsschicht bzw. ≥ 75 mm ohne; Festigkeitskennwerte nach Tab. 3.1 mit f<sub>cd</sub> = α<sub>cc</sub>·f<sub>ck</sub>/γ<sub>C</sub>
+          (α<sub>cc</sub> = 0,85, γ<sub>C</sub> = 1,50 nach NA); Abgleich der Festigkeitsklasse mit der
+          Expositionsklasse nach DIN 1045-2. Die Werte der Betondeckung und der Mindestfestigkeitsklassen sind
+          Richtwerte des Nationalen Anhangs und im Bauteil überschreibbar</li>
         <li><strong>Raumflächen</strong> nach DIN 277-1: lichte Maße in Höhe der Fußbodenoberkante durch Versatz
           der Wandachsen um die halbe Wanddicke; Netto-Raumfläche NRF = lichte Fläche − Konstruktionsflächen
           (Stützen, Pfeiler, Vorlagen, Schächte, Schornsteine) + Nischen bis zum Fußboden. Wahlweise mit den
@@ -513,6 +619,12 @@
           Holz (DIN EN 1995), Feuchteschutz nach DIN 4108-3, Schallschutznachweis nach DIN 4109, Brandschutz
           sowie die Gebäudebilanz und die Höchstwerte der U-Werte nach GEG – der Zielwert in der Tabelle dient
           nur dem Abgleich. Bauteile gegen Erdreich sind nach DIN EN ISO 13370 zu bewerten.</li>
+        <li><strong>Betonbau:</strong> sämtliche Nachweise nach DIN EN 1992-1-1 – Biegung mit Längskraft, Querkraft,
+          Durchstanzen, Torsion, Knicknachweis schlanker Stützen, Rissbreiten und Verformungen, Verankerungs- und
+          Übergreifungslängen, Mindest- und Höchstbewehrung, Fugen und Arbeitsfugen. Für die Gründung zusätzlich der
+          Grundbruch-, Gleit- und Setzungsnachweis nach DIN EN 1997-1 mit DIN 1054, für Bohrpfähle die Herstellung
+          nach DIN EN 1536 und die Pfahltragfähigkeit nach EA-Pfähle; Baugrubenböschungen und Verbau nach DIN 4124.
+          Der Bewehrungsgrad ist ein Erfahrungswert der Kostenschätzung und keine Bewehrungsermittlung</li>
         <li><strong>Flächen und Rauminhalte:</strong> Zuordnung der Grundflächen zu den Bereichen a/b/c nach
           DIN 277-1 (überdeckt, nicht überdeckt), Brutto-Rauminhalt, Zuordnung zu Nutzungsgruppen NUF 1–7 sowie
           die Wohnfläche nach WoFlV § 4 mit den Anrechnungsfaktoren aus der lichten Raumhöhe (unter 1 m ohne
@@ -545,6 +657,7 @@
 <script src="js/architecture.js"></script>
 <script src="js/elevation.js"></script>
 <script src="js/floorplan.js"></script>
+<script src="js/concrete.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

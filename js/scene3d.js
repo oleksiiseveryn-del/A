@@ -468,6 +468,100 @@ function buildArchElement(element, geo, color, opacity, openings) {
   return mesh;
 }
 
+/**
+ * Betonbauteil als Körper.
+ *  - linie:   Wand, Streifenfundament oder Unterzug entlang der Achse p1→p2
+ *  - flaeche: Bodenplatte oder Decke über dem aufgezogenen Rechteck
+ *  - punkt:   Fundament, Köcher, Stütze oder Bohrpfahl am Punkt
+ * Gründungsbauteile liegen unter der Arbeitsebene, aufgehende darüber.
+ */
+function buildConcreteElement(element, geo, opacity) {
+  const typ = BETONTEILTYPEN[element.kind];
+  const material = new THREE.MeshStandardMaterial({
+    color: typ.erdreich ? 0x8d9aa4 : 0xb3bec7, roughness: 0.95, metalness: 0.02,
+    transparent: opacity !== undefined && opacity < 1,
+    opacity: opacity === undefined ? 1 : opacity,
+  });
+  const p1 = element.p1;
+
+  if (typ.form === "linie") {
+    const p2 = element.p2 || p1;
+    const dx = p2.x - p1.x, dz = p2.z - p1.z;
+    const laenge = Math.hypot(dx, dz) || geo.laenge || 1;
+    const hoehe = element.kind === "streifenfundament" ? geo.dicke : geo.hoehe;
+    const dicke = element.kind === "streifenfundament" ? geo.breite : geo.dicke;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(laenge, hoehe, dicke), material);
+    const yMitte = typ.erdreich ? p1.y - hoehe / 2 : p1.y + hoehe / 2;
+    mesh.position.set((p1.x + p2.x) / 2, yMitte, (p1.z + p2.z) / 2);
+    mesh.rotation.y = -Math.atan2(dz, dx);
+    return mesh;
+  }
+
+  if (typ.form === "flaeche") {
+    const p2 = element.p2 || p1;
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(geo.laenge, geo.dicke, geo.breite), material);
+    // Bodenplatte liegt unter der Ebene, die Decke darauf
+    const yMitte = typ.erdreich ? p1.y - geo.dicke / 2 : p1.y + geo.dicke / 2;
+    mesh.position.set((p1.x + p2.x) / 2, yMitte, (p1.z + p2.z) / 2);
+    return mesh;
+  }
+
+  if (element.kind === "bohrpfahl") {
+    const d = geo.laenge, l = geo.hoehe;
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(d / 2, d / 2, l, 20), material);
+    mesh.position.set(p1.x, p1.y - l / 2, p1.z);
+    return mesh;
+  }
+
+  if (element.kind === "stuetze_rund") {
+    const d = geo.laenge, h = geo.hoehe;
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(d / 2, d / 2, h, 20), material);
+    mesh.position.set(p1.x, p1.y + h / 2, p1.z);
+    return mesh;
+  }
+
+  if (element.kind === "stuetze") {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(geo.laenge, geo.hoehe, geo.breite), material);
+    mesh.position.set(p1.x, p1.y + geo.hoehe / 2, p1.z);
+    return mesh;
+  }
+
+  if (element.kind === "koecherfundament" && geo.koecher) {
+    // Block mit ausgespartem Köcher: Ring als Extrusion, darunter die volle Sohle
+    const gruppe = new THREE.Group();
+    const k = geo.koecher;
+    const shape = new THREE.Shape();
+    shape.moveTo(-geo.laenge / 2, -geo.breite / 2);
+    shape.lineTo(geo.laenge / 2, -geo.breite / 2);
+    shape.lineTo(geo.laenge / 2, geo.breite / 2);
+    shape.lineTo(-geo.laenge / 2, geo.breite / 2);
+    shape.closePath();
+    const loch = new THREE.Path();
+    loch.moveTo(-k.l / 2, -k.b / 2);
+    loch.lineTo(k.l / 2, -k.b / 2);
+    loch.lineTo(k.l / 2, k.b / 2);
+    loch.lineTo(-k.l / 2, k.b / 2);
+    loch.closePath();
+    shape.holes.push(loch);
+
+    const ring = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: k.t, bevelEnabled: false }), material);
+    ring.rotation.x = -Math.PI / 2;     // Extrusionsrichtung +z zeigt nach dem Drehen nach oben
+    ring.position.set(p1.x, p1.y - k.t, p1.z);
+    gruppe.add(ring);
+
+    const sohle = Math.max(geo.hoehe - k.t, 0.01);
+    const unten = new THREE.Mesh(new THREE.BoxGeometry(geo.laenge, sohle, geo.breite), material);
+    unten.position.set(p1.x, p1.y - k.t - sohle / 2, p1.z);
+    gruppe.add(unten);
+    return gruppe;
+  }
+
+  // Einzelfundament
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(geo.laenge, geo.hoehe, geo.breite), material);
+  mesh.position.set(p1.x, p1.y - geo.hoehe / 2, p1.z);
+  return mesh;
+}
+
 /** Farbe eines Bauteils aus dem Baustoff der dicksten Schicht. */
 function archElementColor(element) {
   let dickste = null;
