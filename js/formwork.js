@@ -167,16 +167,16 @@ function zeichneSchalAnsicht(ansicht, feld, nenner, koten) {
   if (ansicht.aussparung) {
     const a = ansicht.aussparung;
     svg += `<rect x="${px(a.x).toFixed(2)}" y="${py(a.y + a.h).toFixed(2)}" width="${m(a.b).toFixed(2)}" height="${m(a.h).toFixed(2)}" class="aussparung"/>`;
-    svg += `<text x="${px(a.x + a.b / 2).toFixed(2)}" y="${py(a.y + a.h / 2).toFixed(2)}" class="t-mass">${meterText(a.b)}/${meterText(a.h)}</text>`;
+    svg += `<text x="${px(a.x + a.b / 2).toFixed(2)}" y="${py(a.y + a.h / 2).toFixed(2)}" class="t-mass">${massText(a.b)}/${massText(a.h)}</text>`;
   }
 
   // Maßketten außen
   const yMass = yUK + 7;
   svg += massketteWaagerecht([x0, x0 + W], yMass, yUK, "kette");
-  svg += `<text x="${(x0 + W / 2).toFixed(2)}" y="${(yMass - 1.4).toFixed(2)}" class="t-mass-gross">${meterText(ansicht.breite)}</text>`;
+  svg += `<text x="${(x0 + W / 2).toFixed(2)}" y="${(yMass - 1.4).toFixed(2)}" class="t-mass-gross">${massText(ansicht.breite)}</text>`;
   const xMass = x0 - 7;
   svg += massketteLotrecht([yUK, yUK - H], xMass, x0);
-  svg += `<text x="${(xMass - 1.6).toFixed(2)}" y="${(yUK - H / 2).toFixed(2)}" class="t-mass-gross" transform="rotate(-90 ${(xMass - 1.6).toFixed(2)} ${(yUK - H / 2).toFixed(2)})">${meterText(ansicht.hoehe)}</text>`;
+  svg += `<text x="${(xMass - 1.6).toFixed(2)}" y="${(yUK - H / 2).toFixed(2)}" class="t-mass-gross" transform="rotate(-90 ${(xMass - 1.6).toFixed(2)} ${(yUK - H / 2).toFixed(2)})">${massText(ansicht.hoehe)}</text>`;
 
   // Höhenkoten am Bauteil
   if (koten) {
@@ -432,10 +432,10 @@ function schalungsUebersichtSVG(daten) {
   // Maßketten der Gesamtausdehnung
   const yMass = y0 + H + 8;
   svg += massketteWaagerecht([x0, x0 + W], yMass, y0 + H, "kette");
-  svg += `<text x="${(x0 + W / 2).toFixed(2)}" y="${(yMass - 1.4).toFixed(2)}" class="t-mass-gross">${meterText(breiteM)}</text>`;
+  svg += `<text x="${(x0 + W / 2).toFixed(2)}" y="${(yMass - 1.4).toFixed(2)}" class="t-mass-gross">${massText(breiteM)}</text>`;
   const xMass = x0 - 8;
   svg += massketteLotrecht([y0 + H, y0], xMass, x0);
-  svg += `<text x="${(xMass - 1.6).toFixed(2)}" y="${(y0 + H / 2).toFixed(2)}" class="t-mass-gross" transform="rotate(-90 ${(xMass - 1.6).toFixed(2)} ${(y0 + H / 2).toFixed(2)})">${meterText(tiefeM)}</text>`;
+  svg += `<text x="${(xMass - 1.6).toFixed(2)}" y="${(y0 + H / 2).toFixed(2)}" class="t-mass-gross" transform="rotate(-90 ${(xMass - 1.6).toFixed(2)} ${(y0 + H / 2).toFixed(2)})">${massText(tiefeM)}</text>`;
 
   // ---- Zusammenstellung rechts
   const xL = BLATT.randLinks + 172;

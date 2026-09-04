@@ -599,10 +599,10 @@ function zeichneBewehrungsAnsicht(ansicht, feld, nenner, deckung, marken) {
   // Maßketten für die Außenmaße
   const yMass = yUK + 7;
   svg += massketteWaagerecht([x0, x0 + W], yMass, yUK, "kette");
-  svg += `<text x="${(x0 + W / 2).toFixed(2)}" y="${(yMass - 1.4).toFixed(2)}" class="t-mass">${meterText(ansicht.breite)}</text>`;
+  svg += `<text x="${(x0 + W / 2).toFixed(2)}" y="${(yMass - 1.4).toFixed(2)}" class="t-mass">${massText(ansicht.breite)}</text>`;
   const xMass = x0 - 7;
   svg += massketteLotrecht([yUK, yUK - H], xMass, x0);
-  svg += `<text x="${(xMass - 1.6).toFixed(2)}" y="${(yUK - H / 2).toFixed(2)}" class="t-mass" transform="rotate(-90 ${(xMass - 1.6).toFixed(2)} ${(yUK - H / 2).toFixed(2)})">${meterText(ansicht.hoehe)}</text>`;
+  svg += `<text x="${(xMass - 1.6).toFixed(2)}" y="${(yUK - H / 2).toFixed(2)}" class="t-mass" transform="rotate(-90 ${(xMass - 1.6).toFixed(2)} ${(yUK - H / 2).toFixed(2)})">${massText(ansicht.hoehe)}</text>`;
 
   svg += `<text x="${feld.x.toFixed(2)}" y="${(feld.y + 3).toFixed(2)}" class="t-kopf">${ansicht.titel} · M 1:${nenner}</text>`;
   return svg;

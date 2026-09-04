@@ -429,6 +429,14 @@ function grundrissSVG(daten) {
     }
   });
 
+  let wandketten = false;   // wurde mindestens eine Wandmaßkette gezeichnet?
+
+  // Schwerpunkt aller Wandenden: bestimmt, welche Seite einer Wand außen liegt
+  const schwerpunkt = waende.reduce((sum, w) => ({
+    x: sum.x + (w.p1.x + w.p2.x) / (2 * waende.length),
+    z: sum.z + (w.p1.z + w.p2.z) / (2 * waende.length),
+  }), { x: 0, z: 0 });
+
   // Wände im Schnitt, zwischen den Öffnungen aufgeteilt
   waende.forEach((wand) => {
     const geo = geometrieVon(wand);
@@ -479,19 +487,80 @@ function grundrissSVG(daten) {
       }
     });
 
-    // Wandbeschriftung entlang der Achse
-    svg += `<text x="${(laenge / 2).toFixed(2)}" y="${(dicke / 2 + 4).toFixed(2)}" class="t-wand">${daten.bezeichnungVon(wand)} · ${laengeM.toFixed(2)} m · ${(geo.dicke * 1000).toFixed(0)} mm</text>`;
+    const kopfueber = drehung > 90 || drehung < -90;
+
+    // Außenseite der Wand bestimmen: die Normale, die vom Gebäudeschwerpunkt
+    // weg zeigt. Auf dieser Seite liegen die Maßketten, die Öffnungs-
+    // beschriftung liegt gegenüber, damit sich beides nicht überdeckt.
+    const mx = (wand.p1.x + wand.p2.x) / 2, mz = (wand.p1.z + wand.p2.z) / 2;
+    const dxW = wand.p2.x - wand.p1.x, dzW = wand.p2.z - wand.p1.z;
+    const normW = Math.hypot(dxW, dzW) || 1;
+    const nxW = -dzW / normW, nzW = dxW / normW;
+    const seite = (mx - schwerpunkt.x) * nxW + (mz - schwerpunkt.z) * nzW >= 0 ? 1 : -1;
+    const istAussen = wand.kind === "wand_aussen";
+    const beschriftungsSeite = istAussen ? -seite : -1;
+
+    // Öffnungsbeschriftung wie in der Bauzeichnung: Breite/Höhe und BRH
+    felder.forEach((f) => {
+      const mitte = m(f.x0 + f.b / 2);
+      const art = OEFFNUNGSTYPEN[f.typ] ? OEFFNUNGSTYPEN[f.typ].art : "Fenster";
+      const yText = beschriftungsSeite * (dicke / 2 + 1.6);
+      const dreh = kopfueber ? `transform="rotate(180 ${mitte.toFixed(2)} ${yText.toFixed(2)})"` : "";
+      const zeilen = [`${massText(f.b)}/${massText(f.h)}`];
+      if (art === "Fenster") zeilen.push(`BRH ${massText(f.y0)}`);
+      // Zeilen laufen von der Wand weg
+      zeilen.forEach((text, i) => {
+        const stufe = beschriftungsSeite > 0 ? 3.0 * i : -3.0 * i;
+        const y = yText + (kopfueber ? -stufe : stufe);
+        svg += `<text x="${mitte.toFixed(2)}" y="${y.toFixed(2)}" class="t-oeffnung-plan" ${dreh}>${text}</text>`;
+      });
+    });
+
+    // Maßkette an Außenwänden: Einzelmaße der Pfeiler und Öffnungen sowie
+    // das Gesamtmaß, auf der dem Gebäude abgewandten Seite
+    if (istAussen && laenge > 12) {
+      const yKette = seite * (dicke / 2 + 9);
+
+      const punkte = [0];
+      felder.forEach((f) => { punkte.push(m(f.x0)); punkte.push(m(f.x0 + f.b)); });
+      punkte.push(laenge);
+      const werte = [];
+      for (let i = 0; i < punkte.length - 1; i++) werte.push((punkte[i + 1] - punkte[i]) * nenner / 1000);
+
+      svg += massketteWaagerecht(punkte, yKette, seite * dicke / 2, "kette");
+      for (let i = 0; i < werte.length; i++) {
+        if (punkte[i + 1] - punkte[i] < 3.2) continue;   // zu schmal für eine Maßzahl
+        const mp = (punkte[i] + punkte[i + 1]) / 2;
+        const y = seite > 0 ? yKette - 1.4 : yKette + 3.2;
+        const dreh = kopfueber ? `transform="rotate(180 ${mp.toFixed(2)} ${y.toFixed(2)})"` : "";
+        svg += `<text x="${mp.toFixed(2)}" y="${y.toFixed(2)}" class="t-mass" ${dreh}>${massText(werte[i])}</text>`;
+      }
+      const yGesamt = seite * (dicke / 2 + 17);
+      svg += massketteWaagerecht([0, laenge], yGesamt, yKette + seite * 2, "kette");
+      const yg = seite > 0 ? yGesamt - 1.4 : yGesamt + 3.2;
+      const drehG = kopfueber ? `transform="rotate(180 ${(laenge / 2).toFixed(2)} ${yg.toFixed(2)})"` : "";
+      svg += `<text x="${(laenge / 2).toFixed(2)}" y="${yg.toFixed(2)}" class="t-mass-gross" ${drehG}>${massText(laengeM)}</text>`;
+      wandketten = true;
+    }
+
+    // Wandbeschriftung entlang der Achse, hinter den Öffnungsangaben
+    const yBez = beschriftungsSeite * (dicke / 2 + 8.5);
+    const drehBez = kopfueber ? `transform="rotate(180 ${(laenge / 2).toFixed(2)} ${yBez.toFixed(2)})"` : "";
+    svg += `<text x="${(laenge / 2).toFixed(2)}" y="${yBez.toFixed(2)}" class="t-wand" ${drehBez}>${daten.bezeichnungVon(wand)} · ${massText(laengeM)} · ${(geo.dicke * 1000).toFixed(0)} mm</text>`;
     svg += `</g>`;
   });
 
-  // Gesamtmaße unten und links
+  // Gesamtmaße unten und links nur, wenn die Außenwände keine eigenen
+  // Maßketten tragen – sonst stünden die Maße doppelt im Blatt
+  if (!wandketten) {
   const yUnten = y0 + m(tiefeM) + 14;
   svg += massketteWaagerecht([px(minX), px(maxX)], yUnten, y0 + m(tiefeM) + 2, "kette");
-  svg += `<text x="${((px(minX) + px(maxX)) / 2).toFixed(2)}" y="${(yUnten - 1.5).toFixed(2)}" class="t-mass-gross">${breiteM.toFixed(2)}</text>`;
+  svg += `<text x="${((px(minX) + px(maxX)) / 2).toFixed(2)}" y="${(yUnten - 1.5).toFixed(2)}" class="t-mass-gross">${massText(breiteM)}</text>`;
 
   const xLinks = x0 - 12;
   svg += massketteLotrecht([pz(minZ), pz(maxZ)], xLinks, x0 - 2);
-  svg += `<text x="${(xLinks - 2).toFixed(2)}" y="${((pz(minZ) + pz(maxZ)) / 2).toFixed(2)}" class="t-mass-gross" transform="rotate(-90 ${(xLinks - 2).toFixed(2)} ${((pz(minZ) + pz(maxZ)) / 2).toFixed(2)})">${tiefeM.toFixed(2)}</text>`;
+  svg += `<text x="${(xLinks - 2).toFixed(2)}" y="${((pz(minZ) + pz(maxZ)) / 2).toFixed(2)}" class="t-mass-gross" transform="rotate(-90 ${(xLinks - 2).toFixed(2)} ${((pz(minZ) + pz(maxZ)) / 2).toFixed(2)})">${massText(tiefeM)}</text>`;
+  }
 
   // Raumaufstellung und Achsenzeiger rechts
   const xInfo = BLATT.breite - BLATT.randRechts - 68;
@@ -593,6 +662,7 @@ function grundrissSVG(daten) {
   .t-mass-grau { font-size: 2.2px; text-anchor: middle; fill: #64707c; }
   .t-mass-gross { font-size: 3.2px; text-anchor: middle; font-weight: 600; }
   .t-raum { font-size: 3.4px; text-anchor: middle; font-weight: 600; }
+  .t-oeffnung-plan { font-size: 2.2px; text-anchor: middle; paint-order: stroke; stroke: #ffffff; stroke-width: 0.7; stroke-linejoin: round; }
   .t-wand { font-size: 2.3px; text-anchor: middle; fill: #46525e; }
   .t-kopf { font-size: 3.2px; font-weight: 600; }
   .t-klein { font-size: 2.6px; }

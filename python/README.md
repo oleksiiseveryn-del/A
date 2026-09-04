@@ -71,6 +71,13 @@ vorschlag = automatische_bewehrung(
 print(vorschlag.gewaehlt, vorschlag.as_min, vorschlag.as_vorh)   # ⌀8/200 mm 2.25 2.51
 ```
 
+## Allplan-PythonPart „Wand bewehren"
+
+Im Ordner `allplan_pythonpart/` liegt zusätzlich ein PythonPart für Allplan, der
+eine Wand nach DIN EN 1992-1-1 Abs. 9.6 bewehrt (Palette `.pyp`, Skript `.py`,
+geprüfter Rechenkern ohne Allplan). Einbau und Grenzen stehen in
+`allplan_pythonpart/README.md`.
+
 ## Aufbau
 
 ```
@@ -81,9 +88,14 @@ hsd_bewehrung/
     schedule.py    Biegeliste, Stahlauszug, Schneidplan, Etiketten, Prüfung
     export.py      Ausgabe als CSV, JSON und Text
     cli.py         Kommandozeile
+allplan_pythonpart/
+    WandBewehrung.pyp      Palette des PythonParts
+    WandBewehrung.py       PythonPart: Palette lesen, Bewehrung zeichnen
+    wandbewehrung_kern.py  Rechenkern ohne Allplan (Mindestbewehrung, Stablagen)
 tests/
-    test_bewehrung.py  Normwerte, Mindestbewehrung, Listen, Prüfung, Dateien
-    test_parity.py     Gleichlauf mit der Weboberfläche (js/autorebar.js)
+    test_bewehrung.py      Normwerte, Mindestbewehrung, Listen, Prüfung, Dateien
+    test_parity.py         Gleichlauf mit der Weboberfläche (js/autorebar.js)
+    test_wandbewehrung.py  Rechenkern und Palette des PythonParts
 ```
 
 ## Prüfungen
@@ -93,7 +105,7 @@ cd python
 python -m unittest discover -s tests -v
 ```
 
-31 Prüfungen decken die Tabellenwerte des Betonstahls, die Mindestbewehrung, die
+45 Prüfungen decken die Tabellenwerte des Betonstahls, die Mindestbewehrung, die
 Biegeliste, den Schneidplan und die Dateiausgabe ab. Ein weiterer Test führt die
 Bewehrungswahl in Python **und** in der Weboberfläche aus und vergleicht beide
 Ergebnisse Stück für Stück – so bleibt es bei einer Rechenweise in zwei Umsetzungen.

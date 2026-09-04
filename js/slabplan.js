@@ -225,7 +225,7 @@ function deckenplanSVG(daten) {
       svg += `<line x1="${px(ox).toFixed(2)}" y1="${pz(oz).toFixed(2)}" x2="${px(ox + o.b).toFixed(2)}" y2="${pz(oz + o.t).toFixed(2)}" class="durchbruchkreuz"/>`;
       svg += `<line x1="${px(ox + o.b).toFixed(2)}" y1="${pz(oz).toFixed(2)}" x2="${px(ox).toFixed(2)}" y2="${pz(oz + o.t).toFixed(2)}" class="durchbruchkreuz"/>`;
       if (m(o.b) > 8) {
-        svg += `<text x="${px(ox + o.b / 2).toFixed(2)}" y="${(pz(oz + o.t / 2) + 0.8).toFixed(2)}" class="t-durchbruch">${meterText(o.b)}/${meterText(o.t)}</text>`;
+        svg += `<text x="${px(ox + o.b / 2).toFixed(2)}" y="${(pz(oz + o.t / 2) + 0.8).toFixed(2)}" class="t-durchbruch">${massText(o.b)}/${massText(o.t)}</text>`;
       }
     });
 
@@ -250,10 +250,10 @@ function deckenplanSVG(daten) {
     const pfeilZ = zweiachsig ? l.z0 + l.t * 0.32 : mz;
     const pfeilX = zweiachsig ? l.x0 + l.b * 0.68 : mx;
     if (spann.richtung === "x" || zweiachsig) {
-      svg += pfeil(l.x0 + rand, pfeilZ, l.x0 + l.b - rand, pfeilZ, `l = ${meterText(l.b)}`, false);
+      svg += pfeil(l.x0 + rand, pfeilZ, l.x0 + l.b - rand, pfeilZ, `l = ${massText(l.b)}`, false);
     }
     if (spann.richtung === "z" || zweiachsig) {
-      svg += pfeil(pfeilX, l.z0 + rand, pfeilX, l.z0 + l.t - rand, `l = ${meterText(l.t)}`, true);
+      svg += pfeil(pfeilX, l.z0 + rand, pfeilX, l.z0 + l.t - rand, `l = ${massText(l.t)}`, true);
     }
 
     // Beschriftung im oberen Drittel der Platte, von oben nach unten gesetzt
@@ -272,7 +272,7 @@ function deckenplanSVG(daten) {
     for (let i = 0; i < punkte.length - 1; i++) {
       if (punkte[i + 1] - punkte[i] < 4) continue;
       const weite = achsen.x[i + 1].wert - achsen.x[i].wert;
-      svg += `<text x="${((punkte[i] + punkte[i + 1]) / 2).toFixed(2)}" y="${(yMass - 1.4).toFixed(2)}" class="t-mass">${meterText(weite)}</text>`;
+      svg += `<text x="${((punkte[i] + punkte[i + 1]) / 2).toFixed(2)}" y="${(yMass - 1.4).toFixed(2)}" class="t-mass">${massText(weite)}</text>`;
     }
   }
   if (achsen && achsen.z.length > 1) {

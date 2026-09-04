@@ -316,11 +316,11 @@ function positionsplanSVG(daten) {
     for (let i = 0; i < punkte.length - 1; i++) {
       const weite = achsen.x[i + 1].wert - achsen.x[i].wert;
       if (punkte[i + 1] - punkte[i] < 4) continue;
-      svg += `<text x="${((punkte[i] + punkte[i + 1]) / 2).toFixed(2)}" y="${(yMass - 1.4).toFixed(2)}" class="t-mass">${meterText(weite)}</text>`;
+      svg += `<text x="${((punkte[i] + punkte[i + 1]) / 2).toFixed(2)}" y="${(yMass - 1.4).toFixed(2)}" class="t-mass">${massText(weite)}</text>`;
     }
     const gesamt = achsen.x[achsen.x.length - 1].wert - achsen.x[0].wert;
     svg += massketteWaagerecht([punkte[0], punkte[punkte.length - 1]], yMass + 8, yMass + 2, "kette");
-    svg += `<text x="${((punkte[0] + punkte[punkte.length - 1]) / 2).toFixed(2)}" y="${(yMass + 6.6).toFixed(2)}" class="t-mass-gross">${meterText(gesamt)}</text>`;
+    svg += `<text x="${((punkte[0] + punkte[punkte.length - 1]) / 2).toFixed(2)}" y="${(yMass + 6.6).toFixed(2)}" class="t-mass-gross">${massText(gesamt)}</text>`;
   }
   if (achsen.z.length > 1) {
     const punkte = achsen.z.map((a) => pz(a.wert));

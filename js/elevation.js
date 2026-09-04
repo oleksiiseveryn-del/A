@@ -18,7 +18,32 @@ function waehleMassstab(laengeM, hoeheM, feldBreite, feldHoehe) {
 }
 
 function meterText(wert) {
-  return wert.toFixed(2).replace(".", ",");
+  return wert.toFixed(2).replace(".", MASS_EINSTELLUNG.dezimal);
+}
+
+/**
+ * Einstellung der Maßeintragung.
+ *   dezimal: Dezimalzeichen der Maßzahlen ("," nach DIN 406-11, "." im
+ *            Allplan-Stil vieler Büros)
+ *   zentimeter: Maße unter 1 m als Zentimeterzahl ohne Einheit eintragen
+ *            (Bauzeichnungspraxis: 42, 18, 92 statt 0,42 0,18 0,92)
+ */
+const MASS_EINSTELLUNG = { dezimal: ",", zentimeter: true };
+
+/**
+ * Maßzahl einer Maßkette nach Bauzeichnungspraxis:
+ * ab 1 m in Metern mit zwei Nachkommastellen, darunter in Zentimetern
+ * ohne Einheit; Millimeter werden als hochgestellte Ziffer nicht geführt.
+ */
+function massText(wertM) {
+  const betrag = Math.abs(wertM);
+  if (MASS_EINSTELLUNG.zentimeter && betrag < 1) {
+    const cm = betrag * 100;
+    // unter 1 cm und bei Aufrundung auf 100 cm bleibt die Meterschreibweise
+    if (cm < 1 || Math.round(cm) >= 100) return meterText(wertM);
+    return `${wertM < 0 ? "−" : ""}${cm.toFixed(0)}`;
+  }
+  return meterText(wertM);
 }
 
 /** Waagerechte Maßlinie mit Maßhilfslinien und Schrägstrich-Begrenzung. */
@@ -91,8 +116,8 @@ function wandAnsichtSVG(daten) {
     const mitteX = fx + fw / 2;
     const mitteY = fy + fh / 2;
     svg += `<text x="${mitteX.toFixed(2)}" y="${(mitteY - 1.5).toFixed(2)}" class="t-oeffnung">${art === "Fenster" ? "F" : "T"}${f.id}.${f.index + 1}</text>`;
-    svg += `<text x="${mitteX.toFixed(2)}" y="${(mitteY + 2.2).toFixed(2)}" class="t-mass">${meterText(f.b)}/${meterText(f.h)}</text>`;
-    svg += `<text x="${mitteX.toFixed(2)}" y="${(mitteY + 5.6).toFixed(2)}" class="t-mass">BRH ${meterText(f.y0)}</text>`;
+    svg += `<text x="${mitteX.toFixed(2)}" y="${(mitteY + 2.2).toFixed(2)}" class="t-mass">${massText(f.b)}/${massText(f.h)}</text>`;
+    svg += `<text x="${mitteX.toFixed(2)}" y="${(mitteY + 5.6).toFixed(2)}" class="t-mass">BRH ${massText(f.y0)}</text>`;
   });
 
   // Untere Maßkette: Pfeiler und Öffnungsbreiten
@@ -108,13 +133,13 @@ function wandAnsichtSVG(daten) {
     const breiteMm = punkteX[i + 1] - punkteX[i];
     if (breiteMm < 3) continue; // zu schmal für eine Maßzahl
     const wertM = (breiteMm * nenner) / 1000;
-    svg += `<text x="${((punkteX[i] + punkteX[i + 1]) / 2).toFixed(2)}" y="${(yMass1 - 1.5).toFixed(2)}" class="t-mass">${meterText(wertM)}</text>`;
+    svg += `<text x="${((punkteX[i] + punkteX[i + 1]) / 2).toFixed(2)}" y="${(yMass1 - 1.5).toFixed(2)}" class="t-mass">${massText(wertM)}</text>`;
   }
 
   // Zweite Maßkette: Gesamtlänge
   const yMass2 = yUK + 24;
   svg += massketteWaagerecht([x0, x0 + W], yMass2, yMass1 + 2, "kette");
-  svg += `<text x="${(x0 + W / 2).toFixed(2)}" y="${(yMass2 - 1.5).toFixed(2)}" class="t-mass-gross">${meterText(geo.laenge)}</text>`;
+  svg += `<text x="${(x0 + W / 2).toFixed(2)}" y="${(yMass2 - 1.5).toFixed(2)}" class="t-mass-gross">${massText(geo.laenge)}</text>`;
 
   // Lotrechte Maßkette links: Brüstung, Öffnungshöhe, Rest sowie Gesamthöhe
   const xMass1 = x0 - 8;
@@ -126,12 +151,12 @@ function wandAnsichtSVG(daten) {
     for (let i = 0; i < werte.length; i++) {
       if (m(werte[i]) < 4) continue;
       const my = (punkteY[i] + punkteY[i + 1]) / 2;
-      svg += `<text x="${(xMass1 - 2).toFixed(2)}" y="${my.toFixed(2)}" class="t-mass-v" transform="rotate(-90 ${(xMass1 - 2).toFixed(2)} ${my.toFixed(2)})">${meterText(werte[i])}</text>`;
+      svg += `<text x="${(xMass1 - 2).toFixed(2)}" y="${my.toFixed(2)}" class="t-mass-v" transform="rotate(-90 ${(xMass1 - 2).toFixed(2)} ${my.toFixed(2)})">${massText(werte[i])}</text>`;
     }
   }
   const xMass2 = x0 - 16;
   svg += massketteLotrecht([yUK, yOK], xMass2, xMass1 - 2);
-  svg += `<text x="${(xMass2 - 2).toFixed(2)}" y="${((yUK + yOK) / 2).toFixed(2)}" class="t-mass-gross" transform="rotate(-90 ${(xMass2 - 2).toFixed(2)} ${((yUK + yOK) / 2).toFixed(2)})">${meterText(geo.hoehe)}</text>`;
+  svg += `<text x="${(xMass2 - 2).toFixed(2)}" y="${((yUK + yOK) / 2).toFixed(2)}" class="t-mass-gross" transform="rotate(-90 ${(xMass2 - 2).toFixed(2)} ${((yUK + yOK) / 2).toFixed(2)})">${massText(geo.hoehe)}</text>`;
 
   // Geländelinie
   svg += `<line x1="${(x0 - 6).toFixed(2)}" y1="${yUK.toFixed(2)}" x2="${(x0 + W + 6).toFixed(2)}" y2="${yUK.toFixed(2)}" class="gelaende"/>`;
