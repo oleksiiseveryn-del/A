@@ -16,6 +16,7 @@ kein Internetzugang im Betrieb. three.js r128 liegt unter `js/vendor/` bei.
 | **Im Firmennetz** | Ordner auf einen Webserver legen; die Anwendung meldet einen Service Worker an und läuft danach **ohne Netz** weiter |
 | **Auf dem iPad** | Adresse in Safari öffnen → **Teilen ↗ → Zum Home-Bildschirm**; die Anwendung startet als eigenes Symbol ohne Browserleiste |
 | **Als eine Datei** | `node tools/einzeldatei.js` erzeugt `stahlbau-konverter.html` mit allem darin – zum Weitergeben per AirDrop, Mail oder USB-Stick |
+| **Auf Windows** | eigenes Programm mit deutschem Menü, Windows-Datei-Dialogen, Drucken und PDF – siehe `desktop/README.md` |
 
 ## Bedienung auf dem Tablet
 
@@ -38,6 +39,7 @@ schieben; Bedienelemente sind mindestens 44 pt hoch und Eingabefelder mindestens
 | Wandansicht, Grundriss, Schalplan, Schalplan-Übersicht, Bewehrungsplan, Deckenplan, Positionsplan | SVG im Blatt A4 quer mit Schriftfeld |
 | Biegedaten für die Biegerei | JSON für `python/hsd_bewehrung` |
 | Projektdatei | JSON mit dem vollständigen Modell |
+| Aufmaß und Bautagebuch | CSV sowie Aufmaßblatt und Tagesbericht als SVG im Blatt A4 quer |
 | Papier und PDF | über *Drucken*; aus dem Blattfenster kommt das Blatt allein auf das Papier |
 
 **↗ Weitergeben** übergibt die zuletzt erzeugte Datei an das Systemmenü des Geräts
@@ -72,10 +74,15 @@ js/
   truss-solver.js         Stabkräfte, eben und räumlich
   scene3d.js              3D-Fenster, Maus- und Fingerbedienung
   app.js                  Steuerung der Oberfläche
+  measure.js              Aufmaß nach VOB/B § 14 mit den Regeln der VOB/C
+  sitelog.js              Bautagebuch mit Tagesbericht
 python/                   Bewehrung und Herstellungsunterlagen (46 Prüfungen)
+desktop/                  Windows-Anwendung (Electron) – siehe desktop/README.md
 tools/
   einzeldatei.js          baut stahlbau-konverter.html
-  icons.py                erzeugt die App-Symbole
+  desktop-vorbereiten.js  legt die Oberfläche für das Windows-Fenster ab
+  icons.py                erzeugt die App-Symbole und icon.ico
+  wine-rcedit64.sh        Behelf für den Windows-Bau auf Linux
 ```
 
 ## Geltungsbereich

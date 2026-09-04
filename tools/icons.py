@@ -22,19 +22,24 @@ WEISS = (255, 255, 255)
 WURZEL = Path(__file__).resolve().parents[1]
 
 
-def png_schreiben(pfad: Path, breite: int, hoehe: int, pixel: list[list[tuple[int, int, int]]]) -> None:
-    """Schreibt ein RGB-PNG (8 bit, Filtertyp 0) ohne Fremdpakete."""
+def png_schreiben(pfad: Path, breite: int, hoehe: int,
+                  pixel: list[list[tuple[int, int, int]]], alpha: bool = False) -> None:
+    """Schreibt ein PNG (8 bit, Filtertyp 0) ohne Fremdpakete.
+
+    :param alpha: True schreibt RGBA (Farbtyp 6) mit voller Deckkraft –
+        das Format, das Windows in ICO-Dateien erwartet.
+    """
     roh = bytearray()
     for zeile in pixel:
         roh.append(0)                      # Filtertyp „None“ je Zeile
         for r, g, b in zeile:
-            roh += bytes((r, g, b))
+            roh += bytes((r, g, b, 255)) if alpha else bytes((r, g, b))
 
     def block(kennung: bytes, daten: bytes) -> bytes:
         return (struct.pack(">I", len(daten)) + kennung + daten
                 + struct.pack(">I", zlib.crc32(kennung + daten) & 0xFFFFFFFF))
 
-    kopf = struct.pack(">IIBBBBB", breite, hoehe, 8, 2, 0, 0, 0)
+    kopf = struct.pack(">IIBBBBB", breite, hoehe, 8, 6 if alpha else 2, 0, 0, 0)
     pfad.write_bytes(
         b"\x89PNG\r\n\x1a\n"
         + block(b"IHDR", kopf)
@@ -90,6 +95,42 @@ def symbol(groesse: int, sicherheitsrand: float = 0.0) -> list[list[tuple[int, i
     return bild
 
 
+def ico_schreiben(pfad: Path, groessen: list[int]) -> None:
+    """Schreibt ein Windows-Symbol (.ico) mit eingebetteten PNG-Bildern.
+
+    Windows Vista und neuer liest PNG-Daten in ICO-Verzeichniseintraegen;
+    damit bleiben auch 256 x 256 Pixel klein. Groesse 256 wird im
+    Verzeichnis als 0 eingetragen, so schreibt es das Format vor.
+    """
+    bilder = []
+    for g in groessen:
+        daten = bytearray()
+        png = Path(str(pfad) + f".{g}.tmp")
+        png_schreiben(png, g, g, symbol(g), alpha=True)
+        daten += png.read_bytes()
+        png.unlink()
+        bilder.append((g, bytes(daten)))
+
+    kopf = struct.pack("<HHH", 0, 1, len(bilder))
+    versatz = len(kopf) + 16 * len(bilder)
+    verzeichnis = b""
+    inhalt = b""
+    for g, daten in bilder:
+        verzeichnis += struct.pack(
+            "<BBBBHHII",
+            0 if g >= 256 else g,      # Breite (0 = 256)
+            0 if g >= 256 else g,      # Hoehe
+            0,                          # Farben in der Palette
+            0,                          # reserviert
+            1,                          # Farbebenen
+            32,                         # Bit je Bildpunkt
+            len(daten), versatz,
+        )
+        inhalt += daten
+        versatz += len(daten)
+    pfad.write_bytes(kopf + verzeichnis + inhalt)
+
+
 def main() -> None:
     ordner = WURZEL / "icons"
     ordner.mkdir(exist_ok=True)
@@ -103,6 +144,11 @@ def main() -> None:
     ]:
         png_schreiben(ordner / name, groesse, groesse, symbol(groesse, rand))
         print(f"{name}: {(ordner / name).stat().st_size} Byte")
+
+    # Windows-Symbol fuer die Anwendung und den Installer
+    ico = ordner / "icon.ico"
+    ico_schreiben(ico, [16, 24, 32, 48, 64, 128, 256])
+    print(f"icon.ico: {ico.stat().st_size} Byte")
 
 
 if __name__ == "__main__":

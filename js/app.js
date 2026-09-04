@@ -1065,6 +1065,13 @@
   document.getElementById("sheetPrint").addEventListener("click", () => {
     // nur das Blatt drucken: alles andere wird über die Druckvorlage ausgeblendet
     document.body.classList.add("printing-sheet");
+    if (window.hsd && typeof window.hsd.drucken === "function") {
+      // Der Druckdialog von Windows kommt erst im nächsten Bilddurchgang,
+      // damit die Druckvorlage bereits greift
+      window.requestAnimationFrame(() => window.hsd.drucken()
+        .then(() => document.body.classList.remove("printing-sheet")));
+      return;
+    }
     window.print();
     window.setTimeout(() => document.body.classList.remove("printing-sheet"), 500);
   });
@@ -3427,6 +3434,14 @@
     letzteDatei = { filename, content, mime: typ };
     aktualisiereTeilenKnopf();
 
+    // Windows-Anwendung: Datei-Dialog von Windows statt Browser-Download
+    if (window.hsd && typeof window.hsd.speichern === "function") {
+      window.hsd.speichern(filename, content).then((ergebnis) => {
+        if (!ergebnis || ergebnis.abgebrochen) return;
+        if (ergebnis.ok) setStatus(`Gesichert: ${ergebnis.pfad}`, "ok");
+      });
+      return;
+    }
     if (platformDownloads) {
       platformDownloads.save({ filename, data: content }).catch((err) => {
         if (err && err.code === "declined") return;
@@ -3649,18 +3664,31 @@
   document.getElementById("btnTeilen").addEventListener("click", () => teileDatei(letzteDatei));
 
   const fileInput = document.getElementById("projectFileInput");
-  document.getElementById("btnImportProject").addEventListener("click", () => fileInput.click());
+  /** Geladene Projektdatei übernehmen und melden. */
+  function uebernehmeProjektdatei(name, inhalt) {
+    try {
+      applyProject(JSON.parse(String(inhalt)));
+      setStatus(`Projektdatei „${name}“ geladen.`, "ok");
+    } catch (err) {
+      setStatus("Datei konnte nicht gelesen werden: " + err.message, "error");
+    }
+  }
+
+  document.getElementById("btnImportProject").addEventListener("click", () => {
+    if (window.hsd && typeof window.hsd.oeffnen === "function") {
+      window.hsd.oeffnen().then((datei) => {
+        if (datei) uebernehmeProjektdatei(datei.name, datei.inhalt);
+      });
+      return;
+    }
+    fileInput.click();
+  });
   fileInput.addEventListener("change", () => {
     const file = fileInput.files && fileInput.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      try {
-        applyProject(JSON.parse(String(reader.result)));
-        setStatus(`Projektdatei „${file.name}“ geladen.`, "ok");
-      } catch (err) {
-        setStatus("Datei konnte nicht gelesen werden: " + err.message, "error");
-      }
+      uebernehmeProjektdatei(file.name, reader.result);
       fileInput.value = "";
     };
     reader.readAsText(file);
@@ -3917,7 +3945,10 @@
     saveFile(`LV_Stahlbau_${projectName.replace(/\s+/g, "_")}.csv`, "﻿" + csv);
   });
 
-  document.getElementById("btnPrint").addEventListener("click", () => window.print());
+  document.getElementById("btnPrint").addEventListener("click", () => {
+    if (window.hsd && typeof window.hsd.drucken === "function") { window.hsd.drucken(); return; }
+    window.print();
+  });
 
   /* ------------------------------------------------------------------ Start */
 

@@ -1,0 +1,91 @@
+{
+  "name": "hsd-konverter",
+  "productName": "HSD Konverter",
+  "version": "1.0.0",
+  "description": "Stahlbau-, Architektur- und Betonbau-Werkzeug der HSD Hamburg GmbH",
+  "author": {
+    "name": "HSD Hamburg GmbH",
+    "email": "o.severyn@hsd-hamburg-gmbh.de"
+  },
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "vorbereiten": "node ../tools/desktop-vorbereiten.js",
+    "start": "npm run vorbereiten && electron .",
+    "bau:windows": "npm run vorbereiten && electron-builder --win nsis zip --x64 --publish never",
+    "bau:windows-portabel": "npm run vorbereiten && electron-builder --win portable --x64 --publish never",
+    "bau:linux-behelf": "../tools/wine-rcedit64.sh && npm run bau:windows"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "de.hsd-hamburg.konverter",
+    "productName": "HSD Konverter",
+    "copyright": "© HSD Hamburg GmbH, Merckmannstraße 30, 20539 Hamburg",
+    "directories": {
+      "output": "../dist",
+      "buildResources": "bau"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "app/**/*",
+      "package.json"
+    ],
+    "compression": "maximum",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "app/icons/icon.ico",
+      "artifactName": "HSD-Konverter-${version}-${arch}.${ext}",
+      "legalTrademarks": "HSD Hamburg GmbH"
+    },
+    "portable": {
+      "artifactName": "HSD-Konverter-${version}-portabel.${ext}",
+      "unicode": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "HSD Konverter",
+      "installerLanguages": [
+        "de_DE"
+      ],
+      "language": "1031",
+      "deleteAppDataOnUninstall": false,
+      "artifactName": "HSD-Konverter-${version}-Setup.${ext}"
+    },
+    "fileAssociations": [
+      {
+        "ext": "hsdproj",
+        "name": "HSD Projektdatei",
+        "description": "Projektdatei des HSD Konverters",
+        "icon": "app/icons/icon.ico",
+        "role": "Editor"
+      }
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/oleksiiseveryn-del/A.git"
+  }
+}

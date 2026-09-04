@@ -1,0 +1,61 @@
+# Baut die Windows-Anwendung auf einem echten Windows-Läufer.
+#
+# Auf Windows werden alle Ziele erzeugt: der Installer (NSIS, deutsch),
+# die portable Einzeldatei und das ZIP-Verzeichnis. Der Umweg über wine,
+# den ein Bau auf Linux braucht, entfällt hier vollständig.
+#
+# Auslösen: von Hand über „Run workflow" oder mit einer Marke v1.0.0.
+name: Windows-Anwendung
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  bauen:
+    runs-on: windows-latest
+    steps:
+      - name: Quelltext holen
+        uses: actions/checkout@v4
+
+      - name: Node einrichten
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Symbole erzeugen
+        run: python tools/icons.py
+
+      - name: Abhängigkeiten laden
+        working-directory: desktop
+        run: npm ci
+
+      - name: Oberfläche für das Fenster vorbereiten
+        working-directory: desktop
+        run: npm run vorbereiten
+
+      - name: Installer, portable Datei und ZIP bauen
+        working-directory: desktop
+        run: npx electron-builder --win nsis portable zip --x64 --publish never
+        env:
+          # Ohne Zertifikat wird nicht signiert; Windows SmartScreen warnt dann
+          # beim ersten Start. Mit Zertifikat: CSC_LINK und CSC_KEY_PASSWORD
+          # als Geheimnis hinterlegen, electron-builder signiert dann selbst.
+          CSC_LINK: ${{ secrets.WINDOWS_ZERTIFIKAT }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_ZERTIFIKAT_KENNWORT }}
+
+      - name: Ergebnis prüfen
+        shell: pwsh
+        run: |
+          Get-ChildItem dist -File | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+          if (-not (Test-Path "dist\HSD-Konverter-1.0.0-Setup.exe")) { throw "Installer fehlt" }
+
+      - name: Dateien bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: HSD-Konverter-Windows
+          path: |
+            dist/*.exe
+            dist/*.zip
+          retention-days: 30
