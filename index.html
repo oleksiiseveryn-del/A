@@ -142,6 +142,7 @@
         <button class="tab-btn" id="tabNodes">Knoten / Anschlüsse</button>
         <button class="tab-btn" id="tabArch">Architektur</button>
         <button class="tab-btn" id="tabBeton">Beton</button>
+        <button class="tab-btn" id="tabPositionen">Positionen</button>
         <button class="tab-btn" id="tabCutList">Stückliste</button>
       </div>
     </div>
@@ -545,6 +546,73 @@
         Bewehrungsermittlung.</p>
     </div>
 
+    <div class="result-panel-body" id="viewPositionen" hidden>
+      <p class="view-note">Achsraster und Positionsplan über alle Gewerke: Stahlbau, Betonbau und Architektur im Grundriss
+        mit Positionsnummer und Achsbezug. Die Achsen in Richtung x werden mit Ziffern, die Achsen in Richtung z mit
+        Buchstaben bezeichnet. Darstellung nach DIN 1356-1, Maßeintragung nach DIN 406-11, Maßstäbe nach DIN ISO 5455.
+        Die Positionsnummern dieser Anwendung sind mit der Positionsnummerierung der Statik abzugleichen.</p>
+
+      <div class="arch-actions">
+        <button class="tool-btn primary" id="btnPositionsplan" title="Positionsplan mit Achsraster zeichnen">🧭 Positionsplan zeichnen</button>
+      </div>
+
+      <h3 class="section-title">Achsraster</h3>
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="rasterX0">Nullpunkt x [m]</label>
+          <input type="number" id="rasterX0" step="0.25" value="0" title="Lage der ersten Achse in Richtung x">
+        </div>
+        <div class="field">
+          <label for="rasterFelderX">Feldweiten x [m]</label>
+          <input type="text" id="rasterFelderX" value="6,00 6,00 6,00" title="Feldweiten nacheinander, z. B. 6,00 6,00 6,00 oder 3x6,00">
+        </div>
+        <div class="field">
+          <label for="rasterZ0">Nullpunkt z [m]</label>
+          <input type="number" id="rasterZ0" step="0.25" value="0" title="Lage der ersten Achse in Richtung z">
+        </div>
+        <div class="field">
+          <label for="rasterFelderZ">Feldweiten z [m]</label>
+          <input type="text" id="rasterFelderZ" value="6,00 6,00" title="Feldweiten nacheinander, z. B. 6,00 6,00 oder 2x6,00">
+        </div>
+        <div class="field">
+          <label for="rasterBeschriftungX">Achsen x</label>
+          <select id="rasterBeschriftungX">
+            <option value="zahlen" selected>1, 2, 3 …</option>
+            <option value="buchstaben">A, B, C …</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="rasterBeschriftungZ">Achsen z</label>
+          <select id="rasterBeschriftungZ">
+            <option value="buchstaben" selected>A, B, C …</option>
+            <option value="zahlen">1, 2, 3 …</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="rasterToleranz">Achstoleranz [m]</label>
+          <input type="number" id="rasterToleranz" step="0.01" min="0" value="0.05" title="Bis zu diesem Abstand gilt ein Bauteil als in der Achse liegend">
+        </div>
+      </div>
+      <div class="scale-info" id="rasterInfo">Achsen: –</div>
+
+      <h3 class="section-title">Positionsliste</h3>
+      <table class="members-table" id="positionsTable">
+        <thead>
+          <tr>
+            <th>Pos</th>
+            <th>Gewerk</th>
+            <th>Bauteil</th>
+            <th>Abmessung / Profil</th>
+            <th>Menge</th>
+            <th>Achsbezug</th>
+            <th>Lage x / z [m]</th>
+          </tr>
+        </thead>
+        <tbody id="positionsBody"></tbody>
+      </table>
+      <div class="empty-state" id="positionsEmpty">Noch keine Bauteile – Stäbe, Betonbauteile oder Architektur-Bauteile anlegen.</div>
+    </div>
+
     <div class="result-panel-body" id="viewCutList" hidden>
       <div class="cutlist-controls">
         <div class="field">
@@ -701,6 +769,10 @@
           (α<sub>cc</sub> = 0,85, γ<sub>C</sub> = 1,50 nach NA); Abgleich der Festigkeitsklasse mit der
           Expositionsklasse nach DIN 1045-2. Die Werte der Betondeckung und der Mindestfestigkeitsklassen sind
           Richtwerte des Nationalen Anhangs und im Bauteil überschreibbar</li>
+        <li><strong>Achsraster und Positionsplan</strong>: Achsen aus Nullpunkt und Feldweiten, Bezeichnung mit Ziffern
+          in Richtung x und Buchstaben in Richtung z; automatischer Achsbezug jedes Bauteils aus der nächstgelegenen
+          Achse mit Versatz in Zentimetern. Positionsplan im Grundriss über alle Gewerke mit Achsraster, Maßketten der
+          Achsabstände und Positionsliste (Darstellung nach DIN 1356-1, Maßeintragung nach DIN 406-11)</li>
         <li><strong>Schalung</strong>: Schalflächen getrennt nach Seiten-, Decken- und Aussparungsschalung aus der
           Bauteilgeometrie; Schalplan je Bauteil mit Maßketten nach DIN 406-11, Höhenkoten über ±0,00, Aussparungen und
           den Beton- und Schalungsangaben sowie Schalplan-Übersicht aller Bauteile im Grundriss (Darstellung nach
@@ -748,7 +820,9 @@
           Bügelabstände aus der Querkraft- und Durchstanzbemessung, Zulagen, Steckeisen und die Bewehrungsführung
           an Rahmenecken und Auflagern sind vom Tragwerksplaner festzulegen und in prüffähigen Bewehrungsplänen
           darzustellen. Für die Schalung sind Ausschalfristen, Schalungsdruck, Standsicherheit und Unterstützung nach
-          DIN EN 13670 mit DIN 1045-3 und DIN EN 12812 sowie die Nachbehandlung des Betons gesondert festzulegen</li>
+          DIN EN 13670 mit DIN 1045-3 und DIN EN 12812 sowie die Nachbehandlung des Betons gesondert festzulegen.
+          Die Positionsnummern dieser Anwendung sind eine fortlaufende Bauteilkennzeichnung und mit der
+          Positionsnummerierung der Statik abzugleichen</li>
         <li><strong>Flächen und Rauminhalte:</strong> Zuordnung der Grundflächen zu den Bereichen a/b/c nach
           DIN 277-1 (überdeckt, nicht überdeckt), Brutto-Rauminhalt, Zuordnung zu Nutzungsgruppen NUF 1–7 sowie
           die Wohnfläche nach WoFlV § 4 mit den Anrechnungsfaktoren aus der lichten Raumhöhe (unter 1 m ohne
@@ -784,6 +858,7 @@
 <script src="js/concrete.js"></script>
 <script src="js/rebar.js"></script>
 <script src="js/formwork.js"></script>
+<script src="js/gridplan.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

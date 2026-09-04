@@ -318,17 +318,12 @@ ${inhalt}
 }
 
 /**
- * Schalplan-Übersicht: Grundriss aller Betonbauteile mit Positionsnummern,
- * Höhenkoten und einer Zusammenstellung der Mengen.
- *
- * @param {Object} daten - { elemente, geometrieVon, bezeichnungVon,
- *                           arbeitsraum, projekt }
+ * Grundrissfiguren aller Betonbauteile im X–Z-System für Schal- und
+ * Positionspläne: Wände und Streifenfundamente als Polygon entlang der
+ * Achse, Platten und Punktbauteile als Rechteck, runde Bauteile als Kreis.
  */
-function schalungsUebersichtSVG(daten) {
-  const { elemente, geometrieVon, bezeichnungVon, arbeitsraum, projekt } = daten;
-
-  // Grundrissfiguren aller Bauteile im X–Z-System
-  const figuren = elemente.map((element) => {
+function betonGrundrissFiguren(elemente, geometrieVon, bezeichnungVon, arbeitsraum) {
+  return elemente.map((element) => {
     const typ = BETONTEILTYPEN[element.kind];
     const geo = geometrieVon(element, arbeitsraum);
     const p1 = element.p1, p2 = element.p2;
@@ -374,8 +369,21 @@ function schalungsUebersichtSVG(daten) {
         ? { x: p1.x - geo.koecher.l / 2, z: p1.z - geo.koecher.b / 2, b: geo.koecher.l, t: geo.koecher.b }
         : null,
     });
-  });
+    });
+}
 
+/**
+ * Schalplan-Übersicht: Grundriss aller Betonbauteile mit Positionsnummern,
+ * Höhenkoten und einer Zusammenstellung der Mengen.
+ *
+ * @param {Object} daten - { elemente, geometrieVon, bezeichnungVon,
+ *                           arbeitsraum, projekt }
+ */
+function schalungsUebersichtSVG(daten) {
+  const { elemente, geometrieVon, bezeichnungVon, arbeitsraum, projekt } = daten;
+
+  // Grundrissfiguren aller Bauteile im X–Z-System
+  const figuren = betonGrundrissFiguren(elemente, geometrieVon, bezeichnungVon, arbeitsraum);
   // Umgrenzung aller Figuren
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   const merke = (x, z) => { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z); };

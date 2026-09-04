@@ -781,6 +781,12 @@ button.tool-btn.plain.active { background: var(--hsd-blue); color: #fff; border-
 #bewehrungTable .layer-cell { min-width: 300px; }
 #bewehrungTable .layer-row input[type="number"] { width: 52px; }
 #stahllisteTable td:nth-child(n+5):nth-child(-n+11) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
+#positionsTable td:nth-child(5),
+#positionsTable td:nth-child(6),
+#positionsTable td:nth-child(7) { white-space: nowrap; font-family: var(--font-data); }
+#rasterInfo { margin: 4px 0 10px; }
+#rasterFelderX, #rasterFelderZ { min-width: 150px; font-family: var(--font-data); }
+
 #schalungTable td:nth-child(3),
 #schalungTable td:nth-child(4),
 #schalungTable td:nth-child(5) { text-align: right; white-space: nowrap; font-family: var(--font-data); }

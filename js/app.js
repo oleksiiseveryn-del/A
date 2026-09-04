@@ -1047,6 +1047,10 @@
       saveFile(`Schalplan_Uebersicht_${name}.svg`, inhalt, "image/svg+xml");
       return;
     }
+    if (sheetArt === "positionsplan") {
+      saveFile(`Positionsplan_${name}.svg`, inhalt, "image/svg+xml");
+      return;
+    }
     const element = ansichtsWaende()[sheetIndex];
     if (!element) return;
     saveFile(`Ansicht_${name}_${bauteilBezeichnung(element)}.svg`, inhalt, "image/svg+xml");
@@ -1722,6 +1726,108 @@
     document.getElementById(id).addEventListener("change", refreshAll);
   });
 
+  /* -------------------------------------------------- Achsraster und Positionen */
+
+  /** Achsraster aus den Eingabefeldern. */
+  function rasterVorgabe() {
+    const zahl = (id, fallback) => {
+      const v = parseFloat(document.getElementById(id).value);
+      return Number.isFinite(v) ? v : fallback;
+    };
+    return {
+      x0: zahl("rasterX0", 0), z0: zahl("rasterZ0", 0),
+      felderX: document.getElementById("rasterFelderX").value,
+      felderZ: document.getElementById("rasterFelderZ").value,
+      beschriftungX: document.getElementById("rasterBeschriftungX").value,
+      beschriftungZ: document.getElementById("rasterBeschriftungZ").value,
+      toleranz: Math.max(0, zahl("rasterToleranz", ACHSRASTER_STANDARD.toleranz)),
+    };
+  }
+
+  function aktuelleAchsen() {
+    return achsenAusRaster(rasterVorgabe());
+  }
+
+  /** Stäbe des Stahlbaus als Angaben für den Positionsplan. */
+  function stabAngaben() {
+    const staebe = [];
+    model.members.forEach((member) => {
+      const a = model.nodes[member.a], b = model.nodes[member.b];
+      if (!a || !b) return;
+      const design = designMember(member);
+      staebe.push({
+        bezeichnung: memberLabel(member), typ: member.type,
+        profil: design.profileName || "–", laenge: memberLength(member),
+        von: { x: a.x, z: a.z, y: a.y }, bis: { x: b.x, z: b.z, y: b.y },
+      });
+    });
+    return staebe;
+  }
+
+  /** Alle Bauteile als Grundrissfiguren mit Achsbezug. */
+  function positionsFiguren() {
+    const achsen = aktuelleAchsen();
+    const beton = betonPositionsFiguren(
+      betonGrundrissFiguren(Array.from(model.beton.values()), betonGeometrie, betonBezeichnung, arbeitsraumWert())
+    );
+    const arch = architekturGrundrissFiguren(Array.from(model.elements.values()), bauteilGeometrie, bauteilBezeichnung);
+    const stahl = stabPositionsFiguren(stabAngaben());
+    return { figuren: positionsListe(stahl.concat(beton, arch), achsen), achsen };
+  }
+
+  function renderPositionsTable() {
+    const body = document.getElementById("positionsBody");
+    const empty = document.getElementById("positionsEmpty");
+    body.innerHTML = "";
+    const { figuren, achsen } = positionsFiguren();
+    empty.hidden = figuren.length > 0;
+
+    document.getElementById("rasterInfo").textContent =
+      `Achsen x: ${achsen.x.map((a) => `${a.name} = ${a.wert.toFixed(2)} m`).join(" · ") || "–"}`
+      + `  |  Achsen z: ${achsen.z.map((a) => `${a.name} = ${a.wert.toFixed(2)} m`).join(" · ") || "–"}`;
+
+    figuren.forEach((f) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${f.bezeichnung}</td>
+        <td>${f.kategorie}</td>
+        <td>${f.typName || "–"}</td>
+        <td>${f.beschreibung || "–"}</td>
+        <td>${f.menge || "–"}</td>
+        <td class="${f.bezug && f.bezug.inAchse ? "u-ok" : ""}">${f.bezug ? f.bezug.text : "–"}</td>
+        <td>${f.mitte.x.toFixed(2)} / ${f.mitte.z.toFixed(2)}</td>`;
+      body.appendChild(tr);
+    });
+  }
+
+  function zeichnePositionsplan() {
+    const { figuren, achsen } = positionsFiguren();
+    if (!figuren.length) {
+      setStatus("Für den Positionsplan zuerst Bauteile anlegen.", "error");
+      return;
+    }
+    const svg = positionsplanSVG({
+      figuren, achsen,
+      projekt: {
+        name: document.getElementById("projectName").value,
+        datum: document.getElementById("projectDate").value,
+        bearbeiter: "Oleksii Severyn",
+      },
+    });
+    sheetArt = "positionsplan";
+    document.getElementById("sheetBody").innerHTML = svg;
+    document.getElementById("sheetTitle").textContent = "Positionsplan mit Achsraster";
+    document.getElementById("sheetCounter").textContent =
+      `${figuren.length} Positionen · ${achsen.x.length} × ${achsen.z.length} Achsen`;
+    document.getElementById("sheetOverlay").hidden = false;
+  }
+
+  document.getElementById("btnPositionsplan").addEventListener("click", zeichnePositionsplan);
+  ["rasterX0", "rasterZ0", "rasterFelderX", "rasterFelderZ", "rasterBeschriftungX", "rasterBeschriftungZ", "rasterToleranz"]
+    .forEach((id) => document.getElementById(id).addEventListener("change", () => {
+      if (!TABS.positionen.view.hidden) renderPositionsTable();
+    }));
+
   /* ------------------------------------------------------------- Tabellen */
 
   const tbody = document.getElementById("membersBody");
@@ -1991,6 +2097,7 @@
     nodes: { button: document.getElementById("tabNodes"), view: document.getElementById("viewNodes") },
     arch: { button: document.getElementById("tabArch"), view: document.getElementById("viewArch") },
     beton: { button: document.getElementById("tabBeton"), view: document.getElementById("viewBeton") },
+    positionen: { button: document.getElementById("tabPositionen"), view: document.getElementById("viewPositionen") },
     cutlist: { button: document.getElementById("tabCutList"), view: document.getElementById("viewCutList") },
   };
 
@@ -2002,6 +2109,7 @@
     if (which === "nodes") renderNodeTable();
     if (which === "arch") renderArchTable();
     if (which === "beton") renderBetonTable();
+    if (which === "positionen") renderPositionsTable();
     if (which === "cutlist") renderCutList();
     if (which === "model") { result.resize(); renderModel(); }
   }
@@ -2015,6 +2123,7 @@
     if (!TABS.nodes.view.hidden) renderNodeTable();
     if (!TABS.arch.view.hidden) renderArchTable();
     if (!TABS.beton.view.hidden) renderBetonTable();
+    if (!TABS.positionen.view.hidden) renderPositionsTable();
     if (!TABS.cutlist.view.hidden) renderCutList();
   }
 
@@ -2165,6 +2274,7 @@
       naechsteAbzugId: model.nextAbzugId,
       betonteile: Array.from(model.beton.values()),
       naechsteBetonId: model.nextBetonId,
+      achsraster: rasterVorgabe(),
       betonbau: {
         arbeitsraum: field("arbeitsraum"), preisBeton: field("preisBeton"),
         preisSchalung: field("preisSchalung"), preisBewehrung: field("preisBewehrung"),
@@ -2218,6 +2328,15 @@
       set("cutAllowance", data.werkstatt.zugabe);
       set("stockLength", data.werkstatt.lagerlaenge);
       set("sawKerf", data.werkstatt.saegeschnitt);
+    }
+    if (data.achsraster) {
+      set("rasterX0", data.achsraster.x0, "0");
+      set("rasterZ0", data.achsraster.z0, "0");
+      set("rasterFelderX", data.achsraster.felderX, "6,00 6,00 6,00");
+      set("rasterFelderZ", data.achsraster.felderZ, "6,00 6,00");
+      set("rasterBeschriftungX", data.achsraster.beschriftungX, "zahlen");
+      set("rasterBeschriftungZ", data.achsraster.beschriftungZ, "buchstaben");
+      set("rasterToleranz", data.achsraster.toleranz, "0.05");
     }
     if (data.betonbau) {
       set("arbeitsraum", data.betonbau.arbeitsraum, "0.50");
@@ -2337,6 +2456,18 @@
         rows.push(["K" + (index + 1), node.x.toFixed(2), node.y.toFixed(2), node.z.toFixed(2),
           support ? `${support === "pinned" ? "Festlager" : "Loslager"} ${reactions}` : "-",
           load ? Math.abs(load.fy) : 0, (selfWeightLoads[index] || 0).toFixed(2), entries.join(" | "), maxN.toFixed(1)]);
+      });
+    }
+
+    const positionen = positionsFiguren();
+    if (positionen.figuren.length) {
+      const a = positionen.achsen;
+      rows.push([]);
+      rows.push([`Positionsliste mit Achsbezug (Achsen x: ${a.x.map((x) => `${x.name}=${x.wert.toFixed(2)}`).join(" ")} | Achsen z: ${a.z.map((z) => `${z.name}=${z.wert.toFixed(2)}`).join(" ")} | Toleranz ${(a.toleranz * 100).toFixed(0)} cm)`]);
+      rows.push(["Pos", "Gewerk", "Bauteil", "Abmessung / Profil", "Menge", "Achsbezug", "x [m]", "z [m]"]);
+      positionen.figuren.forEach((f) => {
+        rows.push([f.bezeichnung, f.kategorie, f.typName || "-", f.beschreibung || "-", f.menge || "-",
+          f.bezug ? f.bezug.text : "-", f.mitte.x.toFixed(2), f.mitte.z.toFixed(2)]);
       });
     }
 
