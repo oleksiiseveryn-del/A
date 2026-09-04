@@ -505,12 +505,25 @@
       <div class="empty-state" id="schalungEmpty">Keine Schalflächen – zuerst ein Betonbauteil anlegen.</div>
 
       <h3 class="section-title">Bewehrung je Bauteil</h3>
+      <p class="view-note"><strong>🤖 Bewehrung automatisch erzeugen</strong> wählt für jedes Betonbauteil die
+        konstruktive Mindestbewehrung nach DIN EN 1992-1-1 Abschnitt 9: Platten und Fundamente nach Abs. 9.2.1.1/9.3.1.1,
+        Wände nach 9.6.2/9.6.3, Stützen nach 9.5.2/9.5.3 (mit N<sub>Ed</sub>, sofern eingetragen), Balken nach 9.2.1.1/9.2.2.
+        Gewählt wird die leichteste Kombination aus Durchmesser und Stababstand, die den erforderlichen Querschnitt und die
+        Höchstabstände einhält; der Nachweis steht darunter. Bohrpfähle bleiben manuell (DIN EN 1536 mit EA-Pfähle).
+        <strong>Das ist Mindestbewehrung, keine Bemessung</strong> – die Bemessung kann mehr erfordern.
+        <strong>⬇ Biegedaten (JSON)</strong> übergibt alles an das Python-Werkzeug im Ordner <code>python/</code>
+        (<code>python -m hsd_bewehrung Biegedaten.json</code>): Biegeliste, Stahlauszug, Schneidplan, Bestellliste,
+        Bündeletiketten und die Prüfung der Daten.</p>
       <p class="view-note">Parametrisierte <strong>Regelbewehrung</strong> aus Durchmesser, Stababstand und Stabzahl:
         Stabanzahl n = Verteilbreite / e + 1, Stablänge = lichtes Maß abzüglich zweifacher Betondeckung, Endhaken 10 d<sub>s</sub>,
         Biegerollendurchmesser nach DIN EN 1992-1-1 Tab. 8.1N. Stäbe über der Lieferlänge werden mit Übergreifungsstoß
         geteilt. <strong>Das ist keine Bemessung</strong> – die erforderliche Bewehrung aus Biegung, Querkraft, Durchstanzen
         und Rissbreitenbeschränkung sowie die Verankerungs- und Übergreifungslängen nach DIN EN 1992-1-1 Abs. 8 und 9
         weist der Tragwerksplaner nach.</p>
+      <div class="arch-actions">
+        <button class="tool-btn primary" id="btnAutoBewehrung" title="Konstruktive Mindestbewehrung nach DIN EN 1992-1-1 Abschnitt 9 für alle Betonbauteile wählen">🤖 Bewehrung automatisch erzeugen</button>
+        <button class="tool-btn" id="btnBiegelisteJson" title="Bewehrungsdaten als JSON für das Python-Werkzeug der Biegerei ausgeben">⬇ Biegedaten (JSON) für Python</button>
+      </div>
       <div class="cutlist-controls">
         <div class="field">
           <label for="lieferlaenge">Lieferlänge [m]</label>
@@ -551,6 +564,23 @@
         <tbody id="bewehrungBody"></tbody>
       </table>
       <div class="empty-state" id="bewehrungEmpty">Noch kein Betonbauteil vorhanden.</div>
+
+      <h3 class="section-title small" id="autoReportTitel" hidden>Nachweis der gewählten Mindestbewehrung</h3>
+      <table class="members-table" id="autoReportTable" hidden>
+        <thead>
+          <tr>
+            <th>Bauteil</th>
+            <th>Art</th>
+            <th>Gewählt</th>
+            <th>a<sub>s,min</sub></th>
+            <th>a<sub>s,vorh</sub></th>
+            <th>Ausnutzung</th>
+            <th>s<sub>max</sub> [mm]</th>
+            <th>Regel</th>
+          </tr>
+        </thead>
+        <tbody id="autoReportBody"></tbody>
+      </table>
 
       <h3 class="section-title">Stahlliste (Betonstahl B500B nach DIN 488)</h3>
       <table class="members-table" id="stahllisteTable">
@@ -842,6 +872,18 @@
           Bauteilgeometrie; Schalplan je Bauteil mit Maßketten nach DIN 406-11, Höhenkoten über ±0,00, Aussparungen und
           den Beton- und Schalungsangaben sowie Schalplan-Übersicht aller Bauteile im Grundriss (Darstellung nach
           DIN 1356-1, Maßstäbe nach DIN ISO 5455). Maße sind Rohbaumaße ohne Toleranzen nach DIN 18202</li>
+        <li><strong>Automatische Mindestbewehrung</strong> nach DIN EN 1992-1-1 Abschnitt 9:
+          Platten und Fundamente a<sub>s,min</sub> = max(0,26 · f<sub>ctm</sub>/f<sub>yk</sub> · b · d ; 0,0013 · b · d)
+          mit s<sub>max</sub> = min(3 h ; 400 mm) längs und min(3,5 h ; 450 mm) quer (Abs. 9.2.1.1 mit 9.3.1.1);
+          Wände A<sub>s,v,min</sub> = 0,002 · A<sub>c</sub>, s<sub>v,max</sub> = min(3 h ; 400 mm),
+          A<sub>s,h,min</sub> = max(0,25 · A<sub>s,v</sub> ; 0,001 · A<sub>c</sub>) (Abs. 9.6.2/9.6.3);
+          Stützen A<sub>s,min</sub> = max(0,10 · N<sub>Ed</sub>/f<sub>yd</sub> ; 0,002 · A<sub>c</sub>),
+          A<sub>s,max</sub> = 0,04 · A<sub>c</sub>, Bügel d<sub>s</sub> ≥ max(6 mm ; 0,25 d<sub>s,längs</sub>) mit
+          s<sub>cl,max</sub> = min(20 d<sub>s</sub> ; b ; 400 mm) (Abs. 9.5.2/9.5.3); Balken zusätzlich
+          ρ<sub>w,min</sub> = 0,08 · √f<sub>ck</sub>/f<sub>yk</sub> und s<sub>l,max</sub> = 0,75 d (Abs. 9.2.2).
+          Gewählt wird die leichteste zulässige Kombination aus Durchmesser und Stababstand; dieselbe Rechenweise
+          liegt dem Python-Werkzeug im Ordner <code>python/</code> zugrunde, beide Umsetzungen werden gegeneinander
+          geprüft</li>
         <li><strong>Bewehrung</strong>: parametrisierte Regelbewehrung mit Stabanzahl n = Verteilbreite/e + 1,
           Stablängen aus den lichten Maßen abzüglich 2 · c<sub>nom</sub>, Endhaken 10 d<sub>s</sub>, Bügellänge
           2 · (b + h) + 2 Haken, Kreisbügel π · d + 2 Haken, Wendel aus Windungszahl und Steigung; Teilung langer Stäbe
@@ -884,7 +926,8 @@
           Mindest- und Höchstbewehrung nach Abs. 9, Verankerungs- und Übergreifungslängen nach Abs. 8.4 und 8.7,
           Bügelabstände aus der Querkraft- und Durchstanzbemessung, Zulagen, Steckeisen und die Bewehrungsführung
           an Rahmenecken und Auflagern sind vom Tragwerksplaner festzulegen und in prüffähigen Bewehrungsplänen
-          darzustellen. Für die Schalung sind Ausschalfristen, Schalungsdruck, Standsicherheit und Unterstützung nach
+          darzustellen; die automatische Bewehrung liefert ausschließlich die konstruktive Mindestbewehrung nach
+          Abschnitt 9 und keine Bemessung. Für die Schalung sind Ausschalfristen, Schalungsdruck, Standsicherheit und Unterstützung nach
           DIN EN 13670 mit DIN 1045-3 und DIN EN 12812 sowie die Nachbehandlung des Betons gesondert festzulegen.
           Die Positionsnummern dieser Anwendung sind eine fortlaufende Bauteilkennzeichnung und mit der
           Positionsnummerierung der Statik abzugleichen. Im Deckenplan sind Zulagen an Aussparungen, der
@@ -924,6 +967,7 @@
 <script src="js/floorplan.js"></script>
 <script src="js/concrete.js"></script>
 <script src="js/rebar.js"></script>
+<script src="js/autorebar.js"></script>
 <script src="js/formwork.js"></script>
 <script src="js/gridplan.js"></script>
 <script src="js/slabplan.js"></script>

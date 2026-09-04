@@ -1384,6 +1384,7 @@
     renderDeckenTable();
     renderSchalungsliste();
     renderBewehrungTable();
+    renderAutoReport();
     renderStahlliste();
     renderBetonKosten();
   }
@@ -1443,7 +1444,12 @@
         }
         return `<span class="layer-row"><label class="masse-label">${bewehrungFeldName(element.kind, f)}</label>
           <input type="number" step="${f.indexOf("ds") === 0 ? 2 : f.indexOf("n") === 0 ? 1 : 10}" min="1" data-bw="${element.id}" data-feld="${f}" value="${wert}"></span>`;
-      }).join("");
+      }).join("")
+        // Stützen: Normalkraft für die Mindestbewehrung nach Abs. 9.5.2
+        + (element.kind === "stuetze" || element.kind === "stuetze_rund"
+          ? `<span class="layer-row"><label class="masse-label" title="Bemessungswert der Normalkraft für A_s,min = 0,10·N_Ed/f_yd">N_Ed [kN]</label>
+             <input type="number" step="10" min="0" data-bw="${element.id}" data-feld="nEd" value="${element.nEd || 0}"></span>`
+          : "");
 
       const positionen = b.positionen.map((pos) => `${pos.nr}. ${pos.anzahl}⌀${pos.ds}`).join(" · ");
       const abweichung = ansatz > 0 ? istGrad / ansatz : 1;
@@ -1462,6 +1468,144 @@
       body.appendChild(tr);
     });
   }
+
+  /** Ergebnis des letzten Laufs der automatischen Bewehrung. */
+  let autoBewehrungReport = [];
+
+  /**
+   * Wählt für alle Betonbauteile die konstruktive Mindestbewehrung nach
+   * DIN EN 1992-1-1 Abschnitt 9 und schreibt sie in die Bauteile.
+   */
+  function erzeugeAutomatischeBewehrung() {
+    if (!model.beton.size) {
+      setStatus("Für die automatische Bewehrung zuerst Betonbauteile anlegen.", "error");
+      return;
+    }
+    const raum = arbeitsraumWert();
+    const bericht = [];
+    let geaendert = 0, offen = 0;
+
+    model.beton.forEach((element) => {
+      const geo = betonGeometrie(element, raum);
+      const deckung = betondeckung(element);
+      const ergebnis = automatischeBewehrung(element, geo, deckung, { nEd: element.nEd || 0 });
+      if (!ergebnis.moeglich) {
+        offen++;
+        bericht.push({
+          bauteil: betonBezeichnung(element), typName: BETONTEILTYPEN[element.kind].name,
+          nachweis: null, hinweise: ergebnis.hinweise,
+        });
+        return;
+      }
+      element.bewehrung = Object.assign({}, element.bewehrung || {}, ergebnis.parameter);
+      geaendert++;
+      bericht.push({
+        bauteil: betonBezeichnung(element), typName: BETONTEILTYPEN[element.kind].name,
+        nachweis: ergebnis.nachweis, hinweise: ergebnis.hinweise,
+      });
+    });
+
+    autoBewehrungReport = bericht;
+    const liste = gesamteStahlliste();
+    setStatus(`Mindestbewehrung nach DIN EN 1992-1-1 Abschnitt 9 für ${geaendert} Bauteil${geaendert === 1 ? "" : "e"} gewählt`
+      + (offen ? `, ${offen} Bauteil${offen === 1 ? "" : "e"} bleiben manuell` : "")
+      + ` · Betonstahl gesamt ${liste.gesamtMasse.toFixed(0)} kg. Die Bemessung kann mehr erfordern.`, "ok");
+    refreshAll();
+  }
+
+  function renderAutoReport() {
+    const titel = document.getElementById("autoReportTitel");
+    const tabelle = document.getElementById("autoReportTable");
+    const body = document.getElementById("autoReportBody");
+    body.innerHTML = "";
+    const zeigen = autoBewehrungReport.length > 0;
+    titel.hidden = !zeigen;
+    tabelle.hidden = !zeigen;
+    if (!zeigen) return;
+
+    autoBewehrungReport.forEach((z) => {
+      const n = z.nachweis;
+      const tr = document.createElement("tr");
+      if (!n) {
+        tr.innerHTML = `<td>${z.bauteil}</td><td>${z.typName}</td>
+          <td colspan="5" class="cut-labels">manuell festzulegen</td>
+          <td class="cut-labels">${z.hinweise.join(" ")}</td>`;
+      } else {
+        const klasse = n.unzureichend ? "u-fail" : "u-ok";
+        tr.innerHTML = `
+          <td>${z.bauteil}</td>
+          <td>${n.art}</td>
+          <td><strong>${n.gewaehlt}</strong></td>
+          <td>${n.asMin.toFixed(2)}</td>
+          <td class="${klasse}">${n.asVorh.toFixed(2)}</td>
+          <td>${(n.auslastung * 100).toFixed(0)} %</td>
+          <td>${n.sMax.toFixed(0)}</td>
+          <td class="cut-labels">${z.hinweise.join(" · ")}</td>`;
+      }
+      body.appendChild(tr);
+    });
+  }
+
+  /**
+   * Bewehrungs- und Biegedaten als JSON für die Weiterverarbeitung im
+   * Python-Werkzeug (Biegeliste, Stahlauszug, Schneidoptimierung).
+   */
+  function biegedatenJson() {
+    const raum = arbeitsraumWert();
+    const vorgabe = bewehrungVorgabe();
+    const bauteile = [];
+    model.beton.forEach((element) => {
+      const b = bewehrungVon(element);
+      bauteile.push({
+        pos: betonBezeichnung(element),
+        art: element.kind,
+        artName: BETONTEILTYPEN[element.kind].name,
+        anzahl: Math.max(1, element.anzahl || 1),
+        beton: { guete: element.guete, expositionsklasse: element.expo },
+        betondeckung_mm: b.deckung.cNom,
+        geometrie: {
+          laenge_m: b.geo.laenge, breite_m: b.geo.breite, hoehe_m: b.geo.hoehe,
+          dicke_m: b.geo.dicke, volumen_m3: b.geo.volumen, beschreibung: b.geo.beschreibung,
+        },
+        bewehrung: bewehrungParameter(element),
+        positionen: b.positionen.map((pos) => ({
+          nr: pos.nr, bezeichnung: pos.name, biegeform: pos.form, biegeformName: pos.formName,
+          ds_mm: pos.ds, anzahl: pos.anzahl, einzellaenge_m: pos.einzelLaenge,
+          gesamtlaenge_m: pos.gesamtLaenge, masse_kg: pos.masse,
+          biegerolle_mm: pos.biegerolle, biegemasse_m: pos.masseAngaben, bemerkung: pos.bemerkung,
+        })),
+      });
+    });
+
+    return {
+      erzeuger: "HSD Hamburg GmbH · Stahlbau- und Architektur-Konverter",
+      erstellt: new Date().toISOString(),
+      projekt: {
+        name: document.getElementById("projectName").value || "Projekt",
+        datum: document.getElementById("projectDate").value,
+        bearbeiter: "Oleksii Severyn",
+      },
+      betonstahl: { sorte: "B500B", norm: "DIN 488-1", fyk_n_mm2: BETONSTAHL_FYK, dichte_kg_m3: 7850 },
+      vorgaben: {
+        lieferlaenge_m: vorgabe.lieferlaenge,
+        stossfaktor_x_ds: vorgabe.stossFaktor,
+        endhaken: vorgabe.haken,
+        hinweis: "Einzellängen ohne Abzug der Biegerollendurchmesser; Biegerollen nach DIN EN 1992-1-1 Tab. 8.1N.",
+      },
+      bauteile,
+    };
+  }
+
+  document.getElementById("btnAutoBewehrung").addEventListener("click", erzeugeAutomatischeBewehrung);
+  document.getElementById("btnBiegelisteJson").addEventListener("click", () => {
+    if (!model.beton.size) {
+      setStatus("Keine Betonbauteile vorhanden.", "error");
+      return;
+    }
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Biegedaten_${name}.json`, JSON.stringify(biegedatenJson(), null, 2), "application/json");
+    setStatus("Biegedaten gespeichert – Weiterverarbeitung mit „python -m hsd_bewehrung“ im Ordner python/.", "ok");
+  });
 
   function renderStahlliste() {
     const body = document.getElementById("stahllisteBody");
@@ -1565,6 +1709,7 @@
     const feld = e.target.getAttribute("data-feld");
     if (!element.bewehrung) element.bewehrung = {};
     if (feld === "obenAktiv") element.bewehrung.obenAktiv = e.target.checked;
+    else if (feld === "nEd") element.nEd = Math.max(0, parseFloat(e.target.value) || 0);
     else element.bewehrung[feld] = Math.max(1, parseFloat(e.target.value) || 1);
     refreshAll();
   });

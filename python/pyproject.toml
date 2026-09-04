@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hsd-bewehrung"
+version = "1.0.0"
+description = "Bewehrung, Biegeliste und Herstellungsunterlagen aus den Biegedaten des Stahlbau- und Architektur-Konverters"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietär – HSD Hamburg GmbH" }
+authors = [{ name = "HSD Hamburg GmbH" }]
+keywords = ["Bewehrung", "Betonstahl", "Biegeliste", "DIN 488", "DIN EN 1992-1-1"]
+dependencies = []
+
+[project.scripts]
+hsd-bewehrung = "hsd_bewehrung.cli:main"
+
+[tool.setuptools]
+packages = ["hsd_bewehrung"]
