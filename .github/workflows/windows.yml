@@ -40,6 +40,19 @@ jobs:
       - name: Symbole erzeugen
         run: python tools/icons.py
 
+      # Electron und die Werkzeuge von electron-builder sind zusammen über
+      # 120 MB und werden sonst bei jedem Lauf neu geladen. Der Zwischen-
+      # speicher spart die Zeit und macht den Lauf unabhängig davon, ob die
+      # Auslieferung von GitHub gerade zuverlässig antwortet.
+      - name: Zwischenspeicher für Electron
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: electron-${{ runner.os }}-${{ hashFiles('desktop/package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+
       - name: Abhängigkeiten laden
         working-directory: desktop
         run: npm ci
@@ -48,9 +61,25 @@ jobs:
         working-directory: desktop
         run: npm run vorbereiten
 
+      # Der Bau lädt beim ersten Mal Electron (115 MB) und die NSIS-Werkzeuge.
+      # Reißt dabei die Verbindung ab, ist der ganze Lauf verloren – deshalb
+      # bis zu drei Anläufe mit wachsender Wartezeit.
       - name: Installer, portable Datei und ZIP bauen
         working-directory: desktop
-        run: npx electron-builder --win nsis portable zip --x64 --publish never
+        shell: pwsh
+        run: |
+          $anlaeufe = 3
+          for ($i = 1; $i -le $anlaeufe; $i++) {
+            Write-Host "== Anlauf $i von $anlaeufe =="
+            npx electron-builder --win nsis portable zip --x64 --publish never
+            if ($LASTEXITCODE -eq 0) { exit 0 }
+            if ($i -lt $anlaeufe) {
+              $warten = 20 * $i
+              Write-Host "Bau fehlgeschlagen (Code $LASTEXITCODE) – neuer Anlauf in $warten s"
+              Start-Sleep -Seconds $warten
+            }
+          }
+          throw "Bau nach $anlaeufe Anlaeufen fehlgeschlagen"
         env:
           # Ohne Zertifikat wird nicht signiert; Windows SmartScreen warnt dann
           # beim ersten Start. Mit Zertifikat: CSC_LINK und CSC_KEY_PASSWORD
