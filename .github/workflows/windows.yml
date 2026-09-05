@@ -8,9 +8,22 @@
 name: Windows-Anwendung
 
 on:
+  # Von Hand starten, sobald der Ablauf im Hauptzweig liegt
   workflow_dispatch:
+  # Bei einer Freigabemarke
   push:
     tags: ["v*"]
+    # Und bei jeder Änderung am Entwicklungszweig, die die Anwendung betrifft.
+    # So entsteht die Windows-Fassung auch ohne Marke und ohne Hauptzweig.
+    branches: ["claude/stahlbau-sketch-converter-go6e9t"]
+    paths:
+      - "index.html"
+      - "css/**"
+      - "js/**"
+      - "icons/**"
+      - "desktop/**"
+      - "tools/**"
+      - ".github/workflows/windows.yml"
 
 jobs:
   bauen:
