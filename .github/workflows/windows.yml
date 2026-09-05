@@ -64,11 +64,25 @@ jobs:
           Get-ChildItem dist -File | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
           if (-not (Test-Path "dist\HSD-Konverter-1.0.0-Setup.exe")) { throw "Installer fehlt" }
 
-      - name: Dateien bereitstellen
+      # Getrennt bereitstellen, damit nicht alles zusammen geladen werden muss:
+      # der Installer allein sind 78 MB, alle drei Fassungen zusammen 274 MB.
+      - name: Installer bereitstellen
         uses: actions/upload-artifact@v4
         with:
-          name: HSD-Konverter-Windows
-          path: |
-            dist/*.exe
-            dist/*.zip
+          name: HSD-Konverter-Setup
+          path: dist/HSD-Konverter-*-Setup.exe
+          retention-days: 90
+
+      - name: Portable Einzeldatei bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: HSD-Konverter-portabel
+          path: dist/HSD-Konverter-*-portabel.exe
+          retention-days: 90
+
+      - name: Programmverzeichnis als ZIP bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: HSD-Konverter-ZIP
+          path: dist/HSD-Konverter-*-x64.zip
           retention-days: 30
