@@ -17,6 +17,10 @@
 
 * { box-sizing: border-box; }
 
+/* Verstecktes bleibt versteckt: Klassen mit display: flex würden die
+   Regel des Browsers für [hidden] sonst überstimmen. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   font-family: var(--font-ui);
@@ -146,14 +150,6 @@ header.app-header {
   font-size: 0.72rem;
 }
 
-.toolbar {
-  display: flex;
-  gap: 6px;
-  padding: 8px 12px;
-  flex-wrap: wrap;
-  border-bottom: 1px solid var(--border);
-  background: #fbfdfe;
-}
 
 button.tool-btn {
   border: 1px solid var(--border);
@@ -525,31 +521,8 @@ table.members-table input {
   border-radius: 4px;
 }
 
-.export-bar {
-  padding: 10px 16px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  border-top: 1px solid var(--border);
-  background: #fafcfd;
-}
 
-.export-bar button {
-  padding: 8px 16px;
-  border-radius: 5px;
-  border: none;
-  background: var(--hsd-blue);
-  color: #fff;
-  cursor: pointer;
-  font-size: 0.82rem;
-  font-weight: 600;
-}
 
-.export-bar button.secondary {
-  background: #fff;
-  color: var(--hsd-blue);
-  border: 1px solid var(--hsd-blue);
-}
 
 .disclaimer {
   padding: 8px 24px;
@@ -1046,7 +1019,7 @@ button.tool-btn.primary:hover {
 }
 
 @media print {
-  header.app-header, .toolbar, .export-bar, .canvas-wrap .hint { display: none !important; }
+  header.app-header, .ribbon, .canvas-wrap .hint { display: none !important; }
   .main-grid { grid-template-columns: 1fr; }
   body { background: #fff; }
 
@@ -1087,8 +1060,9 @@ header.app-header {
   padding-top: max(14px, env(safe-area-inset-top));
 }
 
-.export-bar {
-  padding-bottom: max(10px, env(safe-area-inset-bottom));
+/* Die unterste Leiste der rechten Spalte hält den Rand der Home-Anzeige frei */
+.result-panel-body {
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
 }
 
 /* Auf Zeigergeräten ohne feine Steuerung (Finger) gelten größere Maße.
@@ -1096,7 +1070,6 @@ header.app-header {
 @media (pointer: coarse) {
   button.tool-btn,
   .tab-btn,
-  .export-bar button,
   .modal-actions button {
     min-height: 44px;
     padding-top: 9px;
@@ -1161,7 +1134,6 @@ header.app-header {
   .canvas-wrap, .model-view { min-height: 44vh; }
   .main-grid { min-height: 0; }
 
-  .toolbar { gap: 8px; }
   .basis-grid { grid-template-columns: 1fr; }
 }
 
@@ -1229,3 +1201,273 @@ header.app-header {
 }
 #tagHinweise { margin: 6px 0; }
 #tagebuchKennzahlen { border-top: none; padding-left: 0; background: none; }
+
+/* ============================================================ Menüband
+   Aufbau in Anlehnung an die Bauanwendungen: eine Registerleiste je
+   Arbeitsschritt, darunter ein Band aus Gruppen. Jede Gruppe trägt ihre
+   Beschriftung unten und ist durch eine senkrechte Linie getrennt – so
+   liest sich der Arbeitsablauf von links nach rechts.
+*/
+
+.ribbon {
+  border-bottom: 1px solid var(--border);
+  background: #fbfdfe;
+  /* Das Band steht über beiden Fenstern und damit über der ganzen Breite */
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+}
+
+/* ---- Registerleiste */
+.ribbon-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px;
+  background: linear-gradient(180deg, #f2f6f9 0%, #e9eff4 100%);
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ribbon-tab {
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.8rem;
+  padding: 7px 16px 6px;
+  cursor: pointer;
+  border-radius: 4px 4px 0 0;
+  white-space: nowrap;
+  position: relative;
+  top: 1px;
+}
+
+.ribbon-tab:hover { color: var(--hsd-blue); background: #f8fbfd; }
+
+.ribbon-tab.active {
+  background: #fbfdfe;
+  border-color: var(--border);
+  color: var(--hsd-blue);
+  font-weight: 600;
+  box-shadow: inset 0 3px 0 var(--accent);
+}
+
+/* ---- Band mit den Gruppen */
+.ribbon-band {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  padding: 6px 8px 3px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ribbon-band[hidden] { display: none; }
+
+/* Wenn das Band breiter ist als das Fenster, deutet ein weicher Rand an,
+   dass rechts noch Gruppen folgen */
+.ribbon {
+  background-image: linear-gradient(to left, rgba(15, 36, 56, 0.07), rgba(15, 36, 56, 0) 24px);
+  background-repeat: no-repeat;
+  background-position: right bottom;
+  background-size: 24px calc(100% - 34px);
+}
+
+.ribbon-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border-right: 1px solid var(--border);
+}
+
+.ribbon-group:last-child { border-right: none; }
+
+.ribbon-items {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  flex: 1;
+}
+
+.ribbon-caption {
+  text-align: center;
+  font-size: 0.66rem;
+  color: var(--text-muted);
+  padding-top: 4px;
+  margin-top: 3px;
+  white-space: nowrap;
+  letter-spacing: 0.2px;
+}
+
+/* ---- Knöpfe: Sinnbild oben, Beschriftung darunter */
+.ribbon-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 3px;
+  min-width: 58px;
+  max-width: 92px;
+  padding: 5px 6px 4px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 0.7rem;
+  line-height: 1.15;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.ribbon-btn:hover { background: #eaf2f8; border-color: #c3d6e4; }
+.ribbon-btn:active { background: #dceaf5; }
+
+.ribbon-btn .ribbon-icon {
+  font-size: 1.25rem;
+  line-height: 1.1;
+  height: 22px;
+  display: flex;
+  align-items: center;
+}
+
+.ribbon-btn .ribbon-label { text-align: center; }
+
+.ribbon-btn.active {
+  background: var(--hsd-blue);
+  border-color: var(--hsd-blue);
+  color: #fff;
+  font-weight: 600;
+}
+
+.ribbon-btn.primary {
+  background: #eef4f9;
+  border-color: #bcd3e4;
+  font-weight: 600;
+  color: var(--hsd-blue);
+}
+.ribbon-btn.primary:hover { background: #dceaf5; }
+
+.ribbon-btn.gross { min-width: 76px; }
+.ribbon-btn.gross .ribbon-icon { font-size: 1.5rem; height: 26px; }
+
+.ribbon-btn.danger:hover { background: #fdeceb; border-color: #f0c3bf; color: #96271f; }
+
+/* ---- Eingabefelder im Band */
+/* Felderblock: steht neben dem Werkzeugknopf derselben Gruppe */
+.ribbon-felder {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  justify-content: center;
+  align-self: center;
+}
+
+.ribbon-feld {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.ribbon-feld > span {
+  min-width: 62px;
+  text-align: right;
+}
+
+.ribbon-feld select,
+.ribbon-feld input {
+  padding: 3px 5px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 0.74rem;
+  font-family: var(--font-data);
+  background: #fff;
+  min-width: 96px;
+  max-width: 190px;
+}
+
+.ribbon-schalter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+  align-self: center;
+  white-space: nowrap;
+}
+
+.ribbon-schalter .gamma-field {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--text-muted);
+}
+
+.ribbon-schalter input[type="number"] {
+  width: 56px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-family: var(--font-data);
+  font-size: 0.72rem;
+}
+
+/* ---- Am Finger: größere Trefferflächen, Band bleibt schiebbar */
+@media (pointer: coarse) {
+  .ribbon-tab { padding: 11px 18px 10px; font-size: 0.86rem; min-height: 44px; }
+  .ribbon-btn { min-width: 66px; min-height: 62px; padding: 7px 8px 6px; font-size: 0.74rem; }
+  .ribbon-btn .ribbon-icon { font-size: 1.4rem; height: 26px; }
+  .ribbon-feld select, .ribbon-feld input { font-size: 16px; min-height: 38px; min-width: 120px; }
+  .ribbon-schalter { min-height: 44px; font-size: 0.8rem; }
+  .ribbon-schalter input[type="number"] { font-size: 16px; min-height: 34px; width: 66px; }
+  .ribbon-caption { font-size: 0.7rem; }
+}
+
+/* Schmales Fenster: die Beschriftungen der Gruppen kosten nur Höhe */
+@media (max-width: 720px) {
+  .ribbon-caption { display: none; }
+  .ribbon-group { padding: 0 6px; }
+}
+
+/* Schnellzugriff neben den Registern: die Arbeitsebene gilt für jedes
+   Werkzeug, das etwas setzt, und darf daher hinter keinem Register
+   verschwinden. */
+.ribbon-schnellzugriff {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  padding: 3px 10px 3px 14px;
+  border-left: 1px solid var(--border);
+  flex: 0 0 auto;
+}
+
+.ribbon-schnellzugriff .ribbon-feld > span { min-width: 0; }
+.ribbon-schnellzugriff .ribbon-feld select { max-width: 168px; min-width: 84px; }
+.ribbon-schnellzugriff .ribbon-feld input { min-width: 62px; width: 74px; }
+
+@media (max-width: 900px) {
+  /* Auf schmalen Geräten rutscht der Schnellzugriff unter die Register */
+  .ribbon-tabs { flex-wrap: wrap; }
+  .ribbon-schnellzugriff {
+    margin-left: 0;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    width: 100%;
+    padding-left: 8px;
+    overflow-x: auto;
+  }
+}

@@ -71,77 +71,329 @@
   </div>
 </div>
 
+<!-- Menüband: Register je Arbeitsschritt, darin Gruppen mit Beschriftung.
+     Aufbau in Anlehnung an die Bauanwendungen (Allplan): links die
+     Werkzeuge, die etwas erzeugen, rechts die, die etwas auswerten.
+     Knöpfe mit data-befehl reichen den Befehl an die Schaltfläche der
+     zugehörigen Ansicht weiter und wechseln vorher auf deren Register. -->
+<div class="ribbon" id="ribbon">
+  <div class="ribbon-tabs" role="tablist" aria-label="Arbeitsschritte">
+    <button class="ribbon-tab active" data-band="start" role="tab">Start</button>
+    <button class="ribbon-tab" data-band="rohbau" role="tab">Rohbau</button>
+    <button class="ribbon-tab" data-band="ausbau" role="tab">Ausbau</button>
+    <button class="ribbon-tab" data-band="beton" role="tab">Beton</button>
+    <button class="ribbon-tab" data-band="plaene" role="tab">Pläne</button>
+    <button class="ribbon-tab" data-band="baustelle" role="tab">Baustelle</button>
+    <button class="ribbon-tab" data-band="auswertung" role="tab">Auswertung</button>
+
+    <div class="ribbon-schnellzugriff" title="Gilt für jedes Werkzeug, das etwas auf der Arbeitsebene setzt">
+      <label class="ribbon-feld"><span>Arbeitsebene</span>
+        <select id="planeAxis" title="Ebene, in der gezeichnet und gesetzt wird">
+          <option value="XY" selected>Ansicht X–Y (lotrecht)</option>
+          <option value="XZ">Grundriss X–Z (waagerecht)</option>
+          <option value="ZY">Seite Z–Y (lotrecht)</option>
+        </select></label>
+      <label class="ribbon-feld"><span>Versatz [m]</span>
+        <input type="number" id="planeOffset" step="0.5" value="0" title="Versatz der Arbeitsebene in Metern"></label>
+      <label class="ribbon-feld"><span>Raster [m]</span>
+        <input type="number" id="gridStep" step="0.25" min="0.05" value="0.5" title="Fangraster auf der Arbeitsebene"></label>
+    </div>
+  </div>
+
+  <!-- ===================================================== Start -->
+  <div class="ribbon-band" data-band="start">
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" id="btnExample" title="Beispielmodell laden">
+          <span class="ribbon-icon">⌁</span><span class="ribbon-label">Beispiel</span></button>
+        <button class="ribbon-btn danger" id="btnClearAll" title="Modell vollständig löschen">
+          <span class="ribbon-icon">🗑</span><span class="ribbon-label">Alles löschen</span></button>
+      </div>
+      <div class="ribbon-caption">Projekt</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" id="btnSaveProject" title="Projekt im Browser dieses Rechners sichern">
+          <span class="ribbon-icon">💾</span><span class="ribbon-label">Speichern</span></button>
+        <button class="ribbon-btn" id="btnLoadProject" title="Zuletzt gespeichertes Projekt laden">
+          <span class="ribbon-icon">📂</span><span class="ribbon-label">Laden</span></button>
+        <button class="ribbon-btn" id="btnExportProject" title="Projekt als Datei sichern (zum Weitergeben oder Archivieren)">
+          <span class="ribbon-icon">⤓</span><span class="ribbon-label">Projektdatei</span></button>
+        <button class="ribbon-btn" id="btnImportProject" title="Projektdatei öffnen">
+          <span class="ribbon-icon">⤒</span><span class="ribbon-label">Datei öffnen</span></button>
+        <button class="ribbon-btn" id="btnTeilen" title="Zuletzt erzeugte Datei an ein anderes Gerät geben" hidden>
+          <span class="ribbon-icon">↗</span><span class="ribbon-label">Weitergeben</span></button>
+        <input type="file" id="projectFileInput" accept="application/json,.json" hidden>
+      </div>
+      <div class="ribbon-caption">Datei</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" id="btnFit" title="Modell ins Bild einpassen">
+          <span class="ribbon-icon">⤢</span><span class="ribbon-label">Einpassen</span></button>
+        <button class="ribbon-btn" id="btnPrint" title="Drucken oder als PDF sichern">
+          <span class="ribbon-icon">🖨</span><span class="ribbon-label">Drucken</span></button>
+      </div>
+      <div class="ribbon-caption">Ansicht und Druck</div>
+    </div>
+  </div>
+
+  <!-- ==================================================== Rohbau -->
+  <div class="ribbon-band" data-band="rohbau" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn active" id="btnDraw" title="Stab zeichnen: Anfangs- und Endpunkt auf der Arbeitsebene anklicken">
+          <span class="ribbon-icon">✏️</span><span class="ribbon-label">Zeichnen</span></button>
+        <button class="ribbon-btn" id="btnOrbit" title="Modell drehen (auch jederzeit mit der rechten Maustaste)">
+          <span class="ribbon-icon">⟳</span><span class="ribbon-label">Navigieren</span></button>
+      </div>
+      <div class="ribbon-caption">Bauteilachsen</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" id="btnSupport" title="Knoten anklicken: Festlager → Loslager → kein Lager">
+          <span class="ribbon-icon">△</span><span class="ribbon-label">Auflager</span></button>
+        <button class="ribbon-btn" id="btnLoad" title="Knoten anklicken und Knotenlast in kN eingeben">
+          <span class="ribbon-icon">↓</span><span class="ribbon-label">Knotenlast</span></button>
+        <label class="ribbon-schalter" title="Eigengewicht der gewählten Profile iterativ als Knotenlasten ansetzen">
+          <input type="checkbox" id="chkSelfWeight">
+          <span>Eigengewicht</span>
+          <span class="gamma-field">γ<sub>G</sub>
+            <input type="number" id="gammaG" step="0.05" min="1" max="1.5" value="1.35" title="Teilsicherheitsbeiwert für ständige Einwirkungen nach DIN EN 1990">
+          </span>
+        </label>
+      </div>
+      <div class="ribbon-caption">Lager und Lasten</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" id="btnSolve" title="Stabkräfte aus Geometrie, Auflagern und Lasten berechnen">
+          <span class="ribbon-icon">Σ</span><span class="ribbon-label">Stabkräfte<br>berechnen</span></button>
+        <button class="ribbon-btn" data-befehl="tabMembers" title="Profilzuordnung und Nachweise zeigen">
+          <span class="ribbon-icon">▤</span><span class="ribbon-label">Bauteile</span></button>
+        <button class="ribbon-btn" data-befehl="tabNodes" title="Anschlusskräfte je Knoten zeigen">
+          <span class="ribbon-icon">◈</span><span class="ribbon-label">Knoten</span></button>
+      </div>
+      <div class="ribbon-caption">Nachweis nach DIN EN 1993-1-1</div>
+    </div>
+  </div>
+
+  <!-- ==================================================== Ausbau -->
+  <div class="ribbon-band" data-band="ausbau" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" id="btnBauteil" title="Architektur-Bauteil auf der Arbeitsebene aufziehen">
+          <span class="ribbon-icon">▤</span><span class="ribbon-label">Bauteil</span></button>
+        <div class="ribbon-felder">
+        <label class="ribbon-feld"><span>Typ</span>
+          <select id="bauteilTyp" title="Bauteiltyp mit Standardaufbau">
+            <option value="wand_aussen" selected>Außenwand</option>
+            <option value="wand_innen">Innenwand</option>
+            <option value="decke">Geschossdecke</option>
+            <option value="dach">Dach (Warmdach)</option>
+            <option value="bodenplatte">Bodenplatte</option>
+            <option value="streifenfundament">Streifenfundament</option>
+            <option value="einzelfundament">Einzelfundament</option>
+          </select></label>
+        <label class="ribbon-feld"><span>Höhe [m]</span>
+          <input type="number" id="bauteilHoehe" step="0.05" min="0.1" value="2.75" title="Wandhöhe bzw. Breite des Streifenfundaments in Metern"></label>
+        </div>
+      </div>
+      <div class="ribbon-caption">Bauteile</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnAddOpening" data-reiter="arch" title="Fenster oder Tür in eine Wand einsetzen">
+          <span class="ribbon-icon">▭</span><span class="ribbon-label">Fenster<br>und Tür</span></button>
+        <button class="ribbon-btn" data-befehl="btnAddAbzug" data-reiter="arch" title="Abzug oder Nische nach DIN 277 erfassen">
+          <span class="ribbon-icon">◫</span><span class="ribbon-label">Abzug<br>Nische</span></button>
+      </div>
+      <div class="ribbon-caption">Öffnungen und Abzüge</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="tabArch" title="Bauteile, Öffnungen, Räume und Kosten zeigen">
+          <span class="ribbon-icon">🏛</span><span class="ribbon-label">Architektur</span></button>
+      </div>
+      <div class="ribbon-caption">Auswertung</div>
+    </div>
+  </div>
+
+  <!-- ===================================================== Beton -->
+  <div class="ribbon-band" data-band="beton" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" id="btnBetonteil" title="Betonbauteil auf der Arbeitsebene setzen; Abmessungen anschließend im Reiter Beton. Treppe: erster Punkt = Antritt, zweiter Punkt = Laufrichtung">
+          <span class="ribbon-icon">▣</span><span class="ribbon-label">Betonteil</span></button>
+        <div class="ribbon-felder">
+        <label class="ribbon-feld"><span>Bauteilart</span>
+          <select id="betonTyp" title="Betonbauteil mit Regelabmessungen nach DIN EN 1992-1-1">
+            <option value="einzelfundament" selected>Einzelfundament</option>
+            <option value="streifenfundament">Streifenfundament</option>
+            <option value="koecherfundament">Köcherfundament</option>
+            <option value="bohrpfahl">Bohrpfahl</option>
+            <option value="bodenplatte">Bodenplatte</option>
+            <option value="decke">Stahlbetondecke</option>
+            <option value="wand">Stahlbetonwand</option>
+            <option value="kellerwand">Kellerwand (erdberührt)</option>
+            <option value="stuetze">Stütze rechteckig</option>
+            <option value="stuetze_rund">Stütze rund</option>
+            <option value="unterzug">Unterzug / Balken</option>
+            <option value="treppe">Massivtreppe (DIN 18065)</option>
+          </select></label>
+        <label class="ribbon-feld"><span>Güte</span>
+          <select id="betonGuete" title="Betonfestigkeitsklasse nach DIN EN 1992-1-1 Tab. 3.1">
+            <option value="C20/25">C20/25</option>
+            <option value="C25/30" selected>C25/30</option>
+            <option value="C30/37">C30/37</option>
+            <option value="C35/45">C35/45</option>
+          </select></label>
+        </div>
+      </div>
+      <div class="ribbon-caption">Betonbauteile</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnAddAussparung" data-reiter="beton" title="Deckendurchbruch anlegen">
+          <span class="ribbon-icon">⬚</span><span class="ribbon-label">Aussparung</span></button>
+        <button class="ribbon-btn" data-befehl="btnTreppeVorschlag" data-reiter="beton" title="Steigungszahl und Auftritt nach DIN 18065 vorschlagen">
+          <span class="ribbon-icon">📐</span><span class="ribbon-label">Treppe<br>vorschlagen</span></button>
+      </div>
+      <div class="ribbon-caption">Decke und Treppe</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnAutoBewehrung" data-reiter="beton" title="Konstruktive Mindestbewehrung nach DIN EN 1992-1-1 Abschnitt 9 wählen">
+          <span class="ribbon-icon">🤖</span><span class="ribbon-label">Bewehrung<br>erzeugen</span></button>
+        <button class="ribbon-btn" data-befehl="btnBiegelisteJson" data-reiter="beton" title="Biegedaten als JSON für das Python-Werkzeug der Biegerei">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Biegedaten</span></button>
+      </div>
+      <div class="ribbon-caption">Bewehrung</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="tabBeton" title="Betonbauteile, Schalung, Bewehrung und Kosten zeigen">
+          <span class="ribbon-icon">🧱</span><span class="ribbon-label">Betontabelle</span></button>
+      </div>
+      <div class="ribbon-caption">Auswertung</div>
+    </div>
+  </div>
+
+  <!-- ===================================================== Pläne -->
+  <div class="ribbon-band" data-band="plaene" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnGrundriss" data-reiter="arch" title="Grundriss aller Wände mit Raumflächen und Maßketten">
+          <span class="ribbon-icon">🗺</span><span class="ribbon-label">Grundriss</span></button>
+      </div>
+      <div class="ribbon-caption">Architektur</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnSchalUebersicht" data-reiter="beton" title="Grundriss aller Betonbauteile mit Positionen, Höhenkoten und Mengen">
+          <span class="ribbon-icon">🧱</span><span class="ribbon-label">Schalplan-<br>Übersicht</span></button>
+        <button class="ribbon-btn" data-befehl="btnDeckenplan" data-reiter="beton" title="Deckenplan der gewählten Ebene mit Achsraster">
+          <span class="ribbon-icon">▦</span><span class="ribbon-label">Deckenplan</span></button>
+      </div>
+      <div class="ribbon-caption">Beton</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnPositionsplan" data-reiter="positionen" title="Positionsplan mit Achsraster über alle Gewerke">
+          <span class="ribbon-icon">🧭</span><span class="ribbon-label">Positionsplan</span></button>
+      </div>
+      <div class="ribbon-caption">Positionen</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnAufmassblatt" data-reiter="baustelle" title="Aufmaßblatt der gewählten Position mit Unterschriftenfeldern">
+          <span class="ribbon-icon">📏</span><span class="ribbon-label">Aufmaßblatt</span></button>
+        <button class="ribbon-btn" data-befehl="btnTagesbericht" data-reiter="baustelle" title="Tagesbericht des gewählten Bautages">
+          <span class="ribbon-icon">📄</span><span class="ribbon-label">Tagesbericht</span></button>
+      </div>
+      <div class="ribbon-caption">Baustelle</div>
+    </div>
+  </div>
+
+  <!-- ================================================= Baustelle -->
+  <div class="ribbon-band" data-band="baustelle" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnAufmassNeu" data-reiter="baustelle" title="Neues Aufmaßblatt für eine LV-Position anlegen">
+          <span class="ribbon-icon">＋</span><span class="ribbon-label">Aufmaßblatt</span></button>
+        <button class="ribbon-btn" data-befehl="btnAufmassZeile" data-reiter="baustelle" title="Aufmaßzeile anfügen">
+          <span class="ribbon-icon">≡</span><span class="ribbon-label">Zeile</span></button>
+        <button class="ribbon-btn" data-befehl="btnAufmassAusBauteilen" data-reiter="baustelle" title="Aufmaßblätter aus den erfassten Bauteilen vorbereiten">
+          <span class="ribbon-icon">⤓</span><span class="ribbon-label">Aus<br>Bauteilen</span></button>
+        <button class="ribbon-btn danger" data-befehl="btnAufmassLoeschen" data-reiter="baustelle" title="Angezeigtes Aufmaßblatt löschen">
+          <span class="ribbon-icon">🗑</span><span class="ribbon-label">Blatt<br>löschen</span></button>
+      </div>
+      <div class="ribbon-caption">Aufmaß nach VOB/B § 14</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnTagNeu" data-reiter="baustelle" title="Neuen Bautag anlegen">
+          <span class="ribbon-icon">＋</span><span class="ribbon-label">Bautag</span></button>
+        <button class="ribbon-btn danger" data-befehl="btnTagLoeschen" data-reiter="baustelle" title="Angezeigten Bautag löschen">
+          <span class="ribbon-icon">🗑</span><span class="ribbon-label">Bautag<br>löschen</span></button>
+      </div>
+      <div class="ribbon-caption">Bautagebuch</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnAufmassCsv" data-reiter="baustelle" title="Alle Aufmaßblätter als CSV für Excel">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Aufmaß<br>(CSV)</span></button>
+        <button class="ribbon-btn" data-befehl="btnTagebuchCsv" data-reiter="baustelle" title="Bautagebuch als CSV für Excel">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Tagebuch<br>(CSV)</span></button>
+      </div>
+      <div class="ribbon-caption">Ausgabe</div>
+    </div>
+  </div>
+
+  <!-- ================================================ Auswertung -->
+  <div class="ribbon-band" data-band="auswertung" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="tabPositionen" title="Achsraster und Positionsliste zeigen">
+          <span class="ribbon-icon">🧭</span><span class="ribbon-label">Positionen</span></button>
+        <button class="ribbon-btn" data-befehl="tabCutList" title="Stückliste und Zuschnittplan zeigen">
+          <span class="ribbon-icon">✂</span><span class="ribbon-label">Stückliste</span></button>
+        <button class="ribbon-btn" data-befehl="tabBaustelle" title="Aufmaß und Bautagebuch zeigen">
+          <span class="ribbon-icon">🏗</span><span class="ribbon-label">Baustelle</span></button>
+      </div>
+      <div class="ribbon-caption">Listen</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" id="btnExportCsv" title="Leistungsverzeichnis mit Mengen und Kosten als CSV für Excel">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Leistungs-<br>verzeichnis</span></button>
+      </div>
+      <div class="ribbon-caption">Leistungsverzeichnis (CSV)</div>
+    </div>
+  </div>
+</div>
+
 <div class="main-grid">
 
   <!-- Fenster 1: Skizze mit Linien -->
   <div class="panel">
     <div class="panel-header">
       <h2><span class="badge-num">1</span> Skizze (Bauteilachsen, räumlich)</h2>
-    </div>
-    <div class="toolbar">
-      <button class="tool-btn active" id="btnDraw" title="Stab zeichnen: Anfangs- und Endpunkt auf der Arbeitsebene anklicken">✏️ Zeichnen</button>
-      <button class="tool-btn" id="btnOrbit" title="Modell drehen (auch jederzeit mit der rechten Maustaste)">⟳ Navigieren</button>
-      <span class="tool-group">
-        <label>Arbeitsebene</label>
-        <select id="planeAxis" title="Ebene, in der gezeichnet wird">
-          <option value="XY" selected>Ansicht X–Y (lotrecht)</option>
-          <option value="XZ">Grundriss X–Z (waagerecht)</option>
-          <option value="ZY">Seite Z–Y (lotrecht)</option>
-        </select>
-        <input type="number" id="planeOffset" step="0.5" value="0" title="Versatz der Arbeitsebene in Metern">
-      </span>
-      <span class="tool-group">
-        <label>Raster [m]</label>
-        <input type="number" id="gridStep" step="0.25" min="0.05" value="0.5" title="Fangraster auf der Arbeitsebene">
-      </span>
-      <span class="tool-group">
-        <button class="tool-btn plain" id="btnBauteil" title="Architektur-Bauteil auf der Arbeitsebene aufziehen">▤ Bauteil</button>
-        <select id="bauteilTyp" title="Bauteiltyp mit Standardaufbau">
-          <option value="wand_aussen" selected>Außenwand</option>
-          <option value="wand_innen">Innenwand</option>
-          <option value="decke">Geschossdecke</option>
-          <option value="dach">Dach (Warmdach)</option>
-          <option value="bodenplatte">Bodenplatte</option>
-          <option value="streifenfundament">Streifenfundament</option>
-          <option value="einzelfundament">Einzelfundament</option>
-        </select>
-        <input type="number" id="bauteilHoehe" step="0.05" min="0.1" value="2.75" title="Wandhöhe bzw. Breite des Streifenfundaments in Metern">
-      </span>
-      <span class="tool-group">
-        <button class="tool-btn plain" id="btnBetonteil" title="Betonbauteil auf der Arbeitsebene setzen; Abmessungen anschließend im Reiter Beton. Treppe: erster Punkt = Antritt, zweiter Punkt = Laufrichtung">▣ Betonteil</button>
-        <select id="betonTyp" title="Betonbauteil mit Regelabmessungen nach DIN EN 1992-1-1">
-          <option value="einzelfundament" selected>Einzelfundament</option>
-          <option value="streifenfundament">Streifenfundament</option>
-          <option value="koecherfundament">Köcherfundament</option>
-          <option value="bohrpfahl">Bohrpfahl</option>
-          <option value="bodenplatte">Bodenplatte</option>
-          <option value="decke">Stahlbetondecke</option>
-          <option value="wand">Stahlbetonwand</option>
-          <option value="kellerwand">Kellerwand (erdberührt)</option>
-          <option value="stuetze">Stütze rechteckig</option>
-          <option value="stuetze_rund">Stütze rund</option>
-          <option value="unterzug">Unterzug / Balken</option>
-          <option value="treppe">Massivtreppe (DIN 18065)</option>
-        </select>
-        <select id="betonGuete" title="Betonfestigkeitsklasse nach DIN EN 1992-1-1 Tab. 3.1">
-          <option value="C20/25">C20/25</option>
-          <option value="C25/30" selected>C25/30</option>
-          <option value="C30/37">C30/37</option>
-          <option value="C35/45">C35/45</option>
-        </select>
-      </span>
-      <button class="tool-btn" id="btnSupport" title="Knoten anklicken: Festlager → Loslager → kein Lager">△ Auflager</button>
-      <button class="tool-btn" id="btnLoad" title="Knoten anklicken und Knotenlast in kN eingeben">↓ Knotenlast</button>
-      <button class="tool-btn primary" id="btnSolve" title="Stabkräfte aus Geometrie, Auflagern und Lasten berechnen">Σ Stabkräfte berechnen</button>
-      <label class="tool-check" title="Eigengewicht der gewählten Profile iterativ als Knotenlasten ansetzen">
-        <input type="checkbox" id="chkSelfWeight"> Eigengewicht
-        <span class="gamma-field">γ<sub>G</sub>
-          <input type="number" id="gammaG" step="0.05" min="1" max="1.5" value="1.35" title="Teilsicherheitsbeiwert für ständige Einwirkungen nach DIN EN 1990">
-        </span>
-      </label>
-      <button class="tool-btn" id="btnFit" title="Modell ins Bild einpassen">⤢ Einpassen</button>
-      <button class="tool-btn" id="btnExample" title="Beispiel laden">⌁ Beispiel</button>
-      <button class="tool-btn danger" id="btnClearAll" title="Modell vollständig löschen">🗑 Alles löschen</button>
     </div>
     <div class="canvas-wrap" id="sketchView">
       <div class="hint" id="hintBox"></div>
@@ -1068,16 +1320,6 @@
       <div class="stat"><span class="label">Gesamt (Kostenschätzung)</span><span class="value" id="costTotal">0.00 €</span></div>
     </div>
 
-    <div class="export-bar">
-      <button id="btnExportCsv">⬇ Als LV-Position (CSV) exportieren</button>
-      <button class="secondary" id="btnPrint">🖨 Drucken / PDF</button>
-      <button class="secondary" id="btnSaveProject" title="Projekt im Browser dieses Rechners sichern">💾 Projekt speichern</button>
-      <button class="secondary" id="btnLoadProject" title="Zuletzt gespeichertes Projekt laden">📂 Projekt laden</button>
-      <button class="secondary" id="btnExportProject" title="Projekt als Datei sichern (zum Weitergeben oder Archivieren)">⤓ Projektdatei</button>
-      <button class="secondary" id="btnImportProject" title="Projektdatei öffnen">⤒ Datei öffnen</button>
-      <button class="secondary" id="btnTeilen" title="Zuletzt erzeugte Datei an ein anderes Gerät geben" hidden>↗ Weitergeben</button>
-      <input type="file" id="projectFileInput" accept="application/json,.json" hidden>
-    </div>
   </div>
 
 </div>

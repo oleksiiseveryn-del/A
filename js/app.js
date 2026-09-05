@@ -2660,6 +2660,51 @@
   }
   Object.keys(TABS).forEach((key) => TABS[key].button.addEventListener("click", () => showView(key)));
 
+  /* ------------------------------------------------------------ Menüband */
+
+  /**
+   * Das Menüband ist die Befehlsebene: Register je Arbeitsschritt, darin
+   * Gruppen von Werkzeugen. Knöpfe mit `data-befehl` führen den Befehl nicht
+   * selbst aus, sondern reichen ihn an die Schaltfläche der zugehörigen
+   * Ansicht weiter – so bleibt jede Funktion an einer Stelle umgesetzt.
+   * Mit `data-reiter` wird vorher auf die passende Ansicht gewechselt, damit
+   * das Ergebnis auch zu sehen ist.
+   */
+  function zeigeBand(name) {
+    const ribbon = document.getElementById("ribbon");
+    ribbon.querySelectorAll(".ribbon-tab").forEach((t) => {
+      t.classList.toggle("active", t.dataset.band === name);
+      t.setAttribute("aria-selected", t.dataset.band === name ? "true" : "false");
+    });
+    ribbon.querySelectorAll(".ribbon-band").forEach((b) => { b.hidden = b.dataset.band !== name; });
+    try { window.localStorage.setItem("hsd-menueband", name); } catch (e) { /* ohne Speicher: gleichgültig */ }
+    // Das Band ändert die Höhe der Werkzeugleiste; die Zeichenfenster
+    // müssen sich darauf einstellen
+    window.requestAnimationFrame(fensterAngepasst);
+  }
+
+  document.getElementById("ribbon").addEventListener("click", (e) => {
+    const reiter = e.target.closest(".ribbon-tab");
+    if (reiter) { zeigeBand(reiter.dataset.band); return; }
+
+    const knopf = e.target.closest("[data-befehl]");
+    if (!knopf) return;
+    const ziel = document.getElementById(knopf.dataset.befehl);
+    if (!ziel) return;
+    if (knopf.dataset.reiter && TABS[knopf.dataset.reiter]) showView(knopf.dataset.reiter);
+    // Der Wechsel der Ansicht baut Tabellen neu auf; der Befehl folgt danach
+    window.requestAnimationFrame(() => ziel.click());
+  });
+
+  // Zuletzt benutztes Register wiederherstellen
+  (function stelleBandHer() {
+    let gemerkt = null;
+    try { gemerkt = window.localStorage.getItem("hsd-menueband"); } catch (e) { gemerkt = null; }
+    const vorhanden = gemerkt
+      && document.querySelector(`.ribbon-band[data-band="${gemerkt}"]`);
+    zeigeBand(vorhanden ? gemerkt : "start");
+  }());
+
   /** Alle abhängigen Ansichten nach einer Modelländerung auffrischen. */
   function refreshAll() {
     renderTable();

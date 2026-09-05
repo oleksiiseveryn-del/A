@@ -29,13 +29,14 @@
     window.hsd.aufMenue("menue:aufmass-csv", () => druecke("btnAufmassCsv"));
     window.hsd.aufMenue("menue:tagebuch-csv", () => druecke("btnTagebuchCsv"));
 
-    // ---- „Als PDF sichern" neben „Drucken"
+    // ---- „Als PDF sichern" neben „Drucken" im Menüband
     const drucken = document.getElementById("btnPrint");
     if (drucken && !document.getElementById("btnPdf")) {
       const pdf = document.createElement("button");
       pdf.id = "btnPdf";
       pdf.className = drucken.className;
-      pdf.textContent = "🖫 Als PDF sichern";
+      // Aufbau wie die übrigen Knöpfe des Menübands: Sinnbild über Beschriftung
+      pdf.innerHTML = '<span class="ribbon-icon">🖫</span><span class="ribbon-label">Als PDF</span>';
       pdf.title = "Die Ansicht als PDF im Blatt A4 quer sichern";
       pdf.addEventListener("click", () => {
         const name = (document.getElementById("projectName").value || "Projekt")
