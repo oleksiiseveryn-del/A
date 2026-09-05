@@ -1484,3 +1484,12 @@ header.app-header {
 .summary-bar .value.warnwert { color: var(--err); }
 #attributKennzahlen, #kollisionKennzahlen { border-top: none; padding-left: 0; background: none; }
 #ifcStand { margin: 6px 0; font-family: var(--font-data); }
+
+/* Anschlusstabelle: viele kleine Zahlenfelder in einer Zeile.
+   Ohne feste Breiten quetschen sich die Felder gegenseitig zusammen. */
+#anschlussTable input[type="number"] { width: 4.4em; min-width: 4.4em; }
+#anschlussTable input[type="text"] { width: 7em; min-width: 6em; }
+#anschlussTable select { min-width: 5em; }
+#anschlussTable td { white-space: nowrap; }
+#anschlussTable td:nth-child(10) input { width: 3.6em; min-width: 3.6em; margin-right: 2px; }
+#anschlussTable .tool-btn { padding: 4px 8px; }

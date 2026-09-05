@@ -44,6 +44,8 @@
     beton: new Map(),     // id -> Betonbauteil { id, kind, p1, p2, masse, guete, expo, ds, sauberkeit, bewehrungsgrad, anzahl, spannrichtung, aussparungen }
     nextBetonId: 1,
     nextAussparungId: 1,  // fortlaufende Nummer der Deckendurchbrüche
+    anschluesse: new Map(),  // id -> Anschluss { id, memberId, art, ... }
+    nextAnschlussId: 1,
     aufmass: new Map(),   // id -> Aufmaßblatt { id, pos, kurztext, einheit, gewerk, grenze, ep, datum, aufgenommen, anerkannt, zeilen }
     nextAufmassId: 1,
     bautagebuch: new Map(), // id -> Bautag { id, datum, abschnitt, von, bis, pause, wetter, tempFrueh, …, firmen, geraete, leistungen, lieferungen, ereignisse }
@@ -223,6 +225,8 @@
     model.nextAussparungId = 1;
     model.aufmass.clear();
     model.nextAufmassId = 1;
+    model.anschluesse.clear();
+    model.nextAnschlussId = 1;
     model.bautagebuch.clear();
     model.nextTagId = 1;
     pendingBetonPoint = null;
@@ -1143,6 +1147,10 @@
     if (sheetArt === "aufmass") {
       const am = model.aufmass.get(aufmassBlattId);
       return blatt(`Aufmassblatt_${name}_${(am && am.pos ? am.pos : "Position").replace(/[^\w.-]+/g, "_")}.svg`);
+    }
+    if (sheetArt === "anschluss") {
+      const an = model.anschluesse.get(anschlussBlattId);
+      return blatt(`Anschluss_${name}_${(an && an.bezeichnung ? an.bezeichnung : "Anschluss").replace(/[^\w.-]+/g, "_")}.svg`);
     }
     if (sheetArt === "lageplan") return blatt(`Lageplan_${name}.svg`);
     if (sheetArt === "hoehenplan") return blatt(`Hoehenplan_${name}.svg`);
@@ -2867,6 +2875,7 @@
     beton: { button: document.getElementById("tabBeton"), view: document.getElementById("viewBeton") },
     positionen: { button: document.getElementById("tabPositionen"), view: document.getElementById("viewPositionen") },
     baustelle: { button: document.getElementById("tabBaustelle"), view: document.getElementById("viewBaustelle") },
+    anschluss: { button: document.getElementById("tabAnschluss"), view: document.getElementById("viewAnschluss") },
     bestand: { button: document.getElementById("tabBestand"), view: document.getElementById("viewBestand") },
     tiefbau: { button: document.getElementById("tabTiefbau"), view: document.getElementById("viewTiefbau") },
     koordination: { button: document.getElementById("tabKoordination"), view: document.getElementById("viewKoordination") },
@@ -2883,6 +2892,7 @@
     if (which === "beton") renderBetonTable();
     if (which === "positionen") renderPositionsTable();
     if (which === "baustelle") renderBaustelle();
+    if (which === "anschluss") renderAnschluesse();
     if (which === "bestand") renderBestand();
     if (which === "tiefbau") renderTiefbau();
     if (which === "koordination") renderKoordination();
@@ -2946,6 +2956,7 @@
     if (!TABS.beton.view.hidden) renderBetonTable();
     if (!TABS.positionen.view.hidden) renderPositionsTable();
     if (!TABS.baustelle.view.hidden) renderBaustelle();
+    if (!TABS.anschluss.view.hidden) renderAnschluesse();
     if (!TABS.bestand.view.hidden) renderBestand();
     if (!TABS.tiefbau.view.hidden) renderTiefbau();
     if (!TABS.koordination.view.hidden) renderKoordination();
@@ -3892,6 +3903,332 @@
     b.addEventListener("change", () => { a.value = b.value; });
   });
 
+  /* ============================== Anschlüsse nach DIN EN 1993-1-8 */
+
+  let anschlussBlattId = null;
+
+  /** Vorbelegung eines Anschlusses nach Art und Stabkraft. */
+  function anschlussVorgabe(art, member) {
+    const design = member ? designMember(member) : null;
+    const tabelle = design ? STEEL_DB[design.family] : null;
+    const profil = tabelle && tabelle.find((x) => design.profileName.indexOf(x.name) === 0);
+    const mass = profil ? sectionOuter(design.family, profil) : { h: 200, b: 100 };
+    const A = profil ? profil.A * 100 : 2000;              // cm² -> mm²
+    const N = member ? anschlussStabkraft(member) : 100;
+    const guete = document.getElementById("steelGradeGlobal").value;
+    return {
+      art,
+      memberId: member ? member.id : null,
+      bezeichnung: member ? memberLabel(member) : `A${model.nextAnschlussId}`,
+      guete,
+      N_Ed: Math.abs(N),
+      M_Ed: 0, V_Ed: Math.abs(N) * 0.2,
+      schraube: "M16", klasse: "8.8", anzahl: 2, scherfugen: 1, imGewinde: true,
+      tBlech: 10, tStab: Math.max(6, Math.round(mass.h / 20)),
+      e1: 40, e2: 40, p1: 60, p2: 0, reihen: 1,
+      A, loecherImSchnitt: 1,
+      a: 4, laenge: 150, anzahlNaehte: 2,
+      tp: 20, hProfil: mass.h,
+      // Hebelarm der obersten Schraubenreihe zum Druckpunkt; bei kleinen
+      // Profilen ist ein Momentenanschluss ohnehin nicht sinnvoll
+      reihenAbstand: Math.max(120, Math.round(mass.h * 0.8)),
+    };
+  }
+
+  /** Stabkraft eines Stabes: aus der Berechnung, sonst aus der Eingabe. */
+  function anschlussStabkraft(member) {
+    if (lastSolution && lastSolution.ok && lastSolution.forces[member.id] !== undefined) {
+      return lastSolution.forces[member.id];
+    }
+    return member.loadType === "Biegung" ? 0 : (member.force || 0);
+  }
+
+  /** Anschluss rechnen. */
+  function anschlussRechnen(an) {
+    if (an.art === "knotenblech_geschweisst") {
+      return anschlussKnotenblechSchweiss(an);
+    }
+    if (an.art === "stirnplatte") {
+      // Zwei Schraubenreihen: oberhalb und unterhalb des Zugflansches
+      const m = Math.max(1.2 * SCHRAUBEN[an.schraube].d0, 45);
+      return anschlussStirnplatte(Object.assign({}, an, {
+        reihen: [
+          { abstand: an.reihenAbstand, m, e: m },
+          { abstand: Math.max(40, an.reihenAbstand - 100), m, e: m },
+        ],
+      }));
+    }
+    return anschlussKnotenblech(an);
+  }
+
+  /**
+   * Kleinste Schraubenzahl, mit der alle Nachweise erfüllt sind.
+   * Es werden mindestens zwei Schrauben gesetzt: Eine einzelne Schraube
+   * ist im Stahlbau unüblich, weil der Anschluss sich um sie drehen kann
+   * und die Ausmitte nicht erfasst wird.
+   */
+  function anschlussSchraubenErmitteln(an) {
+    if (an.art !== "knotenblech_geschraubt") return null;
+    for (let n = 2; n <= 12; n++) {
+      const probe = Object.assign({}, an, { anzahl: n });
+      const erg = anschlussRechnen(probe);
+      if (erg.status !== "fehler" && erg.ausnutzung <= 1.0) return n;
+    }
+    return null;
+  }
+
+  function anschlussStabListe() {
+    return Array.from(model.members.values());
+  }
+
+  function fuelleStabAuswahl() {
+    const stäbe = anschlussStabListe();
+    ["anschlussStab", "anschlussStabAnsicht"].forEach((id) => {
+      const wahl = document.getElementById(id);
+      if (!wahl) return;
+      const vorher = wahl.value;
+      wahl.innerHTML = stäbe.map((m) => {
+        const N = anschlussStabkraft(m);
+        return `<option value="${m.id}">${memberLabel(m)} · ${m.type} · `
+          + `${N >= 0 ? "+" : "−"}${Math.abs(N).toFixed(1)} kN</option>`;
+      }).join("") || '<option value="">kein Stab im Modell</option>';
+      if (stäbe.some((m) => String(m.id) === vorher)) wahl.value = vorher;
+    });
+  }
+
+  function renderAnschluesse() {
+    fuelleStabAuswahl();
+    const liste = Array.from(model.anschluesse.values());
+    document.getElementById("anschlussEmpty").hidden = liste.length > 0;
+    const body = document.getElementById("anschlussBody");
+    body.innerHTML = "";
+    const meldungen = [];
+
+    liste.forEach((an) => {
+      const erg = anschlussRechnen(an);
+      an.ergebnis = erg;
+      const farbe = erg.status === "fehler" ? "cut-warning"
+        : erg.status === "grenzwertig" ? "beruehrung-marke" : "anschluss-marke";
+      const tr = document.createElement("tr");
+      const geschraubt = an.art === "knotenblech_geschraubt";
+      const stirn = an.art === "stirnplatte";
+      tr.innerHTML = `
+        <td><input type="text" data-an="${an.id}" data-feld="bezeichnung" value="${an.bezeichnung}"></td>
+        <td>${an.memberId ? memberLabel(model.members.get(an.memberId) || { id: an.memberId }) : "–"}</td>
+        <td><select data-an="${an.id}" data-feld="art">
+          ${Object.keys(ANSCHLUSSARTEN).map((k) => `<option value="${k}"${k === an.art ? " selected" : ""}>${ANSCHLUSSARTEN[k].name}</option>`).join("")}
+        </select></td>
+        <td>${stirn
+          ? `M <input type="number" step="5" data-an="${an.id}" data-feld="M_Ed" value="${an.M_Ed}"> kNm<br>`
+            + `V <input type="number" step="5" data-an="${an.id}" data-feld="V_Ed" value="${an.V_Ed.toFixed(1)}"> kN`
+          : `N <input type="number" step="5" data-an="${an.id}" data-feld="N_Ed" value="${an.N_Ed.toFixed(1)}"> kN`}</td>
+        <td>${an.art === "knotenblech_geschweisst" ? "–" : `<select data-an="${an.id}" data-feld="schraube">
+          ${Object.keys(SCHRAUBEN).map((k) => `<option value="${k}"${k === an.schraube ? " selected" : ""}>${k}</option>`).join("")}
+        </select>`}</td>
+        <td>${an.art === "knotenblech_geschweisst" ? "–" : `<select data-an="${an.id}" data-feld="klasse">
+          ${Object.keys(SCHRAUBENKLASSEN).map((k) => `<option value="${k}"${k === an.klasse ? " selected" : ""}>${k}</option>`).join("")}
+        </select>`}</td>
+        <td>${geschraubt ? `<input type="number" step="1" min="1" data-an="${an.id}" data-feld="anzahl" value="${an.anzahl}">` : "–"}</td>
+        <td>${geschraubt ? `<select data-an="${an.id}" data-feld="scherfugen">
+          <option value="1"${an.scherfugen === 1 ? " selected" : ""}>1</option>
+          <option value="2"${an.scherfugen === 2 ? " selected" : ""}>2</option></select>` : "–"}</td>
+        <td>${stirn
+          ? `t_p <input type="number" step="1" data-an="${an.id}" data-feld="tp" value="${an.tp}">`
+          : `<input type="number" step="1" data-an="${an.id}" data-feld="tBlech" value="${an.tBlech}"> / `
+            + `<input type="number" step="1" data-an="${an.id}" data-feld="tStab" value="${an.tStab}">`}</td>
+        <td>${geschraubt
+          ? `<input type="number" step="5" data-an="${an.id}" data-feld="e1" value="${an.e1}">`
+            + `<input type="number" step="5" data-an="${an.id}" data-feld="e2" value="${an.e2}">`
+            + `<input type="number" step="5" data-an="${an.id}" data-feld="p1" value="${an.p1}">`
+            + `<input type="number" step="5" data-an="${an.id}" data-feld="p2" value="${an.p2}">`
+          : stirn ? `h = <input type="number" step="10" data-an="${an.id}" data-feld="reihenAbstand" value="${an.reihenAbstand}">` : "–"}</td>
+        <td>${an.art === "knotenblech_geschweisst"
+          ? `<input type="number" step="0.5" data-an="${an.id}" data-feld="a" value="${an.a}"> × `
+            + `<input type="number" step="10" data-an="${an.id}" data-feld="laenge" value="${an.laenge}">`
+          : "–"}</td>
+        <td>${erg.massgebend ? erg.massgebend.name : "–"}</td>
+        <td><span class="${farbe}">${erg.ausnutzung.toFixed(3).replace(".", ",")}</span></td>
+        <td><button class="tool-btn" data-an-blatt="${an.id}" title="Anschlussblatt">📄</button></td>
+        <td><button class="row-remove" data-an-weg="${an.id}" title="Anschluss löschen">✕</button></td>`;
+      body.appendChild(tr);
+      erg.meldungen.forEach((m) => meldungen.push({ an: an.bezeichnung, m }));
+    });
+
+    const kennzahl = (label, wert, warnung) =>
+      `<div class="stat"><span class="label">${label}</span>`
+      + `<span class="value${warnung ? " warnwert" : ""}">${wert}</span></div>`;
+    const fehler = liste.filter((a) => a.ergebnis.status === "fehler").length;
+    const grenz = liste.filter((a) => a.ergebnis.status === "grenzwertig").length;
+    document.getElementById("anschlussKennzahlen").innerHTML = liste.length
+      ? kennzahl("Anschlüsse", liste.length)
+        + kennzahl("nicht erfüllt", fehler, fehler > 0)
+        + kennzahl("über 95 %", grenz, grenz > 0)
+        + kennzahl("größte Ausnutzung",
+          Math.max(...liste.map((a) => a.ergebnis.ausnutzung)).toFixed(3).replace(".", ","),
+          Math.max(...liste.map((a) => a.ergebnis.ausnutzung)) > 1)
+      : "";
+
+    document.getElementById("anschlussMeldungen").innerHTML = meldungen.length
+      ? meldungen.slice(0, 12).map((x) => `<div class="${x.m.art === "fehler" ? "warnwert" : ""}">`
+        + `${x.m.art === "fehler" ? "✕" : "!"} ${x.an}: ${x.m.text}</div>`).join("")
+      : (liste.length ? "Alle Rand- und Lochabstände sowie Nahtmaße halten die Norm ein." : "");
+  }
+
+  /* ---- Bedienung Anschlüsse */
+
+  document.getElementById("viewAnschluss").addEventListener("change", (e) => {
+    const ziel = e.target;
+    if (!ziel.dataset.an) return;
+    const an = model.anschluesse.get(parseInt(ziel.dataset.an, 10));
+    if (!an) return;
+    const feld = ziel.dataset.feld;
+    const textfelder = ["bezeichnung", "art", "schraube", "klasse"];
+    an[feld] = textfelder.indexOf(feld) >= 0 ? ziel.value : (parseFloat(ziel.value) || 0);
+    if (feld === "art" && an.art === "stirnplatte" && !an.M_Ed) {
+      // Beim Wechsel auf den Momentenanschluss eine sinnvolle Vorbelegung setzen
+      an.M_Ed = Math.round(an.N_Ed * 0.3);
+    }
+    renderAnschluesse();
+  });
+
+  document.getElementById("viewAnschluss").addEventListener("click", (e) => {
+    const weg = e.target.closest("[data-an-weg]");
+    if (weg) {
+      model.anschluesse.delete(parseInt(weg.dataset.anWeg, 10));
+      renderAnschluesse();
+      return;
+    }
+    const blatt = e.target.closest("[data-an-blatt]");
+    if (blatt) zeigeAnschlussblatt(parseInt(blatt.dataset.anBlatt, 10));
+  });
+
+  function neuerAnschluss(art, member) {
+    const an = anschlussVorgabe(art, member);
+    an.id = model.nextAnschlussId++;
+    if (!member) an.bezeichnung = `A${an.id}`;
+    model.anschluesse.set(an.id, an);
+    return an;
+  }
+
+  document.getElementById("btnAnschlussNeu").addEventListener("click", () => {
+    const wahl = document.getElementById("anschlussStabAnsicht").value
+      || document.getElementById("anschlussStab").value;
+    const member = model.members.get(parseInt(wahl, 10));
+    const art = document.getElementById("anschlussArtAnsicht").value;
+    const an = neuerAnschluss(art, member);
+    // Schraubenzahl gleich sinnvoll wählen
+    const n = anschlussSchraubenErmitteln(an);
+    if (n) an.anzahl = n;
+    renderAnschluesse();
+    const erg = anschlussRechnen(an);
+    setStatus(`Anschluss ${an.bezeichnung} angelegt: ${ANSCHLUSSARTEN[art].name}`
+      + (member ? `, N_Ed = ${an.N_Ed.toFixed(1)} kN aus der Berechnung` : "")
+      + `. Ausnutzung ${erg.ausnutzung.toFixed(3).replace(".", ",")} (${erg.massgebend.name}).`,
+    erg.status === "fehler" ? "error" : "ok");
+  });
+
+  document.getElementById("btnAnschlussAlle").addEventListener("click", () => {
+    const stäbe = anschlussStabListe();
+    if (!stäbe.length) { setStatus("Keine Stäbe im Modell.", "error"); return; }
+    let angelegt = 0, offen = 0;
+    stäbe.forEach((member) => {
+      if (Array.from(model.anschluesse.values()).some((a) => a.memberId === member.id)) return;
+      const N = anschlussStabkraft(member);
+      // Druckstäbe werden über Kontakt oder Knotenblech angeschlossen; hier
+      // wird für jeden Stab der geschraubte Knotenblechanschluss vorgeschlagen
+      const an = neuerAnschluss("knotenblech_geschraubt", member);
+      an.N_Ed = Math.abs(N);
+      const n = anschlussSchraubenErmitteln(an);
+      if (n) an.anzahl = n; else offen += 1;
+      angelegt += 1;
+    });
+    renderAnschluesse();
+    setStatus(`${angelegt} Anschlüsse vorgeschlagen, Schraubenzahl je Stab ermittelt.`
+      + (offen ? ` ${offen} Anschlüsse sind mit bis zu 12 Schrauben nicht nachweisbar – `
+        + "Schraubengröße, Blechdicke oder Anschlussart ändern." : "")
+      + " Vorschlag für die Skizzenphase; Ausführung und Prüfung bleiben beim Tragwerksplaner.",
+    offen ? "info" : "ok");
+  });
+
+  document.getElementById("btnAnschlussOptimieren").addEventListener("click", () => {
+    const liste = Array.from(model.anschluesse.values());
+    if (!liste.length) { setStatus("Kein Anschluss vorhanden.", "error"); return; }
+    let geaendert = 0, offen = 0;
+    liste.forEach((an) => {
+      if (an.art !== "knotenblech_geschraubt") return;
+      const n = anschlussSchraubenErmitteln(an);
+      if (!n) { offen += 1; return; }
+      if (n !== an.anzahl) { an.anzahl = n; geaendert += 1; }
+    });
+    renderAnschluesse();
+    setStatus(`${geaendert} Anschlüsse angepasst.`
+      + (offen ? ` ${offen} nicht nachweisbar – größere Schrauben oder dickeres Blech nötig.` : "")
+      + " Maßgebend ist der ungünstigste Nachweis, meist Lochleibung oder Abscheren.",
+    offen ? "info" : "ok");
+  });
+
+  function zeigeAnschlussblatt(id) {
+    const an = model.anschluesse.get(id);
+    if (!an) { setStatus("Zuerst einen Anschluss anlegen.", "error"); return; }
+    anschlussBlattId = id;
+    sheetArt = "anschluss";
+    document.getElementById("sheetBody").innerHTML = anschlussblattSVG({
+      anschluss: anschlussRechnen(an), eingabe: an,
+      bezeichnung: an.bezeichnung, projekt: projektKopf(),
+    });
+    document.getElementById("sheetTitle").textContent = `Anschluss ${an.bezeichnung}`;
+    const liste = Array.from(model.anschluesse.values());
+    document.getElementById("sheetCounter").textContent =
+      `${liste.indexOf(an) + 1} von ${liste.length} · ${ANSCHLUSSARTEN[an.art].name}`;
+    document.getElementById("sheetOverlay").hidden = false;
+  }
+
+  document.getElementById("btnAnschlussBlatt").addEventListener("click", () => {
+    const liste = Array.from(model.anschluesse.values());
+    if (!liste.length) { setStatus("Zuerst einen Anschluss anlegen.", "error"); return; }
+    zeigeAnschlussblatt(anschlussBlattId && model.anschluesse.has(anschlussBlattId)
+      ? anschlussBlattId : liste[0].id);
+  });
+
+  document.getElementById("btnAnschlussCsv").addEventListener("click", () => {
+    const liste = Array.from(model.anschluesse.values());
+    if (!liste.length) { setStatus("Zuerst einen Anschluss anlegen.", "error"); return; }
+    const rows = [["Anschlussnachweise nach DIN EN 1993-1-8 – "
+      + (document.getElementById("projectName").value || "Projekt")]];
+    rows.push(["Teilsicherheitsbeiwerte", "gammaM0 = 1,00", "gammaM2 = 1,25"]);
+    rows.push([]);
+    liste.forEach((an) => {
+      const erg = anschlussRechnen(an);
+      rows.push([`Anschluss ${an.bezeichnung}`, ANSCHLUSSARTEN[an.art].name,
+        an.memberId ? memberLabel(model.members.get(an.memberId) || { id: an.memberId }) : "", an.guete]);
+      if (an.art === "stirnplatte") {
+        rows.push(["M_Ed [kNm]", an.M_Ed, "V_Ed [kN]", an.V_Ed, "Stirnplatte [mm]", an.tp,
+          "Schraube", `${an.schraube} ${an.klasse}`]);
+      } else if (an.art === "knotenblech_geschweisst") {
+        rows.push(["N_Ed [kN]", an.N_Ed.toFixed(1), "Naht a [mm]", an.a, "Laenge [mm]", an.laenge,
+          "Naehte", an.anzahlNaehte]);
+      } else {
+        rows.push(["N_Ed [kN]", an.N_Ed.toFixed(1), "Schraube", `${an.schraube} ${an.klasse}`,
+          "Anzahl", an.anzahl, "Scherfugen", an.scherfugen,
+          "t Blech/Stab [mm]", `${an.tBlech}/${an.tStab}`,
+          "e1/e2/p1/p2 [mm]", `${an.e1}/${an.e2}/${an.p1}/${an.p2}`]);
+      }
+      rows.push(["Nachweis", "E_d", "R_d", "Einheit", "Ausnutzung", "Formel", "Hinweis"]);
+      erg.nachweise.forEach((n) => {
+        rows.push([n.name, n.Ed.toFixed(2), n.Rd.toFixed(2), n.einheit, n.ausnutzung.toFixed(3),
+          n.formel, n.hinweis || ""]);
+      });
+      rows.push(["massgebend", erg.massgebend.name, "", "", erg.ausnutzung.toFixed(3),
+        erg.status === "ok" ? "Nachweis erfuellt" : erg.status === "grenzwertig"
+          ? "erfuellt, ueber 95 Prozent" : "NICHT ERFUELLT"]);
+      erg.meldungen.forEach((m) => rows.push(["Meldung", m.art, m.text]));
+      rows.push([]);
+    });
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Anschluesse_${name}.csv`, "\ufeff" + zuCsv(rows), "text/csv;charset=utf-8;");
+    setStatus(`${liste.length} Anschlüsse mit allen Einzelnachweisen als CSV ausgegeben.`, "ok");
+  });
+
   /* ================================================== Tiefbau: Trassierung */
 
   let querprofilBlatt = 0;
@@ -4740,6 +5077,8 @@
       abzuege: Array.from(model.abzuege.values()),
       naechsteAbzugId: model.nextAbzugId,
       betonteile: Array.from(model.beton.values()),
+      anschluesse: Array.from(model.anschluesse.values()),
+      naechsteAnschlussId: model.nextAnschlussId,
       aufmass: Array.from(model.aufmass.values()),
       naechsteAufmassId: model.nextAufmassId,
       bautagebuch: Array.from(model.bautagebuch.values()),
@@ -4800,6 +5139,9 @@
     model.nextAbzugId = data.naechsteAbzugId || (model.abzuege.size + 1);
     (data.betonteile || []).forEach((b) => model.beton.set(b.id, b));
     model.nextBetonId = data.naechsteBetonId || (model.beton.size + 1);
+    (data.anschluesse || []).forEach((a) => model.anschluesse.set(a.id, a));
+    model.nextAnschlussId = data.naechsteAnschlussId
+      || (Math.max(0, ...(data.anschluesse || []).map((a) => a.id)) + 1);
     (data.aufmass || []).forEach((a) => model.aufmass.set(a.id, a));
     model.nextAufmassId = data.naechsteAufmassId
       || (Math.max(0, ...(data.aufmass || []).map((a) => a.id)) + 1);

@@ -44,6 +44,7 @@ schieben; Bedienelemente sind mindestens 44 pt hoch und Eingabefelder mindestens
 | Zeichnung für CAD | DXF R12 (AC1009) als Grundriss oder räumliches Modell, in Metern oder Millimetern, Ebenen nach Bauteilart |
 | Bestandsaufnahme | Wände aus der Punktwolke als CSV mit Modell- und Scankoordinaten |
 | Tiefbau | Lageplan, Höhenplan mit Massenlinie und Querprofilblätter als SVG; Massen und Kostenschätzung als CSV |
+| Anschlüsse | Anschlussblatt mit Skizze und Nachweisprotokoll als SVG; Einzelnachweise als CSV |
 | Papier und PDF | über *Drucken*; aus dem Blattfenster kommt das Blatt allein auf das Papier |
 
 **↗ Weitergeben** übergibt die zuletzt erzeugte Datei an das Systemmenü des Geräts
@@ -87,6 +88,8 @@ js/
   pointcloud.js           Punktwolken lesen (LAS, PLY, PTS, XYZ), Schnitt, Wanderkennung
   civil.js                Tiefbau: Trassierung, Gradiente, Querprofile, Erdmassen
   civilplan.js            Lageplan, Hoehenplan mit Massenlinie, Querprofilblaetter
+  connections.js          Anschluesse nach DIN EN 1993-1-8 (Schrauben, Naehte, T-Stummel)
+  connectionplan.js       Anschlussblatt mit Skizze und Nachweisprotokoll
 python/                   Bewehrung und Herstellungsunterlagen (46 Prüfungen)
 desktop/                  Windows-Anwendung (Electron) – siehe desktop/README.md
 tools/
@@ -95,6 +98,36 @@ tools/
   icons.py                erzeugt die App-Symbole und icon.ico
   wine-rcedit64.sh        Behelf für den Windows-Bau auf Linux
 ```
+
+## Anschlüsse
+
+Das Register **Anschlüsse** rechnet die Verbindung nach **DIN EN 1993-1-8**
+mit deutschem NA (γM0 = 1,00 · γM2 = 1,25):
+
+| Nachweis | Abschnitt |
+|---|---|
+| Abscheren F_v,Rd = α_v · f_ub · A / γM2 | Tab. 3.4 |
+| Lochleibung F_b,Rd = k₁ · α_b · f_u · d · t / γM2 | Tab. 3.4 |
+| Zug F_t,Rd = 0,9 · f_ub · A_s / γM2 und Durchstanzen B_p,Rd | Tab. 3.4 |
+| Rand- und Lochabstände e₁, e₂, p₁, p₂ | Tab. 3.3 |
+| Nettoquerschnitt N_u,Rd = 0,9 · A_net · f_u / γM2 | Gl. (6.7) |
+| Blockversagen V_eff,1,Rd | Abs. 3.10.2 |
+| Kehlnaht f_vw,d = (f_u/√3)/(β_w · γM2) | 4.5.3.3 |
+| Stirnplatte: T-Stummel, Modi 1 bis 3 | Tab. 6.2 |
+
+Drei Anschlussarten: Fachwerkstab am Knotenblech **geschraubt** und
+**geschweißt** sowie **Stirnplattenstoß**. Die Stabkraft kommt aus der
+Berechnung des Tragwerks; „Schrauben ermitteln" sucht die kleinste
+Schraubenzahl, mit der alle Nachweise erfüllt sind (mindestens zwei).
+Jeder Anschluss lässt sich als **Anschlussblatt** mit Skizze,
+Schraubenbild, Maßen und Nachweisprotokoll ausgeben.
+
+**Nicht geführt**: gleitfeste Verbindungen (GV/GVP) und ihre Vorspannung,
+Langlöcher, Passschrauben, Schraubengruppen nach Tab. 6.6 (jede Reihe wird
+für sich gerechnet), die Nachweise des Stützenstegs, Steifen und Rippen,
+Ermüdung und Brandfall. Die Nachgiebigkeit nach Abs. 6.3 wird nicht
+bestimmt – der Anschluss ist im Tragwerk als gelenkig oder biegesteif
+abzubilden.
 
 ## Bauen im Bestand
 

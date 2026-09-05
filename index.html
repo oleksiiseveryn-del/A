@@ -84,6 +84,7 @@
     <button class="ribbon-tab" data-band="beton" role="tab">Beton</button>
     <button class="ribbon-tab" data-band="plaene" role="tab">Pläne</button>
     <button class="ribbon-tab" data-band="baustelle" role="tab">Baustelle</button>
+    <button class="ribbon-tab" data-band="anschluesse" role="tab">Anschlüsse</button>
     <button class="ribbon-tab" data-band="bestand" role="tab">Bestand</button>
     <button class="ribbon-tab" data-band="tiefbau" role="tab">Tiefbau</button>
     <button class="ribbon-tab" data-band="koordination" role="tab">Koordination</button>
@@ -368,6 +369,47 @@
   </div>
 
   <!-- ============================================== Koordination -->
+  <!-- ================================================ Anschluesse -->
+  <div class="ribbon-band" data-band="anschluesse" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnAnschlussNeu" data-reiter="anschluss" title="Anschluss für einen Stab anlegen; die Stabkraft wird aus der Berechnung übernommen">
+          <span class="ribbon-icon">🔩</span><span class="ribbon-label">Anschluss<br>anlegen</span></button>
+        <label class="ribbon-feld"><span>Stab</span>
+          <select id="anschlussStab"></select></label>
+        <label class="ribbon-feld"><span>Art</span>
+          <select id="anschlussArt">
+            <option value="knotenblech_geschraubt">Knotenblech, geschraubt</option>
+            <option value="knotenblech_geschweisst">Knotenblech, geschweißt</option>
+            <option value="stirnplatte">Stirnplattenstoß</option>
+          </select></label>
+      </div>
+      <div class="ribbon-caption">Anschluss</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnAnschlussAlle" data-reiter="anschluss" title="Für jeden Stab mit Stabkraft einen Anschluss vorschlagen">
+          <span class="ribbon-icon">⚙</span><span class="ribbon-label">Alle Stäbe<br>vorschlagen</span></button>
+        <button class="ribbon-btn" data-befehl="btnAnschlussOptimieren" data-reiter="anschluss" title="Schraubenzahl so wählen, dass der Nachweis erfüllt ist">
+          <span class="ribbon-icon">🎯</span><span class="ribbon-label">Schrauben<br>ermitteln</span></button>
+      </div>
+      <div class="ribbon-caption">Automatik</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnAnschlussBlatt" data-reiter="anschluss" title="Anschlussblatt mit Skizze und Nachweisen">
+          <span class="ribbon-icon">📄</span><span class="ribbon-label">Anschluss-<br>blatt</span></button>
+        <button class="ribbon-btn" data-befehl="btnAnschlussCsv" data-reiter="anschluss" title="Nachweise als CSV">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Nachweise<br>(CSV)</span></button>
+        <button class="ribbon-btn" data-befehl="tabAnschluss" title="Anschlussliste zeigen">
+          <span class="ribbon-icon">📋</span><span class="ribbon-label">Anschluss-<br>liste</span></button>
+      </div>
+      <div class="ribbon-caption">Ausgabe</div>
+    </div>
+  </div>
+
   <!-- ================================================ Bestand (Punktwolke) -->
   <div class="ribbon-band" data-band="bestand" hidden>
     <div class="ribbon-group">
@@ -558,6 +600,7 @@
         <button class="tab-btn" id="tabBeton">Beton</button>
         <button class="tab-btn" id="tabPositionen">Positionen</button>
         <button class="tab-btn" id="tabBaustelle">Baustelle</button>
+        <button class="tab-btn" id="tabAnschluss">Anschlüsse</button>
         <button class="tab-btn" id="tabBestand">Bestand</button>
         <button class="tab-btn" id="tabTiefbau">Tiefbau</button>
         <button class="tab-btn" id="tabKoordination">Koordination</button>
@@ -1688,6 +1731,68 @@
         Untersuchung nach LAGA/AVV.</p>
     </div>
 
+    <div class="result-panel-body" id="viewAnschluss" hidden>
+      <h3 class="section-title">Anschlüsse nach DIN EN 1993-1-8</h3>
+      <p class="view-note">Geführt werden <strong>Abscheren</strong> (Tab. 3.4), <strong>Lochleibung</strong>,
+        <strong>Zug</strong> und <strong>Durchstanzen</strong> der Schrauben, die Rand- und Lochabstände nach
+        Tab. 3.3, der <strong>Nettoquerschnitt</strong> (Gl. 6.7) und das <strong>Blockversagen</strong>
+        (Abs. 3.10.2), die <strong>Kehlnaht</strong> nach dem vereinfachten Verfahren (4.5.3.3) sowie beim
+        Stirnplattenstoß das <strong>T-Stummel-Modell</strong> nach Tab. 6.2 mit den Versagensmodi 1 bis 3.
+        Teilsicherheitsbeiwerte nach deutschem NA: γM0 = 1,00 · γM2 = 1,25.
+        <strong>Nicht geführt</strong>: gleitfeste Verbindungen (GV/GVP) und ihre Vorspannung, Langlöcher,
+        Passschrauben, die Wirksamkeit von Schraubengruppen nach Tab. 6.6 (jede Reihe wird für sich gerechnet),
+        die Nachweise des Stützenstegs (Schub, Beulen, Quetschen), Steifen und Rippen, Ermüdung und Brandfall.
+        Die Nachgiebigkeit nach Abs. 6.3 wird nicht bestimmt – der Anschluss ist im Tragwerk als gelenkig oder
+        biegesteif abzubilden.</p>
+
+      <div class="cutlist-controls">
+        <div class="field"><label for="anschlussStabAnsicht">Stab</label>
+          <select id="anschlussStabAnsicht"></select></div>
+        <div class="field"><label for="anschlussArtAnsicht">Art</label>
+          <select id="anschlussArtAnsicht">
+            <option value="knotenblech_geschraubt">Knotenblech, geschraubt</option>
+            <option value="knotenblech_geschweisst">Knotenblech, geschweißt</option>
+            <option value="stirnplatte">Stirnplattenstoß</option>
+          </select></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnAnschlussNeu">🔩 Anschluss anlegen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnAnschlussAlle" title="Für jeden Stab mit Stabkraft einen Anschluss vorschlagen">⚙ Alle Stäbe vorschlagen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnAnschlussOptimieren" title="Schraubenzahl je Anschluss so wählen, dass alle Nachweise erfüllt sind">🎯 Schrauben ermitteln</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnAnschlussBlatt" title="Anschlussblatt des gewählten Anschlusses">📄 Anschlussblatt</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnAnschlussCsv" title="Nachweise als CSV">⬇ Nachweise (CSV)</button></div>
+      </div>
+
+      <div class="summary-bar" id="anschlussKennzahlen"></div>
+      <table class="members-table" id="anschlussTable">
+        <thead>
+          <tr>
+            <th>Anschluss</th>
+            <th>Stab</th>
+            <th>Art</th>
+            <th>Beanspruchung</th>
+            <th>Schraube</th>
+            <th>Klasse</th>
+            <th>n</th>
+            <th>Scherfugen</th>
+            <th>t Blech / Stab [mm]</th>
+            <th>e₁ / e₂ / p₁ / p₂ [mm]</th>
+            <th>Naht a × ℓ [mm]</th>
+            <th>maßgebend</th>
+            <th>Ausnutzung</th>
+            <th>Blatt</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="anschlussBody"></tbody>
+      </table>
+      <div class="empty-state" id="anschlussEmpty">Noch kein Anschluss – Stab wählen und „🔩 Anschluss anlegen“.</div>
+      <div class="layer-note" id="anschlussMeldungen"></div>
+    </div>
+
     <div class="result-panel-body" id="viewBestand" hidden>
       <h3 class="section-title">Bauen im Bestand: Punktwolke aus dem 3D-Laserscan</h3>
       <p class="view-note">Gelesen werden <strong>LAS</strong> (1.0 bis 1.4, Punktformate 0 bis 8),
@@ -2172,6 +2277,8 @@
   <script src="js/pointcloud.js"></script>
   <script src="js/civil.js"></script>
   <script src="js/civilplan.js"></script>
+  <script src="js/connections.js"></script>
+  <script src="js/connectionplan.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>
