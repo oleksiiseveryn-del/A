@@ -2318,6 +2318,173 @@
     return { figuren: positionsListe(stahl.concat(beton, arch), achsen), achsen };
   }
 
+  /* ======================================= Modell für IFC und Koordination */
+
+  /**
+   * Alle Bauteile in einer gemeinsamen Form: Körper als aufrechtes Prisma
+   * mit Lage und Drehung, dazu Bezeichnung, Werkstoff, Geschoss und
+   * Attribute. Aus dieser einen Liste entstehen der IFC-Export, die
+   * Kollisionsprüfung und die Attributauswertung – so beschreiben alle drei
+   * dasselbe Modell.
+   *
+   * Die Lage bezieht sich auf die Mitte des Körpers im Grundriss und auf
+   * seine Unterkante in der Höhe; die Drehung ist der Winkel der Längsachse
+   * gegen die x-Achse in Grad.
+   */
+  function modellBauteile() {
+    const raum = arbeitsraumWert();
+    const liste = [];
+
+    // ---- Betonbauteile
+    model.beton.forEach((element) => {
+      const geo = betonGeometrie(element, raum);
+      const typ = BETONTEILTYPEN[element.kind];
+      const p1 = element.p1, p2 = element.p2;
+      const koten = hoehenkoten(element, geo);
+      let koerper, lage;
+
+      if (typ.form === "linie" && p2) {
+        const dx = p2.x - p1.x, dz = p2.z - p1.z;
+        const laenge = Math.hypot(dx, dz) || 0.01;
+        const drehung = (Math.atan2(dz, dx) * 180) / Math.PI;
+        if (element.kind === "treppe" && geo.treppe) {
+          // Treppe: Laufkörper vom Antritt aus in Laufrichtung
+          const t = geo.treppe;
+          const rad = (drehung * Math.PI) / 180;
+          koerper = { art: "rechteck", laenge: t.lauflaenge, breite: t.laufbreite, hoehe: t.geschosshoehe };
+          lage = {
+            x: p1.x + Math.cos(rad) * t.lauflaenge / 2 - Math.sin(rad) * t.laufbreite / 2,
+            y: p1.z + Math.sin(rad) * t.lauflaenge / 2 + Math.cos(rad) * t.laufbreite / 2,
+            z: koten.uk, drehung,
+          };
+        } else {
+          const dicke = element.kind === "streifenfundament" ? geo.breite : geo.dicke;
+          const hoehe = element.kind === "streifenfundament" ? geo.dicke : geo.hoehe;
+          koerper = { art: "rechteck", laenge, breite: dicke, hoehe };
+          lage = { x: (p1.x + p2.x) / 2, y: (p1.z + p2.z) / 2, z: koten.uk, drehung };
+        }
+      } else if (typ.form === "flaeche" && p2) {
+        koerper = { art: "rechteck", laenge: geo.laenge, breite: geo.breite, hoehe: geo.dicke };
+        lage = { x: (p1.x + p2.x) / 2, y: (p1.z + p2.z) / 2, z: koten.uk, drehung: 0 };
+      } else if (typ.rund) {
+        koerper = { art: "kreis", durchmesser: geo.laenge, hoehe: geo.hoehe };
+        lage = { x: p1.x, y: p1.z, z: koten.uk, drehung: 0 };
+      } else {
+        koerper = { art: "rechteck", laenge: geo.laenge, breite: geo.breite, hoehe: geo.hoehe };
+        lage = { x: p1.x, y: p1.z, z: koten.uk, drehung: 0 };
+      }
+
+      liste.push({
+        id: `B${element.id}`, bezeichnung: betonBezeichnung(element), kind: element.kind,
+        kategorie: "Beton", typName: typ.name, koerper, lage,
+        werkstoff: `Beton ${element.guete}`, geschoss: null,
+        attribute: bauteilAttribute(element), element,
+        menge: `${(geo.volumen * Math.max(1, element.anzahl || 1)).toFixed(2)} m³`,
+      });
+    });
+
+    // ---- Architektur-Bauteile
+    model.elements.forEach((element) => {
+      const typ = BAUTEILTYPEN[element.kind];
+      const geo = bauteilGeometrie(element);
+      const p1 = element.p1, p2 = element.p2;
+      let koerper, lage;
+
+      if (typ.form === "linie" && p2) {
+        const dx = p2.x - p1.x, dz = p2.z - p1.z;
+        const laenge = Math.hypot(dx, dz) || 0.01;
+        koerper = { art: "rechteck", laenge, breite: geo.dicke, hoehe: geo.hoehe };
+        lage = {
+          x: (p1.x + p2.x) / 2, y: (p1.z + p2.z) / 2,
+          z: typ.unterGelaende ? p1.y - geo.hoehe : p1.y,
+          drehung: (Math.atan2(dz, dx) * 180) / Math.PI,
+        };
+      } else if (typ.form === "flaeche" && p2) {
+        koerper = { art: "rechteck", laenge: geo.laenge, breite: geo.breite, hoehe: geo.dicke };
+        lage = { x: (p1.x + p2.x) / 2, y: (p1.z + p2.z) / 2, z: p1.y, drehung: 0 };
+      } else {
+        koerper = { art: "rechteck", laenge: geo.laenge, breite: geo.breite, hoehe: geo.dicke };
+        lage = { x: p1.x, y: p1.z, z: p1.y - geo.dicke, drehung: 0 };
+      }
+
+      const stoff = (element.layers || [])[0];
+      liste.push({
+        id: `A${element.id}`, bezeichnung: bauteilBezeichnung(element), kind: element.kind,
+        kategorie: "Architektur", typName: typ.name, koerper, lage,
+        werkstoff: stoff && BAUSTOFFE[stoff.material] ? BAUSTOFFE[stoff.material].name : typ.name,
+        geschoss: null, attribute: bauteilAttribute(element), element,
+        menge: `${geo.flaeche.toFixed(2)} m²`,
+      });
+    });
+
+    // ---- Stahlbau: Stäbe als Träger mit dem Umriss ihres Profils
+    model.members.forEach((member) => {
+      const a = model.nodes[member.a], b = model.nodes[member.b];
+      if (!a || !b) return;
+      const design = designMember(member);
+      // Querschnittsmaße aus der Profiltabelle: sie bestimmen den Körper,
+      // mit dem der Stab in IFC und in der Kollisionsprüfung erscheint
+      const tabelle = STEEL_DB[design.family];
+      const profil = (tabelle && tabelle.find((x) => design.profileName.indexOf(x.name) === 0)) || {};
+      const laenge = memberLength(member);
+      const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
+      const hProfil = (profil.h || 100) / 1000;
+      const bProfil = (profil.b || 100) / 1000;
+      // Der Stab kann schräg oder lotrecht stehen. Für die Kollisionsprüfung
+      // zählt seine wirkliche Ausdehnung: im Grundriss die waagerechte
+      // Projektion, in der Höhe der Bereich zwischen beiden Knoten – jeweils
+      // mindestens so groß wie der Querschnitt.
+      const grundriss = Math.hypot(dx, dz);
+      liste.push({
+        id: `S${member.id}`, bezeichnung: memberLabel(member), kind: "stahlstab",
+        kategorie: "Stahlbau", typName: member.type,
+        koerper: {
+          art: "rechteck",
+          laenge: Math.max(grundriss, bProfil),
+          breite: bProfil,
+          hoehe: Math.max(Math.abs(dy), hProfil),
+          // Für IFC wird das Profil entlang der Stabachse ausgetragen;
+          // die Richtung steht im Koordinatensystem der IFC-Datei (x, z, y)
+          achse: { x: dx / laenge, y: dz / laenge, z: dy / laenge },
+          achslaenge: laenge,
+        },
+        lage: {
+          x: (a.x + b.x) / 2, y: (a.z + b.z) / 2,
+          z: Math.min(a.y, b.y) - (Math.abs(dy) < hProfil ? hProfil / 2 : 0),
+          drehung: (Math.atan2(dz, dx) * 180) / Math.PI,
+        },
+        werkstoff: `Stahl ${document.getElementById("steelGradeGlobal").value}`,
+        // Die Knoten des Stabes: zwei Stäbe mit gemeinsamem Knoten sind für
+        // die Kollisionsprüfung ein Anschluss
+        knoten: [member.a, member.b],
+        geschoss: null, attribute: bauteilAttribute(member), element: member,
+        menge: `${design.totalWeight.toFixed(1)} kg`,
+      });
+    });
+
+    // ---- Geschosse aus den Höhenkoten ableiten
+    const koten = Array.from(new Set(liste.map((b) => Math.round(b.lage.z * 100) / 100)))
+      .sort((x, y) => x - y);
+    const geschosse = koten.length
+      ? koten.map((k, i) => ({ name: geschossName(k, i, koten.length), kote: k }))
+      : [{ name: "Erdgeschoss", kote: 0 }];
+    liste.forEach((b) => {
+      const k = Math.round(b.lage.z * 100) / 100;
+      const g = geschosse.find((x) => Math.abs(x.kote - k) < 0.005) || geschosse[0];
+      b.geschoss = g.name;
+    });
+
+    return { bauteile: liste, geschosse };
+  }
+
+  /** Geschossbezeichnung aus der Höhenkote. */
+  function geschossName(kote, index, anzahl) {
+    if (Math.abs(kote) < 0.005) return "Erdgeschoss";
+    if (kote < 0) return `${Math.round(Math.abs(kote) / 3) || 1}. Untergeschoss (${koteText(kote)})`;
+    void index; void anzahl;
+    return `${Math.max(1, Math.round(kote / 3))}. Obergeschoss (${koteText(kote)})`;
+  }
+
   function renderPositionsTable() {
     const body = document.getElementById("positionsBody");
     const empty = document.getElementById("positionsEmpty");
@@ -2642,6 +2809,7 @@
     beton: { button: document.getElementById("tabBeton"), view: document.getElementById("viewBeton") },
     positionen: { button: document.getElementById("tabPositionen"), view: document.getElementById("viewPositionen") },
     baustelle: { button: document.getElementById("tabBaustelle"), view: document.getElementById("viewBaustelle") },
+    koordination: { button: document.getElementById("tabKoordination"), view: document.getElementById("viewKoordination") },
     cutlist: { button: document.getElementById("tabCutList"), view: document.getElementById("viewCutList") },
   };
 
@@ -2655,6 +2823,7 @@
     if (which === "beton") renderBetonTable();
     if (which === "positionen") renderPositionsTable();
     if (which === "baustelle") renderBaustelle();
+    if (which === "koordination") renderKoordination();
     if (which === "cutlist") renderCutList();
     if (which === "model") { result.resize(); renderModel(); }
   }
@@ -2715,6 +2884,7 @@
     if (!TABS.beton.view.hidden) renderBetonTable();
     if (!TABS.positionen.view.hidden) renderPositionsTable();
     if (!TABS.baustelle.view.hidden) renderBaustelle();
+    if (!TABS.koordination.view.hidden) renderKoordination();
     if (!TABS.cutlist.view.hidden) renderCutList();
   }
 
@@ -3165,6 +3335,183 @@
     renderAufmass();
     renderBautagebuch();
   }
+
+  /* ================================== Koordination: Attribute, Kollision, IFC */
+
+  let letzteKollision = null;   // Ergebnis der letzten Prüfung
+
+  /** Attribut eines Bauteils setzen; die Bauteile liegen in drei Sammlungen. */
+  function setzeAttribut(id, feld, wert) {
+    const art = id[0];
+    const nummer = parseInt(id.slice(1), 10);
+    const element = art === "B" ? model.beton.get(nummer)
+      : art === "A" ? model.elements.get(nummer)
+        : model.members.get(nummer);
+    if (!element) return;
+    element.attribute = Object.assign({}, bauteilAttribute(element), { [feld]: wert });
+    renderKoordination();
+  }
+
+  /** Fehlende Attribute nach Bauteilart vorbelegen. */
+  function attributeVorbelegen() {
+    const { bauteile } = modellBauteile();
+    if (!bauteile.length) { setStatus("Keine Bauteile vorhanden.", "error"); return; }
+    let gesetzt = 0;
+    bauteile.forEach((b) => {
+      const vorher = b.element.attribute || {};
+      const voll = bauteilAttribute(b.element);
+      // bauteilAttribute() legt die Vorgabe der Bauteilart über die leeren
+      // Felder; sie wird hier festgeschrieben, damit sie in der Datei steht
+      const neu = {};
+      Object.keys(voll).forEach((k) => {
+        if (vorher[k] === undefined && voll[k] !== "" && voll[k] !== false) { neu[k] = voll[k]; gesetzt += 1; }
+      });
+      if (Object.keys(neu).length) b.element.attribute = Object.assign({}, voll, vorher, neu);
+    });
+    // Was nach dem Vorbelegen noch offen ist, muss der Anwender festlegen
+    const nachher = attributAuswertung(modellBauteile().bauteile);
+    const offen = [];
+    if (nachher.ohneFeuer) offen.push(`${nachher.ohneFeuer} ohne Feuerwiderstand`);
+    if (nachher.ohneGewerk) offen.push(`${nachher.ohneGewerk} ohne Gewerk`);
+    setStatus(`${gesetzt} Attribute nach Bauteilart festgeschrieben.`
+      + (offen.length ? ` Noch offen: ${offen.join(", ")} – diese Festlegungen trifft die Planung.` : "")
+      + " Feuerwiderstand und Baustoffklasse sind Vorgaben und im Brandschutznachweis zu bestätigen.",
+    offen.length ? "info" : "ok");
+    renderKoordination();
+  }
+
+  function renderKoordination() {
+    const { bauteile } = modellBauteile();
+    document.getElementById("attributEmpty").hidden = bauteile.length > 0;
+
+    // ---- Attributtabelle
+    const body = document.getElementById("attributBody");
+    body.innerHTML = "";
+    bauteile.forEach((b) => {
+      const a = b.attribute;
+      const wahl = (feld, karte, wert, namen) => `
+        <select data-attr="${b.id}" data-feld="${feld}">
+          ${Object.keys(karte).map((k) =>
+            `<option value="${k}" ${k === (wert || "") ? "selected" : ""}>${namen(k)}</option>`).join("")}
+        </select>`;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${b.bezeichnung}</td>
+        <td>${b.kategorie}</td>
+        <td>${b.typName}</td>
+        <td>${b.menge}</td>
+        <td>${wahl("feuer", FEUERWIDERSTAND, a.feuer, (k) => FEUERWIDERSTAND[k].name)}
+          <div class="layer-note">${feuerText(a.feuer)}</div></td>
+        <td>${wahl("baustoff", BAUSTOFFKLASSEN, a.baustoff, (k) => BAUSTOFFKLASSEN[k].name)}
+          <div class="layer-note">${baustoffText(a.baustoff)}</div></td>
+        <td>${wahl("gewerk", GEWERKE, a.gewerk, (k) => GEWERKE[k])}</td>
+        <td><input type="text" data-attr="${b.id}" data-feld="abschnitt" value="${a.abschnitt || ""}" placeholder="BA 1"></td>
+        <td><input type="checkbox" data-attr="${b.id}" data-feld="tragend" ${a.tragend ? "checked" : ""}></td>
+        <td><input type="checkbox" data-attr="${b.id}" data-feld="aussen" ${a.aussen ? "checked" : ""}></td>
+        <td><input type="text" data-attr="${b.id}" data-feld="bemerkung" value="${a.bemerkung || ""}"></td>`;
+      body.appendChild(tr);
+    });
+
+    const aus = attributAuswertung(bauteile);
+    const kennzahl = (label, wert, warnung) =>
+      `<div class="stat"><span class="label">${label}</span>`
+      + `<span class="value${warnung ? " warnwert" : ""}">${wert}</span></div>`;
+    document.getElementById("attributKennzahlen").innerHTML = bauteile.length
+      ? kennzahl("Bauteile", aus.gesamt)
+        + kennzahl("ohne Feuerwiderstand", aus.ohneFeuer, aus.ohneFeuer > 0)
+        + kennzahl("ohne Gewerk", aus.ohneGewerk, aus.ohneGewerk > 0)
+        + aus.jeFeuer.filter((f) => f.schluessel).map((f) => kennzahl(f.name.split(" – ")[0], f.anzahl)).join("")
+      : "";
+
+    // ---- Kollisionsbefunde
+    const kBody = document.getElementById("kollisionBody");
+    kBody.innerHTML = "";
+    document.getElementById("kollisionEmpty").hidden = !!letzteKollision;
+    if (letzteKollision) {
+      const m = (w) => w.toFixed(3).replace(".", ",");
+      letzteKollision.befunde.forEach((f) => {
+        const marke = f.art === "durchdringung" ? '<span class="cut-warning">Durchdringung</span>'
+          : f.art === "anschluss" ? '<span class="anschluss-marke">Anschluss</span>'
+            : '<span class="beruehrung-marke">Berührung</span>';
+        const tr = document.createElement("tr");
+        tr.className = f.art === "durchdringung" ? "durchdringung" : "";
+        tr.innerHTML = `
+          <td>${marke}</td>
+          <td>${f.a.bezeichnung}<div class="layer-note">${f.a.typName}</div></td>
+          <td>${f.b.bezeichnung}<div class="layer-note">${f.b.typName}</div></td>
+          <td>${kollisionText(f)}</td>
+          <td>${m(f.tiefeEben)}</td>
+          <td>${m(f.tiefeLotrecht)}</td>
+          <td>${m(f.mitte.x)} / ${m(f.mitte.y)} / ${m(f.mitte.z)}</td>`;
+        kBody.appendChild(tr);
+      });
+      document.getElementById("kollisionKennzahlen").innerHTML =
+        kennzahl("geprüfte Paare", letzteKollision.geprueft)
+        + kennzahl("Durchdringungen", letzteKollision.durchdringungen, letzteKollision.durchdringungen > 0)
+        + kennzahl("konstruktive Anschlüsse", letzteKollision.anschluesse)
+        + kennzahl("Berührungen", letzteKollision.beruehrungen)
+        + kennzahl("Toleranz", `${letzteKollision.toleranz.toFixed(3).replace(".", ",")} m`);
+    } else {
+      document.getElementById("kollisionKennzahlen").innerHTML = "";
+    }
+  }
+
+  document.getElementById("viewKoordination").addEventListener("change", (e) => {
+    const ziel = e.target;
+    if (!ziel.dataset.attr) return;
+    const wert = ziel.type === "checkbox" ? ziel.checked : ziel.value;
+    setzeAttribut(ziel.dataset.attr, ziel.dataset.feld, wert);
+  });
+
+  document.getElementById("btnAttributeAlle").addEventListener("click", attributeVorbelegen);
+
+  document.getElementById("btnKollision").addEventListener("click", () => {
+    const { bauteile } = modellBauteile();
+    if (bauteile.length < 2) { setStatus("Für eine Prüfung sind mindestens zwei Bauteile nötig.", "error"); return; }
+    const t = parseFloat(document.getElementById("kollisionToleranz").value);
+    letzteKollision = kollisionsPruefung(bauteile, { toleranz: Number.isFinite(t) && t >= 0 ? t : 0.01 });
+    renderKoordination();
+    setStatus(`${letzteKollision.geprueft} Bauteilpaare geprüft · `
+      + `${letzteKollision.durchdringungen} Durchdringung${letzteKollision.durchdringungen === 1 ? "" : "en"}, `
+      + `${letzteKollision.anschluesse} konstruktive Anschlüsse, ${letzteKollision.beruehrungen} Berührungen. `
+      + "Aussparungen mindern den Körper nicht.",
+    letzteKollision.durchdringungen ? "error" : "ok");
+  });
+
+  document.getElementById("btnKollisionCsv").addEventListener("click", () => {
+    if (!letzteKollision) { setStatus("Zuerst die Kollisionsprüfung ausführen.", "error"); return; }
+    const rows = [["Kollisionsprüfung – " + (document.getElementById("projectName").value || "Projekt")]];
+    rows.push([`${letzteKollision.geprueft} Paare geprüft`,
+      `${letzteKollision.durchdringungen} Durchdringungen`,
+      `${letzteKollision.anschluesse} Anschlüsse`,
+      `${letzteKollision.beruehrungen} Berührungen`,
+      `Toleranz ${letzteKollision.toleranz.toFixed(3)} m`]);
+    rows.push([]);
+    rows.push(["Art", "Bauteil A", "Typ A", "Bauteil B", "Typ B", "Befund",
+      "Überdeckung Grundriss [m]", "Höhenschnitt [m]", "x [m]", "y [m]", "z [m]"]);
+    letzteKollision.befunde.forEach((f) => {
+      rows.push([f.art, f.a.bezeichnung, f.a.typName, f.b.bezeichnung, f.b.typName,
+        kollisionText(f), f.tiefeEben.toFixed(3), f.tiefeLotrecht.toFixed(3),
+        f.mitte.x.toFixed(3), f.mitte.y.toFixed(3), f.mitte.z.toFixed(3)]);
+    });
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Kollisionen_${name}.csv`, "\ufeff" + zuCsv(rows), "text/csv;charset=utf-8;");
+  });
+
+  document.getElementById("btnIfcExport").addEventListener("click", () => {
+    const { bauteile, geschosse } = modellBauteile();
+    if (!bauteile.length) { setStatus("Keine Bauteile vorhanden.", "error"); return; }
+    const inhalt = ifcExport({ projekt: projektKopf(), bauteile, geschosse });
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`${name}.ifc`, inhalt, "application/x-step");
+    const eintraege = (inhalt.match(/^#\d+= /gm) || []).length;
+    document.getElementById("ifcStand").textContent =
+      `Zuletzt ausgegeben: ${bauteile.length} Bauteile in ${geschosse.length} Geschoss`
+      + `${geschosse.length === 1 ? "" : "en"} · ${eintraege} IFC-Einträge · `
+      + `${(inhalt.length / 1024).toFixed(0)} kB · Schema IFC4 (ISO 16739).`;
+    setStatus(`IFC4 ausgegeben: ${bauteile.length} Bauteile, ${eintraege} Einträge. `
+      + "Bewehrung, Räume und Achsraster sind nicht enthalten.", "ok");
+  });
 
   /* ------------------------------------------- Bedienung der Baustelle */
 

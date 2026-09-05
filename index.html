@@ -84,6 +84,7 @@
     <button class="ribbon-tab" data-band="beton" role="tab">Beton</button>
     <button class="ribbon-tab" data-band="plaene" role="tab">Pläne</button>
     <button class="ribbon-tab" data-band="baustelle" role="tab">Baustelle</button>
+    <button class="ribbon-tab" data-band="koordination" role="tab">Koordination</button>
     <button class="ribbon-tab" data-band="auswertung" role="tab">Auswertung</button>
 
     <div class="ribbon-schnellzugriff" title="Gilt für jedes Werkzeug, das etwas auf der Arbeitsebene setzt">
@@ -364,6 +365,37 @@
     </div>
   </div>
 
+  <!-- ============================================== Koordination -->
+  <div class="ribbon-band" data-band="koordination" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnKollision" data-reiter="koordination" title="Alle Bauteile paarweise auf Durchdringung prüfen">
+          <span class="ribbon-icon">⚠</span><span class="ribbon-label">Kollisionen<br>prüfen</span></button>
+        <button class="ribbon-btn" data-befehl="btnKollisionCsv" data-reiter="koordination" title="Befunde als CSV für Excel">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Befunde<br>(CSV)</span></button>
+      </div>
+      <div class="ribbon-caption">Kollisionsprüfung</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnIfcExport" data-reiter="koordination" title="Modell als IFC4 für andere Fachplanungen und für Lumion oder Twinmotion">
+          <span class="ribbon-icon">🔗</span><span class="ribbon-label">IFC4<br>ausgeben</span></button>
+      </div>
+      <div class="ribbon-caption">OpenBIM</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnAttributeAlle" data-reiter="koordination" title="Fehlende Attribute nach Bauteilart vorbelegen">
+          <span class="ribbon-icon">🏷</span><span class="ribbon-label">Attribute<br>vorbelegen</span></button>
+        <button class="ribbon-btn" data-befehl="tabKoordination" title="Bauteilattribute und Befunde zeigen">
+          <span class="ribbon-icon">📋</span><span class="ribbon-label">Attributliste</span></button>
+      </div>
+      <div class="ribbon-caption">Bauteilattribute</div>
+    </div>
+  </div>
+
   <!-- ================================================ Auswertung -->
   <div class="ribbon-band" data-band="auswertung" hidden>
     <div class="ribbon-group">
@@ -414,6 +446,7 @@
         <button class="tab-btn" id="tabBeton">Beton</button>
         <button class="tab-btn" id="tabPositionen">Positionen</button>
         <button class="tab-btn" id="tabBaustelle">Baustelle</button>
+        <button class="tab-btn" id="tabKoordination">Koordination</button>
         <button class="tab-btn" id="tabCutList">Stückliste</button>
       </div>
     </div>
@@ -1239,6 +1272,104 @@
       </table>
     </div>
 
+    <div class="result-panel-body" id="viewKoordination" hidden>
+
+      <h3 class="section-title">Bauteilattribute</h3>
+      <p class="view-note">Was ein Bauteil über seine Geometrie hinaus weiß: Feuerwiderstand nach
+        <strong>DIN 4102-2</strong> mit der Entsprechung nach <strong>DIN EN 13501-2</strong> (R Tragfähigkeit,
+        E Raumabschluss, I Wärmedämmung), Baustoffklasse nach DIN 4102-1 bzw. DIN EN 13501-1, Gewerk nach der
+        Gliederung der VOB/C, Bauabschnitt sowie tragende Wirkung und Lage innen oder außen. Diese Attribute
+        wandern als Eigenschaftssätze in die IFC-Datei.
+        <strong>Nicht geführt wird der Nachweis selbst</strong>: Ob ein Bauteil seine Feuerwiderstandsklasse
+        erreicht, folgt aus DIN EN 1992-1-2 bzw. DIN EN 1993-1-2 oder DIN 4102-4 und ist vom Brandschutznachweis
+        zu führen. Hier wird die Anforderung festgehalten und weitergegeben.</p>
+
+      <div class="summary-bar" id="attributKennzahlen"></div>
+
+      <table class="members-table" id="attributTable">
+        <thead>
+          <tr>
+            <th>Pos</th>
+            <th>Gewerk / Kategorie</th>
+            <th>Bauteil</th>
+            <th>Menge</th>
+            <th>Feuerwiderstand</th>
+            <th>Baustoffklasse</th>
+            <th>Gewerk (VOB/C)</th>
+            <th>Bauabschnitt</th>
+            <th>tragend</th>
+            <th>außen</th>
+            <th>Bemerkung</th>
+          </tr>
+        </thead>
+        <tbody id="attributBody"></tbody>
+      </table>
+      <div class="empty-state" id="attributEmpty">Noch keine Bauteile – zuerst Stäbe, Architektur- oder Betonbauteile anlegen.</div>
+
+      <h3 class="section-title">Kollisionsprüfung</h3>
+      <p class="view-note">Alle Bauteile werden paarweise auf Durchdringung geprüft. Jedes Bauteil ist dabei ein
+        aufrechtes Prisma – im Grundriss ein gedrehtes Rechteck oder ein Kreis, dazu ein Höhenbereich. Die
+        Überdeckung im Grundriss folgt aus dem Trennachsenverfahren, die lotrechte aus dem Schnitt der
+        Höhenbereiche; für aufrechte Bauteile mit gerader Kante ist das Ergebnis genau.
+        Paare, die konstruktiv aufeinandertreffen (Wand auf Fundament, Decke auf Stütze), werden als
+        <strong>Anschluss</strong> geführt und nicht als Fehler.
+        <strong>Nicht enthalten</strong>: Aussparungen und Öffnungen mindern den Körper nicht – eine Leitung durch
+        eine vorgesehene Wandöffnung erschiene daher als Durchdringung. Gekrümmte und geneigte Bauteile werden über
+        ihr aufrechtes Prisma angenähert.</p>
+
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="kollisionToleranz">Toleranz [m]</label>
+          <input type="number" id="kollisionToleranz" step="0.005" min="0" value="0.010"
+                 title="Bis zu dieser Eindringtiefe gilt eine Überschneidung als Berührung, darüber als Durchdringung">
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnKollision" title="Alle Bauteile paarweise prüfen">⚠ Kollisionen prüfen</button>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn" id="btnKollisionCsv" title="Befunde als CSV für Excel">⬇ Befunde (CSV)</button>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn" id="btnAttributeAlle" title="Fehlende Attribute nach Bauteilart vorbelegen">🏷 Attribute vorbelegen</button>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnIfcExport" title="Modell als IFC4 ausgeben">🔗 IFC4 ausgeben</button>
+        </div>
+      </div>
+
+      <div class="summary-bar" id="kollisionKennzahlen"></div>
+      <table class="members-table" id="kollisionTable">
+        <thead>
+          <tr>
+            <th>Art</th>
+            <th>Bauteil A</th>
+            <th>Bauteil B</th>
+            <th>Befund</th>
+            <th>Überdeckung Grundriss [m]</th>
+            <th>Höhenschnitt [m]</th>
+            <th>Lage x / y / z [m]</th>
+          </tr>
+        </thead>
+        <tbody id="kollisionBody"></tbody>
+      </table>
+      <div class="empty-state" id="kollisionEmpty">Noch nicht geprüft – „⚠ Kollisionen prüfen“ ausführen.</div>
+
+      <h3 class="section-title">OpenBIM: Datenaustausch</h3>
+      <p class="view-note">Der <strong>IFC-Export</strong> schreibt das Modell nach <strong>ISO 16739 (IFC4)</strong>
+        als STEP-Datei: Projekt, Grundstück, Gebäude und Geschosse, darin die Bauteile mit Körper, Werkstoff und
+        Eigenschaftssätzen (Pset_WallCommon, Pset_SlabCommon und weitere) einschließlich FireRating, LoadBearing
+        und IsExternal. Damit lässt sich das Modell in Prüfprogramme, in die Fachplanungen der Tragwerks- und
+        Gebäudetechnik sowie in Darstellungsprogramme wie Lumion oder Twinmotion einlesen.
+        <strong>Nicht enthalten</strong>: Bewehrung als IfcReinforcingBar, Räume als IfcSpace, Achsraster als
+        IfcGrid, Verschneidungen der Bauteile untereinander und die Mengen nach Base Quantities. Die Geometrie ist
+        die Rohbaugeometrie der Achsen und Regelabmessungen, nicht die verschnittene Ausführungsgeometrie.</p>
+      <div class="layer-note" id="ifcStand"></div>
+    </div>
+
     <div class="result-panel-body" id="viewCutList" hidden>
       <div class="cutlist-controls">
         <div class="field">
@@ -1572,6 +1703,9 @@
 <script src="js/slabplan.js"></script>
 <script src="js/measure.js"></script>
 <script src="js/sitelog.js"></script>
+<script src="js/attributes.js"></script>
+<script src="js/ifc.js"></script>
+<script src="js/clash.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

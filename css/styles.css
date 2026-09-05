@@ -1471,3 +1471,16 @@ header.app-header {
     overflow-x: auto;
   }
 }
+
+/* Koordination: Attribute und Kollisionsbefunde */
+#attributTable select { max-width: 210px; }
+#attributTable input[type="text"] { min-width: 110px; }
+#attributTable td:nth-child(9), #attributTable td:nth-child(10) { text-align: center; }
+#attributTable td:nth-child(4) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
+#kollisionTable td:nth-child(n+5) { text-align: right; white-space: nowrap; font-family: var(--font-data); }
+#kollisionTable tr.durchdringung td:first-child { border-left: 3px solid var(--err); }
+.anschluss-marke { color: var(--ok); font-weight: 600; white-space: nowrap; }
+.beruehrung-marke { color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+.summary-bar .value.warnwert { color: var(--err); }
+#attributKennzahlen, #kollisionKennzahlen { border-top: none; padding-left: 0; background: none; }
+#ifcStand { margin: 6px 0; font-family: var(--font-data); }

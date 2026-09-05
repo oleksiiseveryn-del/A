@@ -40,6 +40,7 @@ schieben; Bedienelemente sind mindestens 44 pt hoch und Eingabefelder mindestens
 | Biegedaten für die Biegerei | JSON für `python/hsd_bewehrung` |
 | Projektdatei | JSON mit dem vollständigen Modell |
 | Aufmaß und Bautagebuch | CSV sowie Aufmaßblatt und Tagesbericht als SVG im Blatt A4 quer |
+| Koordinationsmodell | IFC4 nach ISO 16739 (OpenBIM) mit Eigenschaftssätzen; Kollisionsbefunde als CSV |
 | Papier und PDF | über *Drucken*; aus dem Blattfenster kommt das Blatt allein auf das Papier |
 
 **↗ Weitergeben** übergibt die zuletzt erzeugte Datei an das Systemmenü des Geräts
@@ -76,6 +77,9 @@ js/
   app.js                  Steuerung der Oberfläche
   measure.js              Aufmaß nach VOB/B § 14 mit den Regeln der VOB/C
   sitelog.js              Bautagebuch mit Tagesbericht
+  attributes.js           Bauteilattribute: Feuerwiderstand, Baustoff, Gewerk
+  clash.js                Kollisionsprüfung im Koordinationsmodell
+  ifc.js                  IFC-Export nach ISO 16739 (IFC4)
 python/                   Bewehrung und Herstellungsunterlagen (46 Prüfungen)
 desktop/                  Windows-Anwendung (Electron) – siehe desktop/README.md
 tools/
