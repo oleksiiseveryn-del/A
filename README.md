@@ -42,6 +42,7 @@ schieben; Bedienelemente sind mindestens 44 pt hoch und Eingabefelder mindestens
 | Aufmaß und Bautagebuch | CSV sowie Aufmaßblatt und Tagesbericht als SVG im Blatt A4 quer |
 | Koordinationsmodell | IFC4 nach ISO 16739 (OpenBIM) mit Eigenschaftssätzen; Kollisionsbefunde als CSV |
 | Zeichnung für CAD | DXF R12 (AC1009) als Grundriss oder räumliches Modell, in Metern oder Millimetern, Ebenen nach Bauteilart |
+| Bestandsaufnahme | Wände aus der Punktwolke als CSV mit Modell- und Scankoordinaten |
 | Papier und PDF | über *Drucken*; aus dem Blattfenster kommt das Blatt allein auf das Papier |
 
 **↗ Weitergeben** übergibt die zuletzt erzeugte Datei an das Systemmenü des Geräts
@@ -82,6 +83,7 @@ js/
   clash.js                Kollisionsprüfung im Koordinationsmodell
   ifc.js                  IFC-Export nach ISO 16739 (IFC4)
   dxf.js                  DXF-Export R12 für AutoCAD, Allplan und andere CAD
+  pointcloud.js           Punktwolken lesen (LAS, PLY, PTS, XYZ), Schnitt, Wanderkennung
 python/                   Bewehrung und Herstellungsunterlagen (46 Prüfungen)
 desktop/                  Windows-Anwendung (Electron) – siehe desktop/README.md
 tools/
@@ -90,6 +92,26 @@ tools/
   icons.py                erzeugt die App-Symbole und icon.ico
   wine-rcedit64.sh        Behelf für den Windows-Bau auf Linux
 ```
+
+## Bauen im Bestand
+
+Das Register **Bestand** liest die Punktwolke des 3D-Laserscans und macht daraus
+eine Bestandsaufnahme:
+
+| Schritt | Was geschieht |
+|---|---|
+| Scan laden | **LAS** 1.0–1.4 (Punktformate 0–8), **PLY** (ascii, binary little endian), **PTS**, **XYZ/ASC/TXT/CSV**. Beim Einlesen wird ein **Bezugspunkt** abgezogen und mitgeführt – er ist der Projektnullpunkt und gehört nach DIN 18710-1 in jede Weitergabe |
+| Rasterfilter | je Würfel bleibt ein Punkt; große Wolken werden damit darstellbar, ohne dass die Form verloren geht |
+| Höhenschnitt | alle Punkte in einem Höhenband – der Grundriss des Bestands, im Skizzenfenster als Vorlage zum Darüberzeichnen |
+| Wände erkennen | Geraden über das Häufungsverfahren nach Hough, Nachführung über die Trägheitsachse, Zerlegung in Abschnitte, Paarung gegenüberliegender Flächen zu Wänden mit Achse und Dicke |
+| Wände übernehmen | die erkannten Wände werden Bauteile im Modell und laufen in Mengen, Pläne, IFC und DXF weiter |
+
+**Nicht gelesen**: LAZ (gepackt), E57 und die Hausformate der Scanner (Faro `.fls`,
+Leica `.ptx`-Projekte, Trimble `.rwp`) – diese Programme geben auf Wunsch LAS, PTS
+oder PLY aus. **Nicht erkannt**: Rundungen, im Aufriss schräge Wände, Stützen und
+Wände hinter Einbauten. Die Punktwolke wird **nicht** in der Projektdatei
+gespeichert; sie ist nach dem Öffnen neu zu laden. Das Ergebnis der Erkennung ist
+ein Vorschlag für die Bestandsaufnahme und **ersetzt das Aufmaß vor Ort nicht**.
 
 ## Geltungsbereich
 

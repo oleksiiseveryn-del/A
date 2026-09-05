@@ -712,3 +712,59 @@ function buildWallWithOpenings(element, geo, material, openings, laenge, hoehe, 
   gruppe.applyMatrix4(matrix);
   return gruppe;
 }
+
+/**
+ * Punktwolke als Punktobjekt.
+ *
+ * Die Koordinaten liegen bereits im Modellsystem und relativ zum
+ * Bezugspunkt der Wolke; sie werden unverändert übernommen. Farben werden
+ * als Byte-Werte übergeben und von der Grafik selbst auf 0…1 gebracht.
+ * Fehlt die Farbe, wird die Intensität als Grauwert dargestellt; fehlt
+ * auch sie, bleibt die Wolke einfarbig.
+ *
+ * @param {Object} wolke - { anzahl, xyz: Float32Array, farbe, intensitaet }
+ * @param {number} groesse - Punktgröße in Metern
+ */
+function buildPunktwolke(wolke, groesse) {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(wolke.xyz, 3));
+
+  let farben = null;
+  if (wolke.farbe) {
+    farben = new THREE.BufferAttribute(wolke.farbe, 3, true);
+  } else if (wolke.intensitaet) {
+    let max = 1;
+    for (let i = 0; i < wolke.anzahl; i++) if (wolke.intensitaet[i] > max) max = wolke.intensitaet[i];
+    const grau = new Uint8Array(wolke.anzahl * 3);
+    for (let i = 0; i < wolke.anzahl; i++) {
+      const w = Math.round((wolke.intensitaet[i] / max) * 200) + 40;
+      grau[i * 3] = w; grau[i * 3 + 1] = w; grau[i * 3 + 2] = w;
+    }
+    farben = new THREE.BufferAttribute(grau, 3, true);
+  }
+  if (farben) geo.setAttribute("color", farben);
+
+  const material = new THREE.PointsMaterial({
+    size: groesse || 0.02,
+    sizeAttenuation: true,
+    vertexColors: !!farben,
+    color: farben ? 0xffffff : 0x9fd4f0,
+  });
+  return new THREE.Points(geo, material);
+}
+
+/**
+ * Punkte eines waagerechten Schnitts, flach in einer Höhe.
+ * Sie dienen als Vorlage im Grundrissfenster.
+ */
+function buildSchnittPunkte(punkte, kote, farbe, groesse) {
+  const xyz = new Float32Array(punkte.length * 3);
+  punkte.forEach((p, i) => {
+    xyz[i * 3] = p.x; xyz[i * 3 + 1] = kote; xyz[i * 3 + 2] = p.z;
+  });
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(xyz, 3));
+  return new THREE.Points(geo, new THREE.PointsMaterial({
+    size: groesse || 0.04, sizeAttenuation: true, color: farbe === undefined ? 0xffc46b : farbe,
+  }));
+}

@@ -84,6 +84,7 @@
     <button class="ribbon-tab" data-band="beton" role="tab">Beton</button>
     <button class="ribbon-tab" data-band="plaene" role="tab">Pläne</button>
     <button class="ribbon-tab" data-band="baustelle" role="tab">Baustelle</button>
+    <button class="ribbon-tab" data-band="bestand" role="tab">Bestand</button>
     <button class="ribbon-tab" data-band="koordination" role="tab">Koordination</button>
     <button class="ribbon-tab" data-band="auswertung" role="tab">Auswertung</button>
 
@@ -366,6 +367,51 @@
   </div>
 
   <!-- ============================================== Koordination -->
+  <!-- ================================================ Bestand (Punktwolke) -->
+  <div class="ribbon-band" data-band="bestand" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnScanLaden" data-reiter="bestand" title="Punktwolke aus dem Laserscan laden: LAS, PLY, PTS oder XYZ">
+          <span class="ribbon-icon">☁</span><span class="ribbon-label">Scan<br>laden</span></button>
+        <button class="ribbon-btn" data-befehl="btnScanLoeschen" data-reiter="bestand" title="Punktwolke aus dem Modell entfernen">
+          <span class="ribbon-icon">🗑</span><span class="ribbon-label">Scan<br>entfernen</span></button>
+      </div>
+      <div class="ribbon-caption">Punktwolke</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnScanSchnitt" data-reiter="bestand" title="Waagerechten Schnitt durch die Wolke legen – der Grundriss des Bestands">
+          <span class="ribbon-icon">▤</span><span class="ribbon-label">Höhen-<br>schnitt</span></button>
+        <label class="ribbon-feld"><span>Kote [m]</span>
+          <input type="number" id="scanKote" step="0.05" value="1.20" title="Höhe des Schnitts über dem tiefsten Punkt der Wolke"></label>
+        <label class="ribbon-feld"><span>Band [m]</span>
+          <input type="number" id="scanBand" step="0.01" min="0.01" value="0.06" title="Dicke des Höhenbandes"></label>
+      </div>
+      <div class="ribbon-caption">Schnitt</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnScanWaende" data-reiter="bestand" title="Wände im Schnitt erkennen: parallele Flächenpaare">
+          <span class="ribbon-icon">🧱</span><span class="ribbon-label">Wände<br>erkennen</span></button>
+        <button class="ribbon-btn" data-befehl="btnScanUebernehmen" data-reiter="bestand" title="Erkannte Wände als Bauteile in das Modell übernehmen">
+          <span class="ribbon-icon">➕</span><span class="ribbon-label">Wände<br>übernehmen</span></button>
+        <button class="ribbon-btn" data-befehl="btnScanCsv" data-reiter="bestand" title="Erkannte Wände als CSV für Excel">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Aufmaß<br>(CSV)</span></button>
+      </div>
+      <div class="ribbon-caption">Bestandsaufnahme</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="tabBestand" title="Kennwerte, Schnitt und erkannte Wände zeigen">
+          <span class="ribbon-icon">📋</span><span class="ribbon-label">Bestandsliste</span></button>
+      </div>
+      <div class="ribbon-caption">Ansicht</div>
+    </div>
+  </div>
+
   <div class="ribbon-band" data-band="koordination" hidden>
     <div class="ribbon-group">
       <div class="ribbon-items">
@@ -448,6 +494,7 @@
         <button class="tab-btn" id="tabBeton">Beton</button>
         <button class="tab-btn" id="tabPositionen">Positionen</button>
         <button class="tab-btn" id="tabBaustelle">Baustelle</button>
+        <button class="tab-btn" id="tabBestand">Bestand</button>
         <button class="tab-btn" id="tabKoordination">Koordination</button>
         <button class="tab-btn" id="tabCutList">Stückliste</button>
       </div>
@@ -1413,6 +1460,150 @@
       <div class="layer-note" id="dxfStand"></div>
     </div>
 
+    <div class="result-panel-body" id="viewBestand" hidden>
+      <h3 class="section-title">Bauen im Bestand: Punktwolke aus dem 3D-Laserscan</h3>
+      <p class="view-note">Gelesen werden <strong>LAS</strong> (1.0 bis 1.4, Punktformate 0 bis 8),
+        <strong>PLY</strong> (ascii und binary little endian), <strong>PTS</strong> und
+        <strong>XYZ/ASC/TXT/CSV</strong>. <strong>Nicht gelesen</strong> werden LAZ (gepackt), E57 und die
+        Hausformate der Scanner (Faro .fls, Leica .ptx-Projekte, Trimble .rwp) – diese Programme geben auf
+        Wunsch LAS, PTS oder PLY aus, das ist der offene Weg.
+        Ein Scan in ETRS89/UTM trägt Koordinaten um 32 565 000 / 5 935 000 m; damit rechnet keine Darstellung
+        sauber. Beim Einlesen wird deshalb ein <strong>Bezugspunkt</strong> abgezogen und mitgeführt – er ist der
+        Projektnullpunkt und gehört nach DIN 18710-1 in jede Weitergabe.
+        Die Punktwolke wird <strong>nicht</strong> in der Projektdatei gespeichert (Dateigröße); sie ist nach dem
+        Öffnen des Projekts neu zu laden.</p>
+
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="scanDatei">Scandatei</label>
+          <input type="file" id="scanDatei" accept=".las,.ply,.pts,.xyz,.asc,.txt,.csv">
+        </div>
+        <div class="field">
+          <label for="scanRaster">Rasterfilter [m]</label>
+          <input type="number" id="scanRaster" step="0.01" min="0" value="0.03"
+                 title="Je Würfel dieser Kantenlänge bleibt ein Punkt. 0 = ohne Filter. Große Wolken werden damit darstellbar.">
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnScanLaden" title="Punktwolke laden">☁ Scan laden</button>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn" id="btnScanLoeschen" title="Punktwolke entfernen">🗑 Scan entfernen</button>
+        </div>
+        <div class="field">
+          <label for="scanZeigen">Darstellung</label>
+          <label class="ribbon-schalter"><input type="checkbox" id="scanZeigen" checked>
+            <span>Wolke im Modell zeigen</span></label>
+        </div>
+      </div>
+      <div class="summary-bar" id="scanKennzahlen"></div>
+      <div class="layer-note" id="scanStand"></div>
+      <div class="empty-state" id="scanEmpty">Noch kein Scan geladen – Datei wählen und „☁ Scan laden“.</div>
+
+      <h3 class="section-title">Höhenschnitt: der Grundriss des Bestands</h3>
+      <p class="view-note">Der Schnitt nimmt alle Punkte in einem Höhenband und zeigt sie im Grundrissfenster.
+        Darauf lässt sich zeichnen: Die Werkzeuge für Wände, Betonteile und Achsen arbeiten unverändert weiter,
+        der Schnitt liegt als Vorlage darunter. Die Kote ist über dem <em>tiefsten Punkt der Wolke</em> gemessen;
+        die stärksten Höhenlagen in den Kennwerten zeigen, wo Boden und Decke liegen.</p>
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="scanKoteAnsicht">Kote über Boden [m]</label>
+          <input type="number" id="scanKoteAnsicht" step="0.05" value="1.20">
+        </div>
+        <div class="field">
+          <label for="scanBandAnsicht">Banddicke [m]</label>
+          <input type="number" id="scanBandAnsicht" step="0.01" min="0.01" value="0.06">
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnScanSchnitt" title="Schnitt legen und im Grundriss zeigen">▤ Höhenschnitt</button>
+        </div>
+      </div>
+
+      <h3 class="section-title">Wanderkennung</h3>
+      <p class="view-note">Im Schnitt werden Geraden gesucht (Häufungsverfahren nach Hough mit anschließender
+        Nachführung über die Trägheitsachse), in Abschnitte zerlegt und paarweise zu Wänden zusammengefasst:
+        Eine Wand zeigt im Schnitt <strong>zwei parallele Flächen</strong>; ihr Abstand ist die Wanddicke, die
+        Mitte die Achse. Eine Lücke größer als das eingestellte Maß (Tür, Fenster, Verdeckung) trennt zwei
+        Abschnitte. Flächen ohne Gegenstück werden als <em>einseitig erfasst</em> geführt und nicht
+        stillschweigend zur Wand gemacht.
+        <strong>Nicht erkannt</strong>: Rundungen, im Aufriss schräge Wände, Stützen (zu kurz) und Wände hinter
+        Einbauten. Das Ergebnis ist ein Vorschlag für die Bestandsaufnahme und ersetzt das Aufmaß vor Ort nicht;
+        maßgebend bleibt die Prüfung am Bauwerk.</p>
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="scanMinLaenge">kürzeste Wand [m]</label>
+          <input type="number" id="scanMinLaenge" step="0.1" min="0.2" value="1.0">
+        </div>
+        <div class="field">
+          <label for="scanLuecke">größte Lücke [m]</label>
+          <input type="number" id="scanLuecke" step="0.1" min="0.05" value="0.60"
+                 title="Türen und Fenster trennen die Wand in Abschnitte">
+        </div>
+        <div class="field">
+          <label for="scanDickeMin">Dicke von [m]</label>
+          <input type="number" id="scanDickeMin" step="0.005" min="0.01" value="0.05">
+        </div>
+        <div class="field">
+          <label for="scanDickeMax">bis [m]</label>
+          <input type="number" id="scanDickeMax" step="0.05" min="0.05" value="0.60">
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnScanWaende" title="Wände im Schnitt erkennen">🧱 Wände erkennen</button>
+        </div>
+      </div>
+
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="scanBauteilart">Übernehmen als</label>
+          <select id="scanBauteilart">
+            <option value="auto" selected>automatisch (dick = Außenwand)</option>
+            <option value="wand_aussen">Außenwand</option>
+            <option value="wand_innen">Innenwand</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="scanBaustoff">Baustoff des Bestands</label>
+          <select id="scanBaustoff"></select>
+        </div>
+        <div class="field">
+          <label for="scanHoehe">Wandhöhe [m]</label>
+          <input type="number" id="scanHoehe" step="0.05" min="0.1" value="2.75"
+                 title="Vorbelegt aus der Höhe der Wolke zwischen Boden und Decke">
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnScanUebernehmen" title="Erkannte Wände als Bauteile anlegen">➕ Wände übernehmen</button>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn" id="btnScanCsv" title="Erkannte Wände als CSV">⬇ Aufmaß (CSV)</button>
+        </div>
+      </div>
+
+      <div class="summary-bar" id="scanWandKennzahlen"></div>
+      <table class="members-table" id="scanWandTable">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Nr</th>
+            <th>Anfang x / z [m]</th>
+            <th>Ende x / z [m]</th>
+            <th>Länge [m]</th>
+            <th>Dicke [m]</th>
+            <th>Richtung [°]</th>
+            <th>Punkte</th>
+            <th>Streuung [mm]</th>
+            <th>Vorschlag</th>
+          </tr>
+        </thead>
+        <tbody id="scanWandBody"></tbody>
+      </table>
+      <div class="empty-state" id="scanWandEmpty">Noch nicht erkannt – zuerst Höhenschnitt, dann „🧱 Wände erkennen“.</div>
+    </div>
+
     <div class="result-panel-body" id="viewCutList" hidden>
       <div class="cutlist-controls">
         <div class="field">
@@ -1750,6 +1941,7 @@
 <script src="js/ifc.js"></script>
 <script src="js/clash.js"></script>
   <script src="js/dxf.js"></script>
+  <script src="js/pointcloud.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

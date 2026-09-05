@@ -11,6 +11,14 @@
   const G_ERDBESCHLEUNIGUNG = 9.81;
   const STORAGE_KEY = "hsd-stahlbau-konverter-projekt";
 
+  // Zustand der Bestandsaufnahme. Bewusst außerhalb des Modells: Ein Scan von
+  // Millionen Punkten gehört nicht in die Projektdatei. Er ist Vorlage und
+  // Prüfmittel; in das Modell geht über, was daraus abgeleitet wird.
+  let punktwolke = null;      // { voll, anzeige, statistik, raster, ms }
+  let scanSchnitt = null;     // { punkte, kote, dicke, ueber }
+  let scanWaende = null;      // Ergebnis der Wanderkennung
+  let scanAuswahl = new Set();
+
   const model = {
     nodes: [],            // [{ x, y, z }]
     members: new Map(),   // id -> { id, a, b, type, loadType, force, moment, beta, family, steelGrade }
@@ -438,6 +446,19 @@
       }
     });
 
+    // Höhenschnitt der Punktwolke als Vorlage, darauf wird gezeichnet
+    if (scanSchnitt && scanSchnitt.punkte.length) {
+      sketch.contentGroup.add(buildSchnittPunkte(scanSchnitt.punkte, scanSchnitt.kote, 0xffc46b, 0.05));
+    }
+    if (scanWaende) {
+      scanWaende.waende.forEach((w, i) => {
+        const y = scanSchnitt ? scanSchnitt.kote : 0;
+        sketch.overlayGroup.add(buildSketchMember(
+          { x: w.p1.x, y, z: w.p1.z }, { x: w.p2.x, y, z: w.p2.z },
+          scanAuswahl.has(i) ? 0x7fe0a5 : 0x9fb6c8, 0.03));
+      });
+    }
+
     // Architektur- und Betonbauteile halbtransparent, damit die Achsen sichtbar bleiben
     renderArchElements(sketch, true);
     renderBetonElements(sketch, true);
@@ -481,6 +502,11 @@
         buildProfileSolid(a, b, design.family, profile, utilizationColor(design.utilization, design.status), exaggeration)
       );
     });
+
+    // Punktwolke des Bestands unter dem Modell
+    if (punktwolke && punktwolke.anzeige.anzahl && document.getElementById("scanZeigen").checked) {
+      result.contentGroup.add(buildPunktwolke(punktwolke.anzeige, punktGroesse()));
+    }
 
     renderArchElements(result, false);
     renderBetonElements(result, false);
@@ -2819,6 +2845,7 @@
     beton: { button: document.getElementById("tabBeton"), view: document.getElementById("viewBeton") },
     positionen: { button: document.getElementById("tabPositionen"), view: document.getElementById("viewPositionen") },
     baustelle: { button: document.getElementById("tabBaustelle"), view: document.getElementById("viewBaustelle") },
+    bestand: { button: document.getElementById("tabBestand"), view: document.getElementById("viewBestand") },
     koordination: { button: document.getElementById("tabKoordination"), view: document.getElementById("viewKoordination") },
     cutlist: { button: document.getElementById("tabCutList"), view: document.getElementById("viewCutList") },
   };
@@ -2833,6 +2860,7 @@
     if (which === "beton") renderBetonTable();
     if (which === "positionen") renderPositionsTable();
     if (which === "baustelle") renderBaustelle();
+    if (which === "bestand") renderBestand();
     if (which === "koordination") renderKoordination();
     if (which === "cutlist") renderCutList();
     if (which === "model") { result.resize(); renderModel(); }
@@ -2894,6 +2922,7 @@
     if (!TABS.beton.view.hidden) renderBetonTable();
     if (!TABS.positionen.view.hidden) renderPositionsTable();
     if (!TABS.baustelle.view.hidden) renderBaustelle();
+    if (!TABS.bestand.view.hidden) renderBestand();
     if (!TABS.koordination.view.hidden) renderKoordination();
     if (!TABS.cutlist.view.hidden) renderCutList();
   }
@@ -3540,6 +3569,302 @@
     setStatus(`DXF ausgegeben: ${bericht.modus}, ${bericht.elemente} Zeichenelemente auf `
       + `${bericht.ebenen} Ebenen, Einheit ${bericht.einheit}. `
       + "Bemaßung, Schraffur und Öffnungen sind nicht enthalten.", "ok");
+  });
+
+  /* ============================== Bestand: Punktwolke aus dem Laserscan */
+
+  /** Punktgröße der Darstellung: bei dichten Wolken kleiner. */
+  function punktGroesse() {
+    const r = parseFloat(document.getElementById("scanRaster").value);
+    return Number.isFinite(r) && r > 0 ? Math.max(0.01, r * 0.8) : 0.02;
+  }
+
+  /** Baustoffliste für die Übernahme füllen. */
+  (function fuelleScanBaustoff() {
+    const wahl = document.getElementById("scanBaustoff");
+    wahl.innerHTML = Object.keys(BAUSTOFFE)
+      .map((k) => `<option value="${k}"${k === "ks_mauerwerk" ? " selected" : ""}>${BAUSTOFFE[k].name}</option>`)
+      .join("");
+  }());
+
+  function scanZahl(wert, stellen) {
+    return Number(wert).toFixed(stellen === undefined ? 2 : stellen).replace(".", ",");
+  }
+
+  function scanLaden() {
+    const eingabe = document.getElementById("scanDatei");
+    const datei = eingabe.files && eingabe.files[0];
+    if (!datei) { setStatus("Zuerst eine Scandatei wählen.", "error"); return; }
+    if (!punktwolkeFormat(datei.name)) {
+      setStatus(`„${datei.name}“ hat kein gelesenes Format. Gelesen werden LAS, PLY, PTS und XYZ; `
+        + "LAZ und E57 bitte in der Scannersoftware umsetzen.", "error");
+      return;
+    }
+    setStatus(`„${datei.name}“ wird gelesen …`, "info");
+    const leser = new FileReader();
+    leser.onload = () => {
+      try {
+        const beginn = Date.now();
+        const voll = punktwolkeLesen(datei.name, leser.result);
+        if (!voll.anzahl) throw new Error("Die Datei enthält keine Punkte.");
+        const raster = parseFloat(document.getElementById("scanRaster").value);
+        const anzeige = Number.isFinite(raster) && raster > 0
+          ? punktwolkeRasterfilter(voll, raster) : voll;
+        punktwolke = { voll, anzeige, raster, statistik: punktwolkeStatistik(voll), ms: Date.now() - beginn };
+        scanSchnitt = null; scanWaende = null; scanAuswahl = new Set();
+
+        // Wandhöhe aus der Wolke vorbelegen: Boden bis Decke
+        const h = punktwolke.statistik.hoehe;
+        if (h > 1.5 && h < 12) document.getElementById("scanHoehe").value = h.toFixed(2);
+
+        renderBestand();
+        refreshAll();
+        if (!TABS.model.view.hidden) renderModel();
+        // Kamera auf die Wolke stellen: die acht Ecken ihres Hüllquaders
+        const g = voll.grenzen;
+        const ecken = [];
+        [g.min.x, g.max.x].forEach((x) => [g.min.y, g.max.y].forEach((y) =>
+          [g.min.z, g.max.z].forEach((z) => ecken.push({ x, y, z }))));
+        sketch.frameContent(ecken);
+        result.frameContent(ecken);
+        setStatus(`Scan „${datei.name}“ geladen: ${voll.anzahl.toLocaleString("de-DE")} Punkte, `
+          + `dargestellt ${anzeige.anzahl.toLocaleString("de-DE")}. Bezugspunkt `
+          + `${punktwolke.voll.bezug.x} / ${punktwolke.voll.bezug.y} / ${punktwolke.voll.bezug.z} `
+          + "– er gehört in jede Weitergabe.", "ok");
+      } catch (fehler) {
+        setStatus("Scan nicht lesbar: " + fehler.message, "error");
+      }
+      eingabe.value = "";
+    };
+    leser.onerror = () => setStatus("Die Datei konnte nicht gelesen werden.", "error");
+    leser.readAsArrayBuffer(datei);
+  }
+
+  function scanLoeschen() {
+    if (!punktwolke) { setStatus("Es ist kein Scan geladen.", "info"); return; }
+    punktwolke = null; scanSchnitt = null; scanWaende = null; scanAuswahl = new Set();
+    renderBestand();
+    refreshAll();
+    if (!TABS.model.view.hidden) renderModel();
+    setStatus("Punktwolke entfernt. Die daraus übernommenen Bauteile bleiben im Modell.", "ok");
+  }
+
+  function scanSchnittLegen() {
+    if (!punktwolke) { setStatus("Zuerst einen Scan laden.", "error"); return; }
+    const ueber = parseFloat(document.getElementById("scanKoteAnsicht").value);
+    const dicke = parseFloat(document.getElementById("scanBandAnsicht").value);
+    const boden = punktwolke.voll.grenzen.min.y;
+    const kote = boden + (Number.isFinite(ueber) ? ueber : 1.2);
+    const punkte = punktwolkeSchnitt(punktwolke.voll, kote, Number.isFinite(dicke) && dicke > 0 ? dicke : 0.06);
+    scanSchnitt = { punkte, kote, dicke, ueber };
+    scanWaende = null; scanAuswahl = new Set();
+    renderBestand();
+    renderSketch();
+    if (!punkte.length) {
+      setStatus(`Im Band bei ${scanZahl(kote)} m liegt kein Punkt. `
+        + "Die stärksten Höhenlagen in den Kennwerten zeigen, wo Boden und Decke sind.", "error");
+      return;
+    }
+    setStatus(`Höhenschnitt bei ${scanZahl(kote)} m (${scanZahl(ueber)} m über dem tiefsten Punkt): `
+      + `${punkte.length.toLocaleString("de-DE")} Punkte. Der Schnitt liegt im Grundrissfenster als Vorlage.`, "ok");
+  }
+
+  function scanWaendeErkennen() {
+    if (!scanSchnitt || !scanSchnitt.punkte.length) { setStatus("Zuerst einen Höhenschnitt legen.", "error"); return; }
+    const zahl = (id, ersatz) => {
+      const w = parseFloat(document.getElementById(id).value);
+      return Number.isFinite(w) ? w : ersatz;
+    };
+    const beginn = Date.now();
+    scanWaende = wandErkennung(scanSchnitt.punkte, {
+      minLaenge: zahl("scanMinLaenge", 1.0),
+      luecke: zahl("scanLuecke", 0.6),
+      dickeMin: zahl("scanDickeMin", 0.05),
+      dickeMax: zahl("scanDickeMax", 0.60),
+    });
+    // Vorschlag: alles übernehmen, was gefunden wurde
+    scanAuswahl = new Set(scanWaende.waende.map((_, i) => i));
+    renderBestand();
+    renderSketch();
+    setStatus(`${scanWaende.waende.length} Wände erkannt, ${scanWaende.offen.length} Flächen einseitig `
+      + `(ohne Gegenfläche, Dicke unbekannt), ${Date.now() - beginn} ms. `
+      + "Das Ergebnis ist ein Vorschlag und ersetzt das Aufmaß vor Ort nicht.",
+    scanWaende.waende.length ? "ok" : "error");
+  }
+
+  /** Wandart nach der Dicke: dicke Wände außen, dünne innen. */
+  function scanWandArt(dicke) {
+    const wahl = document.getElementById("scanBauteilart").value;
+    if (wahl !== "auto") return wahl;
+    return dicke >= 0.20 ? "wand_aussen" : "wand_innen";
+  }
+
+  function scanUebernehmen() {
+    if (!scanWaende || !scanWaende.waende.length) { setStatus("Zuerst Wände erkennen.", "error"); return; }
+    if (!scanAuswahl.size) { setStatus("Keine Wand ausgewählt.", "error"); return; }
+    const stoff = document.getElementById("scanBaustoff").value;
+    const hoehe = parseFloat(document.getElementById("scanHoehe").value) || 2.75;
+    const kote = scanSchnitt ? punktwolke.voll.grenzen.min.y : 0;
+    let angelegt = 0;
+
+    scanWaende.waende.forEach((w, i) => {
+      if (!scanAuswahl.has(i)) return;
+      const kind = scanWandArt(w.dicke);
+      const element = {
+        id: model.nextElementId++,
+        kind,
+        // Der Grundriss der Anwendung liegt in x und z, die Höhe in y
+        p1: { x: w.p1.x, y: kote, z: w.p1.z },
+        p2: { x: w.p2.x, y: kote, z: w.p2.z },
+        // Eine Schicht in der gemessenen Dicke: der wirkliche Aufbau des
+        // Bestands ist aus dem Scan nicht ablesbar und im Aufmaß zu klären
+        layers: [{ material: stoff, d: Math.round(w.dicke * 1000) / 1000 }],
+        hoehe,
+        anzahl: 1,
+        zielU: null,
+        bemerkung: `aus Punktwolke ${punktwolke.voll.quelle}`,
+      };
+      model.elements.set(element.id, element);
+      angelegt += 1;
+    });
+
+    scanAuswahl = new Set();
+    renderBestand();
+    refreshAll();
+    setStatus(`${angelegt} Wände aus dem Scan übernommen (Baustoff ${BAUSTOFFE[stoff].name}, `
+      + `Höhe ${scanZahl(hoehe)} m). Die Dicke ist gemessen, der Schichtaufbau ist eine Annahme – `
+      + "er ist im Bestand zu klären, ebenso Öffnungen und die Wandhöhe je Raum.", "ok");
+  }
+
+  function scanCsv() {
+    if (!scanWaende || !scanWaende.waende.length) { setStatus("Zuerst Wände erkennen.", "error"); return; }
+    const b = punktwolke.voll.bezug;
+    const rows = [["Bestandsaufnahme aus Punktwolke – " + (document.getElementById("projectName").value || "Projekt")]];
+    rows.push(["Quelle", punktwolke.voll.quelle, punktwolke.voll.format]);
+    rows.push(["Bezugspunkt (Scankoordinaten)", b.x, b.y, b.z]);
+    rows.push(["Höhenschnitt [m]", scanSchnitt.kote.toFixed(3), "Banddicke [m]", scanSchnitt.dicke.toFixed(3)]);
+    rows.push([]);
+    rows.push(["Nr", "x1 [m]", "z1 [m]", "x2 [m]", "z2 [m]", "Länge [m]", "Dicke [m]",
+      "Richtung [Grad]", "Punkte", "Streuung [mm]", "Vorschlag",
+      "x1 Scan", "y1 Scan", "x2 Scan", "y2 Scan"]);
+    scanWaende.waende.forEach((w, i) => {
+      rows.push([i + 1, w.p1.x.toFixed(3), w.p1.z.toFixed(3), w.p2.x.toFixed(3), w.p2.z.toFixed(3),
+        w.laenge.toFixed(3), w.dicke.toFixed(3), w.richtung.toFixed(1), w.punkte,
+        (w.streuung * 1000).toFixed(1), BAUTEILTYPEN[scanWandArt(w.dicke)].name,
+        (w.p1.x + b.x).toFixed(3), (w.p1.z + b.y).toFixed(3),
+        (w.p2.x + b.x).toFixed(3), (w.p2.z + b.y).toFixed(3)]);
+    });
+    if (scanWaende.offen.length) {
+      rows.push([]);
+      rows.push(["Einseitig erfasste Flächen – Dicke unbekannt, vor Ort zu messen"]);
+      rows.push(["Nr", "x1 [m]", "z1 [m]", "x2 [m]", "z2 [m]", "Länge [m]", "Richtung [Grad]", "Punkte"]);
+      scanWaende.offen.forEach((o, i) => {
+        rows.push([i + 1, o.p1.x.toFixed(3), o.p1.z.toFixed(3), o.p2.x.toFixed(3), o.p2.z.toFixed(3),
+          o.laenge.toFixed(3), ((o.winkel * 180) / Math.PI).toFixed(1), o.punkte]);
+      });
+    }
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Bestand_${name}.csv`, "\ufeff" + zuCsv(rows), "text/csv;charset=utf-8;");
+    setStatus("Bestandsaufmaß als CSV ausgegeben – mit Modell- und Scankoordinaten.", "ok");
+  }
+
+  function renderBestand() {
+    const kennzahl = (label, wert, warnung) =>
+      `<div class="stat"><span class="label">${label}</span>`
+      + `<span class="value${warnung ? " warnwert" : ""}">${wert}</span></div>`;
+
+    document.getElementById("scanEmpty").hidden = !!punktwolke;
+    const kennzahlen = document.getElementById("scanKennzahlen");
+    const stand = document.getElementById("scanStand");
+
+    if (!punktwolke) {
+      kennzahlen.innerHTML = "";
+      stand.textContent = "";
+    } else {
+      const st = punktwolke.statistik;
+      const g = punktwolke.voll.grenzen;
+      kennzahlen.innerHTML =
+        kennzahl("Punkte", st.anzahl.toLocaleString("de-DE"))
+        + kennzahl("dargestellt", punktwolke.anzeige.anzahl.toLocaleString("de-DE"))
+        + kennzahl("Breite × Tiefe", `${scanZahl(st.breite)} × ${scanZahl(st.tiefe)} m`)
+        + kennzahl("Höhe", `${scanZahl(st.hoehe)} m`)
+        + kennzahl("Dichte", `${st.dichte.toFixed(0)} Pkt/m²`);
+      const spitzen = st.spitzen
+        .map((sp) => `${scanZahl(sp.von)}…${scanZahl(sp.bis)} m (${sp.anzahl.toLocaleString("de-DE")} Pkt)`)
+        .join(" · ");
+      stand.innerHTML = `Datei: <strong>${punktwolke.voll.quelle}</strong> · ${punktwolke.voll.format} · `
+        + `gelesen in ${punktwolke.ms} ms.<br>`
+        + `Bezugspunkt (Projektnullpunkt) in Scankoordinaten: `
+        + `<strong>${punktwolke.voll.bezug.x} / ${punktwolke.voll.bezug.y} / ${punktwolke.voll.bezug.z}</strong> `
+        + "– ohne ihn ist der Lagebezug nach DIN 18710-1 verloren.<br>"
+        + `Stärkste Höhenlagen (Boden, Decke, Einbauten): ${spitzen}.`
+        + (punktwolke.voll.hinweise.length ? `<br>${punktwolke.voll.hinweise.join(" ")}` : "");
+    }
+
+    // ---- Tabelle der erkannten Wände
+    const body = document.getElementById("scanWandBody");
+    body.innerHTML = "";
+    document.getElementById("scanWandEmpty").hidden = !!(scanWaende && scanWaende.waende.length);
+    const wandKennzahlen = document.getElementById("scanWandKennzahlen");
+
+    if (!scanWaende) {
+      wandKennzahlen.innerHTML = scanSchnitt
+        ? kennzahl("Schnittkote", `${scanZahl(scanSchnitt.kote)} m`)
+          + kennzahl("Punkte im Schnitt", scanSchnitt.punkte.length.toLocaleString("de-DE"))
+        : "";
+      return;
+    }
+
+    scanWaende.waende.forEach((w, i) => {
+      const art = BAUTEILTYPEN[scanWandArt(w.dicke)].name;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input type="checkbox" data-scanwand="${i}" ${scanAuswahl.has(i) ? "checked" : ""}></td>
+        <td>${i + 1}</td>
+        <td>${scanZahl(w.p1.x)} / ${scanZahl(w.p1.z)}</td>
+        <td>${scanZahl(w.p2.x)} / ${scanZahl(w.p2.z)}</td>
+        <td>${scanZahl(w.laenge)}</td>
+        <td><strong>${scanZahl(w.dicke, 3)}</strong></td>
+        <td>${scanZahl(w.richtung, 1)}</td>
+        <td>${w.punkte}</td>
+        <td>${scanZahl(w.streuung * 1000, 1)}</td>
+        <td>${art}</td>`;
+      body.appendChild(tr);
+    });
+
+    const gesamt = scanWaende.waende.reduce((s, w) => s + w.laenge, 0);
+    wandKennzahlen.innerHTML =
+      kennzahl("Schnittkote", `${scanZahl(scanSchnitt.kote)} m`)
+      + kennzahl("Punkte im Schnitt", scanWaende.punkte.toLocaleString("de-DE"))
+      + kennzahl("Wände", scanWaende.waende.length)
+      + kennzahl("Wandlänge", `${scanZahl(gesamt)} m`)
+      + kennzahl("einseitig erfasst", scanWaende.offen.length, scanWaende.offen.length > 0)
+      + kennzahl("ausgewählt", scanAuswahl.size);
+  }
+
+  document.getElementById("viewBestand").addEventListener("change", (e) => {
+    const ziel = e.target;
+    if (ziel.dataset.scanwand === undefined) return;
+    const i = parseInt(ziel.dataset.scanwand, 10);
+    if (ziel.checked) scanAuswahl.add(i); else scanAuswahl.delete(i);
+    renderBestand();
+    renderSketch();
+  });
+
+  document.getElementById("btnScanLaden").addEventListener("click", scanLaden);
+  document.getElementById("btnScanLoeschen").addEventListener("click", scanLoeschen);
+  document.getElementById("btnScanSchnitt").addEventListener("click", scanSchnittLegen);
+  document.getElementById("btnScanWaende").addEventListener("click", scanWaendeErkennen);
+  document.getElementById("btnScanUebernehmen").addEventListener("click", scanUebernehmen);
+  document.getElementById("btnScanCsv").addEventListener("click", scanCsv);
+  document.getElementById("scanZeigen").addEventListener("change", () => {
+    if (!TABS.model.view.hidden) renderModel();
+  });
+  // Die Felder im Menüband und in der Ansicht zeigen dasselbe an
+  [["scanKote", "scanKoteAnsicht"], ["scanBand", "scanBandAnsicht"]].forEach(([band, ansicht]) => {
+    const a = document.getElementById(band), b = document.getElementById(ansicht);
+    a.addEventListener("change", () => { b.value = a.value; });
+    b.addEventListener("change", () => { a.value = b.value; });
   });
 
   /* ------------------------------------------- Bedienung der Baustelle */
