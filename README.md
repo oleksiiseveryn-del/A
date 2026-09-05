@@ -43,6 +43,7 @@ schieben; Bedienelemente sind mindestens 44 pt hoch und Eingabefelder mindestens
 | Koordinationsmodell | IFC4 nach ISO 16739 (OpenBIM) mit Eigenschaftssätzen; Kollisionsbefunde als CSV |
 | Zeichnung für CAD | DXF R12 (AC1009) als Grundriss oder räumliches Modell, in Metern oder Millimetern, Ebenen nach Bauteilart |
 | Bestandsaufnahme | Wände aus der Punktwolke als CSV mit Modell- und Scankoordinaten |
+| Tiefbau | Lageplan, Höhenplan mit Massenlinie und Querprofilblätter als SVG; Massen und Kostenschätzung als CSV |
 | Papier und PDF | über *Drucken*; aus dem Blattfenster kommt das Blatt allein auf das Papier |
 
 **↗ Weitergeben** übergibt die zuletzt erzeugte Datei an das Systemmenü des Geräts
@@ -84,6 +85,8 @@ js/
   ifc.js                  IFC-Export nach ISO 16739 (IFC4)
   dxf.js                  DXF-Export R12 für AutoCAD, Allplan und andere CAD
   pointcloud.js           Punktwolken lesen (LAS, PLY, PTS, XYZ), Schnitt, Wanderkennung
+  civil.js                Tiefbau: Trassierung, Gradiente, Querprofile, Erdmassen
+  civilplan.js            Lageplan, Hoehenplan mit Massenlinie, Querprofilblaetter
 python/                   Bewehrung und Herstellungsunterlagen (46 Prüfungen)
 desktop/                  Windows-Anwendung (Electron) – siehe desktop/README.md
 tools/
@@ -112,6 +115,26 @@ oder PLY aus. **Nicht erkannt**: Rundungen, im Aufriss schräge Wände, Stützen
 Wände hinter Einbauten. Die Punktwolke wird **nicht** in der Projektdatei
 gespeichert; sie ist nach dem Öffnen neu zu laden. Das Ergebnis der Erkennung ist
 ein Vorschlag für die Bestandsaufnahme und **ersetzt das Aufmaß vor Ort nicht**.
+
+## Tiefbau
+
+Das Register **Tiefbau** führt eine Trasse von der Achse bis zur Kostenschätzung:
+
+| Schritt | Rechenweg |
+|---|---|
+| Achse | Geraden, Kreisbögen und **Klothoiden** (A² = R · L). Gerade und Bogen geschlossen, die Klothoide über die Integration von cos θ und sin θ nach Simpson. Geprüft: Mindestradius, Richtwert R/3 ≤ A ≤ R, Krümmungssprünge |
+| Gradiente | Neigungsabschnitte mit parabolischer Ausrundung: L = H · Δs, T = L/2, Stich = Δs · L/8, Kuppe und Wanne aus dem Vorzeichen |
+| Querprofil | Regelquerschnitt mit Fahrbahn, Querneigung, Bankett, Oberbau und Böschung 1:n bis zum Schnitt mit dem Gelände. Das **Planum** liegt um die Oberbaudicke tiefer; gerechnet wird gegen das Gelände **nach Abtrag des Oberbodens** |
+| Massen | Mittelwertverfahren V = (A₁+A₂)/2 · e und Prismenformel V = e/6 · (A₁+4·A_m+A₂) mit dem an der halben Station gerechneten Mittelprofil |
+| Ausgleich | Festmaß, Lockermaß (× Auflockerung) und verdichtetes Maß (× Verdichtung) je **Homogenbereich nach DIN 18300**; daraus Wiederverwendung, Überschuss, Fehlmenge |
+| Kosten | Leistungsverzeichnis der Erdarbeiten: Oberboden, Lösen und Laden, Fördern, Einbauen und Verdichten, Abfahren, Entsorgen, Liefern, Oberbau |
+
+**Nicht enthalten**: Kurvenaufweitung, Verwindung und Anrampung der Querneigung,
+Mulden und Gräben, Sichtweiten, Entwässerung sowie ein aufgemessenes
+Geländemodell – das Gelände wird je Station über Höhe und Querneigung
+beschrieben. Verfahren und Profilabstand der Massenberechnung sind vertraglich
+zu vereinbaren (REB-Verfahrensbeschreibungen, VOB/C DIN 18300); die Grenzwerte
+für Radien und Neigungen richten sich nach RAL bzw. RASt.
 
 ## Geltungsbereich
 

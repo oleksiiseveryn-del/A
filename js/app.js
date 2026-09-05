@@ -19,6 +19,16 @@
   let scanWaende = null;      // Ergebnis der Wanderkennung
   let scanAuswahl = new Set();
 
+  // Tiefbau: Achse, Gradiente, Gelände und das Ergebnis der Massenberechnung.
+  // Die Eingaben gehören zum Projekt und werden mit gespeichert; das Ergebnis
+  // wird bei jeder Rechnung neu gebildet.
+  const tiefbau = {
+    achse: [],        // [{ art, laenge, radius, radiusEnde }]
+    gradiente: [],    // [{ station, hoehe, halbmesser }]
+    gelaende: [],     // [{ station, hoehe, querneigung }]
+  };
+  let tiefbauErgebnis = null;
+
   const model = {
     nodes: [],            // [{ x, y, z }]
     members: new Map(),   // id -> { id, a, b, type, loadType, force, moment, beta, family, steelGrade }
@@ -224,6 +234,14 @@
     selfWeightLoads = [];
     selfWeightTotal = 0;
     pendingStart = null;
+    tiefbau.achse = [];
+    tiefbau.gradiente = [];
+    tiefbau.gelaende = [];
+    tiefbauErgebnis = null;
+    punktwolke = null;
+    scanSchnitt = null;
+    scanWaende = null;
+    scanAuswahl = new Set();
   }
 
   /* ------------------------------------------------------- Nachweisparameter */
@@ -1070,6 +1088,7 @@
     else if (sheetArt === "ansicht") zeichneAnsicht(sheetIndex + schritt);
     else if (sheetArt === "aufmass") blaettereListe(aufmassBlaetter(), aufmassBlattId, schritt,
       "aufmassBlatt", "btnAufmassblatt");
+    else if (sheetArt === "querprofile") zeigeQuerprofile(querprofilBlatt + schritt);
     else if (sheetArt === "tagesbericht") blaettereListe(bautage(), tagesberichtId, schritt,
       "tagAuswahl", "btnTagesbericht");
   }
@@ -1125,6 +1144,9 @@
       const am = model.aufmass.get(aufmassBlattId);
       return blatt(`Aufmassblatt_${name}_${(am && am.pos ? am.pos : "Position").replace(/[^\w.-]+/g, "_")}.svg`);
     }
+    if (sheetArt === "lageplan") return blatt(`Lageplan_${name}.svg`);
+    if (sheetArt === "hoehenplan") return blatt(`Hoehenplan_${name}.svg`);
+    if (sheetArt === "querprofile") return blatt(`Querprofile_${name}_Blatt${querprofilBlatt + 1}.svg`);
     if (sheetArt === "tagesbericht") {
       const tag = model.bautagebuch.get(tagesberichtId);
       return blatt(`Tagesbericht_${name}_${(tag && tag.datum) || "Bautag"}.svg`);
@@ -2846,6 +2868,7 @@
     positionen: { button: document.getElementById("tabPositionen"), view: document.getElementById("viewPositionen") },
     baustelle: { button: document.getElementById("tabBaustelle"), view: document.getElementById("viewBaustelle") },
     bestand: { button: document.getElementById("tabBestand"), view: document.getElementById("viewBestand") },
+    tiefbau: { button: document.getElementById("tabTiefbau"), view: document.getElementById("viewTiefbau") },
     koordination: { button: document.getElementById("tabKoordination"), view: document.getElementById("viewKoordination") },
     cutlist: { button: document.getElementById("tabCutList"), view: document.getElementById("viewCutList") },
   };
@@ -2861,6 +2884,7 @@
     if (which === "positionen") renderPositionsTable();
     if (which === "baustelle") renderBaustelle();
     if (which === "bestand") renderBestand();
+    if (which === "tiefbau") renderTiefbau();
     if (which === "koordination") renderKoordination();
     if (which === "cutlist") renderCutList();
     if (which === "model") { result.resize(); renderModel(); }
@@ -2923,6 +2947,7 @@
     if (!TABS.positionen.view.hidden) renderPositionsTable();
     if (!TABS.baustelle.view.hidden) renderBaustelle();
     if (!TABS.bestand.view.hidden) renderBestand();
+    if (!TABS.tiefbau.view.hidden) renderTiefbau();
     if (!TABS.koordination.view.hidden) renderKoordination();
     if (!TABS.cutlist.view.hidden) renderCutList();
   }
@@ -3867,6 +3892,444 @@
     b.addEventListener("change", () => { a.value = b.value; });
   });
 
+  /* ================================================== Tiefbau: Trassierung */
+
+  let querprofilBlatt = 0;
+
+  /** Zahl aus einem Feld, mit Ersatzwert. */
+  function tbZahl(id, ersatz) {
+    const w = parseFloat(document.getElementById(id).value);
+    return Number.isFinite(w) ? w : ersatz;
+  }
+
+  function tbText(wert, stellen) {
+    return Number(wert).toFixed(stellen === undefined ? 2 : stellen).replace(".", ",");
+  }
+
+  /** Regelquerschnitt aus den Eingabefeldern. */
+  function tiefbauQuerschnitt() {
+    return {
+      fahrbahn: tbZahl("qsFahrbahn", 6.5),
+      querneigung: tbZahl("qsQuerneigung", 2.5),
+      dachprofil: document.getElementById("qsDach").value === "dach",
+      bankett: tbZahl("qsBankett", 1.5),
+      bankettNeigung: tbZahl("qsBankettNeigung", 12),
+      oberbau: tbZahl("qsOberbau", 0.55),
+      oberboden: tbZahl("qsOberboden", 0.25),
+      boeschungAuftrag: tbZahl("qsBoeschungAuftrag", 1.5),
+      boeschungAbtrag: tbZahl("qsBoeschungAbtrag", 1.5),
+    };
+  }
+
+  /** Ausgewerteter Zustand: Achse, Gradiente, Stationen. */
+  function tiefbauStand() {
+    const trasse = trasseAuswerten(tiefbau.achse, {
+      x: tbZahl("achseStartX", 0), y: tbZahl("achseStartY", 0),
+      richtung: tbZahl("achseStartRichtung", 0), station: tbZahl("achseStartStation", 0),
+    });
+    const gradiente = gradienteAuswerten(tiefbau.gradiente);
+    const stationen = tiefbau.achse.length ? trasseStationen(trasse, tbZahl("profilAbstand", 20)) : [];
+    return { trasse, gradiente, stationen };
+  }
+
+  /** Querprofil an einer Station aus dem aktuellen Zustand. */
+  function tiefbauProfilBei(gradiente, qs) {
+    return (station) => querprofil(qs, gradienteHoehe(gradiente, station).hoehe,
+      gelaendeBei(tiefbau.gelaende, station));
+  }
+
+  function tiefbauRechnen() {
+    if (tiefbau.achse.length < 1) { setStatus("Zuerst die Achse anlegen.", "error"); return null; }
+    if (tiefbau.gradiente.length < 2) { setStatus("Die Gradiente braucht mindestens zwei Punkte.", "error"); return null; }
+    if (!tiefbau.gelaende.length) { setStatus("Zuerst Geländehöhen eintragen.", "error"); return null; }
+
+    const { trasse, gradiente, stationen } = tiefbauStand();
+    const qs = tiefbauQuerschnitt();
+    const profilBei = tiefbauProfilBei(gradiente, qs);
+    const massen = massenBerechnung(stationen, profilBei);
+
+    const boden = {
+      name: document.getElementById("bodenArt").selectedOptions[0].textContent,
+      auflockerung: tbZahl("bodenAuflockerung", 1.25),
+      verdichtung: tbZahl("bodenVerdichtung", 0.92),
+      wiederverwendung: tbZahl("bodenWieder", 60),
+      loesen: HOMOGENBEREICHE[document.getElementById("bodenArt").value].loesen,
+      einbau: HOMOGENBEREICHE[document.getElementById("bodenArt").value].einbau,
+      deponie: HOMOGENBEREICHE[document.getElementById("bodenArt").value].deponie,
+      lieferung: HOMOGENBEREICHE[document.getElementById("bodenArt").value].lieferung,
+    };
+    const ausgleich = massenAusgleich(massen.summe, boden);
+    const kosten = erdKosten(ausgleich, {
+      transportKm: tbZahl("transportKm", 12),
+      transportProKmM3: tbZahl("transportPreis", 0.35),
+      oberbauMenge: massen.summe.oberbau,
+    });
+
+    tiefbauErgebnis = { trasse, gradiente, stationen, qs, massen, ausgleich, kosten, profilBei };
+    renderTiefbau();
+    const offen = massen.profile.filter((p) => p.profil.hinweise.length).length;
+    setStatus(`${stationen.length} Querprofile gerechnet: Abtrag ${tbText(massen.summe.abtrag, 1)} m³, `
+      + `Auftrag ${tbText(massen.summe.auftrag, 1)} m³, Oberboden ${tbText(massen.summe.oberboden, 1)} m³ `
+      + `(Mittelwertverfahren). Kostenschätzung ${tbText(kosten.summe, 2)} €.`
+      + (offen ? ` ${offen} Profile: die Böschung erreicht das Gelände nicht – Grenzweite oder Gelände prüfen.` : ""),
+    offen ? "info" : "ok");
+    return tiefbauErgebnis;
+  }
+
+  function renderTiefbau() {
+    const { trasse, gradiente, stationen } = tiefbauStand();
+
+    // ---- Achse
+    const aBody = document.getElementById("achseBody");
+    aBody.innerHTML = "";
+    document.getElementById("achseEmpty").hidden = tiefbau.achse.length > 0;
+    trasse.elemente.forEach((el, i) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${el.nummer}</td>
+        <td><select data-tb="achse" data-i="${i}" data-feld="art">
+          ${Object.keys(TRASSE_ARTEN).map((k) => `<option value="${k}"${k === el.art ? " selected" : ""}>${TRASSE_ARTEN[k].name}</option>`).join("")}
+        </select></td>
+        <td><input type="number" step="1" min="0.1" data-tb="achse" data-i="${i}" data-feld="laenge" value="${el.laenge}"></td>
+        <td>${el.art === "gerade" ? "–" : `<input type="number" step="10" data-tb="achse" data-i="${i}" data-feld="radius" value="${el.radius}">`}</td>
+        <td>${el.art === "klothoide" ? `<input type="number" step="10" data-tb="achse" data-i="${i}" data-feld="radiusEnde" value="${el.radiusEnde}">` : "–"}</td>
+        <td>${stationText(el.station)}</td>
+        <td>${stationText(el.stationEnde)}</td>
+        <td>${el.A ? tbText(el.A, 1) : "–"}</td>
+        <td>${tbText(el.xEnde, 3)} / ${tbText(el.yEnde, 3)}</td>
+        <td>${tbText((el.richtungEnde * 180) / Math.PI, 4)}</td>
+        <td><button class="row-remove" data-tb-weg="achse" data-i="${i}" title="Element entfernen">✕</button></td>`;
+      aBody.appendChild(tr);
+    });
+
+    // ---- Gradiente
+    const gBody = document.getElementById("gradBody");
+    gBody.innerHTML = "";
+    document.getElementById("gradEmpty").hidden = tiefbau.gradiente.length > 0;
+    gradiente.punkte.forEach((p, i) => {
+      const ab = gradiente.abschnitte[i];
+      const a = gradiente.ausrundungen.find((x) => Math.abs(x.station - p.station) < 1e-9);
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input type="number" step="10" data-tb="gradiente" data-i="${i}" data-feld="station" value="${p.station}"></td>
+        <td><input type="number" step="0.01" data-tb="gradiente" data-i="${i}" data-feld="hoehe" value="${p.hoehe}"></td>
+        <td><input type="number" step="100" min="0" data-tb="gradiente" data-i="${i}" data-feld="halbmesser" value="${p.halbmesser || 0}"></td>
+        <td>${ab ? tbText(ab.neigung * 100, 2) : "–"}</td>
+        <td>${a ? a.art : "–"}</td>
+        <td>${a ? tbText(a.laenge, 1) : "–"}</td>
+        <td>${a ? tbText(a.T, 1) : "–"}</td>
+        <td>${a ? tbText(a.stich, 3) : "–"}</td>
+        <td><button class="row-remove" data-tb-weg="gradiente" data-i="${i}">✕</button></td>`;
+      gBody.appendChild(tr);
+    });
+
+    // ---- Gelände
+    const glBody = document.getElementById("gelBody");
+    glBody.innerHTML = "";
+    document.getElementById("gelEmpty").hidden = tiefbau.gelaende.length > 0;
+    tiefbau.gelaende.slice().sort((a, b) => a.station - b.station).forEach((p, i) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input type="number" step="10" data-tb="gelaende" data-i="${i}" data-feld="station" value="${p.station}"></td>
+        <td><input type="number" step="0.01" data-tb="gelaende" data-i="${i}" data-feld="hoehe" value="${p.hoehe}"></td>
+        <td><input type="number" step="0.5" data-tb="gelaende" data-i="${i}" data-feld="querneigung" value="${p.querneigung || 0}"></td>
+        <td><button class="row-remove" data-tb-weg="gelaende" data-i="${i}">✕</button></td>`;
+      glBody.appendChild(tr);
+    });
+
+    // ---- Meldungen der Entwurfsprüfung
+    const meldungen = trassePruefung(trasse).concat(gradiente.meldungen);
+    document.getElementById("tiefbauMeldungen").innerHTML = meldungen.length
+      ? meldungen.map((m) => `<div class="${m.art === "warnung" ? "warnwert" : ""}">`
+        + `${m.art === "warnung" ? "⚠" : "ℹ"} ${m.text}</div>`).join("")
+      : (tiefbau.achse.length ? "Achse und Gradiente halten die hinterlegten Richtwerte ein." : "");
+
+    // ---- Massen
+    const kennzahl = (label, wert, warnung) =>
+      `<div class="stat"><span class="label">${label}</span>`
+      + `<span class="value${warnung ? " warnwert" : ""}">${wert}</span></div>`;
+    const mBody = document.getElementById("massenBody");
+    mBody.innerHTML = "";
+    const kBody = document.getElementById("erdKostenBody");
+    kBody.innerHTML = "";
+    document.getElementById("massenEmpty").hidden = !!tiefbauErgebnis;
+
+    if (!tiefbauErgebnis) {
+      document.getElementById("tiefbauKennzahlen").innerHTML = tiefbau.achse.length
+        ? kennzahl("Achslänge", `${tbText(trasse.laenge)} m`)
+          + kennzahl("Elemente", trasse.elemente.length)
+          + kennzahl("Querprofile", stationen.length)
+        : "";
+      return;
+    }
+
+    const e = tiefbauErgebnis;
+    e.massen.felder.forEach((f) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${stationText(f.von)}</td>
+        <td>${stationText(f.bis)}</td>
+        <td>${tbText(f.abstand)}</td>
+        <td>${tbText(f.A1abtrag)} → ${tbText(f.A2abtrag)}</td>
+        <td>${tbText(f.A1auftrag)} → ${tbText(f.A2auftrag)}</td>
+        <td><strong>${tbText(f.abtrag, 1)}</strong></td>
+        <td><strong>${tbText(f.auftrag, 1)}</strong></td>
+        <td>${tbText(f.abtragPrisma, 1)}</td>
+        <td>${tbText(f.auftragPrisma, 1)}</td>
+        <td>${tbText(f.oberboden, 1)}</td>
+        <td>${tbText(f.oberbau, 1)}</td>`;
+      mBody.appendChild(tr);
+    });
+
+    const s = e.massen.summe, a = e.ausgleich;
+    document.getElementById("tiefbauKennzahlen").innerHTML =
+      kennzahl("Achslänge", `${tbText(trasse.laenge)} m`)
+      + kennzahl("Querprofile", e.stationen.length)
+      + kennzahl("Abtrag (fest)", `${tbText(s.abtrag, 1)} m³`)
+      + kennzahl("Auftrag (verdichtet)", `${tbText(s.auftrag, 1)} m³`)
+      + kennzahl("Oberboden", `${tbText(s.oberboden, 1)} m³`)
+      + kennzahl("Oberbau", `${tbText(s.oberbau, 1)} m³`)
+      + kennzahl("Abfuhr (lose)", `${tbText(a.abfuhrLose, 1)} m³`, a.abfuhrLose > 0)
+      + kennzahl("Fehlmenge", `${tbText(a.fehlmengeVerdichtet, 1)} m³`, a.fehlmengeVerdichtet > 0)
+      + kennzahl("Kosten Erdbau", `${tbText(e.kosten.summe, 2)} €`);
+
+    e.kosten.zeilen.forEach((zl) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${zl.nr}</td>
+        <td>${zl.kurz}</td>
+        <td>${tbText(zl.menge, 2)}</td>
+        <td>${zl.einheit}</td>
+        <td>${tbText(zl.ep, 2)}</td>
+        <td><strong>${tbText(zl.gp, 2)}</strong></td>
+        <td class="layer-note">${zl.hinweis || ""}</td>`;
+      kBody.appendChild(tr);
+    });
+    const summe = document.createElement("tr");
+    summe.innerHTML = `<td></td><td><strong>Summe Erdarbeiten</strong></td><td></td><td></td><td></td>`
+      + `<td><strong>${tbText(e.kosten.summe, 2)}</strong></td><td class="layer-note">ohne Umsatzsteuer</td>`;
+    kBody.appendChild(summe);
+  }
+
+  /* ---- Bedienung Tiefbau */
+
+  (function fuelleBodenarten() {
+    const wahl = document.getElementById("bodenArt");
+    wahl.innerHTML = Object.keys(HOMOGENBEREICHE)
+      .map((k) => `<option value="${k}"${k === "lehm" ? " selected" : ""}>${HOMOGENBEREICHE[k].name}</option>`).join("");
+    const setzeFaktoren = () => {
+      const b = HOMOGENBEREICHE[wahl.value];
+      document.getElementById("bodenAuflockerung").value = b.auflockerung;
+      document.getElementById("bodenVerdichtung").value = b.verdichtung;
+      document.getElementById("bodenWieder").value = b.wiederverwendung;
+    };
+    wahl.addEventListener("change", () => { setzeFaktoren(); if (tiefbauErgebnis) tiefbauRechnen(); });
+    setzeFaktoren();
+  }());
+
+  document.getElementById("viewTiefbau").addEventListener("change", (e) => {
+    const ziel = e.target;
+    if (!ziel.dataset.tb) return;
+    const liste = tiefbau[ziel.dataset.tb];
+    const eintrag = liste[parseInt(ziel.dataset.i, 10)];
+    if (!eintrag) return;
+    const feld = ziel.dataset.feld;
+    eintrag[feld] = feld === "art" ? ziel.value : parseFloat(ziel.value) || 0;
+    if (feld === "art" && ziel.value === "gerade") { eintrag.radius = 0; eintrag.radiusEnde = 0; }
+    if (ziel.dataset.tb !== "achse") liste.sort((a, b) => a.station - b.station);
+    if (tiefbauErgebnis) tiefbauRechnen(); else renderTiefbau();
+  });
+
+  document.getElementById("viewTiefbau").addEventListener("click", (e) => {
+    const knopf = e.target.closest("[data-tb-weg]");
+    if (!knopf) return;
+    tiefbau[knopf.dataset.tbWeg].splice(parseInt(knopf.dataset.i, 10), 1);
+    if (tiefbauErgebnis) tiefbauRechnen(); else renderTiefbau();
+  });
+
+  document.getElementById("btnAchseElement").addEventListener("click", () => {
+    const art = document.getElementById("achseArt").value;
+    const radius = tbZahl("achseRadius", 250);
+    tiefbau.achse.push({
+      art, laenge: Math.max(1, tbZahl("achseLaenge", 100)),
+      radius: art === "gerade" ? 0 : radius,
+      // Die Klothoide führt vom vorherigen Radius auf den eingestellten
+      radiusEnde: art === "klothoide" ? radius : 0,
+    });
+    if (art === "klothoide") {
+      // Übergang aus der Geraden: Anfangsradius unendlich, Endradius wie gewählt
+      const el = tiefbau.achse[tiefbau.achse.length - 1];
+      const vorher = tiefbau.achse[tiefbau.achse.length - 2];
+      el.radius = vorher && vorher.art === "bogen" ? vorher.radius : 0;
+      el.radiusEnde = vorher && vorher.art === "bogen" ? 0 : radius;
+    }
+    renderTiefbau();
+    setStatus(`${TRASSE_ARTEN[art].name} angehängt. Achslänge ${tbText(tiefbauStand().trasse.laenge)} m.`, "ok");
+  });
+
+  document.getElementById("btnAchseBeispiel").addEventListener("click", () => {
+    tiefbau.achse = [
+      { art: "gerade", laenge: 80, radius: 0, radiusEnde: 0 },
+      { art: "klothoide", laenge: 60, radius: 0, radiusEnde: 250 },
+      { art: "bogen", laenge: 120, radius: 250, radiusEnde: 250 },
+      { art: "klothoide", laenge: 60, radius: 250, radiusEnde: 0 },
+      { art: "gerade", laenge: 100, radius: 0, radiusEnde: 0 },
+    ];
+    tiefbau.gradiente = [
+      { station: 0, hoehe: 12.50, halbmesser: 0 },
+      { station: 160, hoehe: 16.00, halbmesser: 2500 },
+      { station: 300, hoehe: 14.60, halbmesser: 3000 },
+      { station: 420, hoehe: 15.80, halbmesser: 0 },
+    ];
+    tiefbau.gelaende = [
+      { station: 0, hoehe: 12.00, querneigung: 3 },
+      { station: 100, hoehe: 13.50, querneigung: 5 },
+      { station: 200, hoehe: 16.80, querneigung: 4 },
+      { station: 300, hoehe: 15.20, querneigung: 2 },
+      { station: 420, hoehe: 14.60, querneigung: 0 },
+    ];
+    tiefbauErgebnis = null;
+    renderTiefbau();
+    setStatus("Beispielachse eingesetzt: Gerade, Klothoide, Bogen R = 250 m, Klothoide, Gerade – "
+      + "420 m mit Gradiente und Gelände. Zum Prüfen und Überschreiben gedacht.", "ok");
+  });
+
+  document.getElementById("btnGradientePunkt").addEventListener("click", () => {
+    tiefbau.gradiente.push({
+      station: tbZahl("gradStation", 0), hoehe: tbZahl("gradHoehe", 0),
+      halbmesser: Math.abs(tbZahl("gradHalbmesser", 0)),
+    });
+    tiefbau.gradiente.sort((a, b) => a.station - b.station);
+    if (tiefbauErgebnis) tiefbauRechnen(); else renderTiefbau();
+  });
+
+  document.getElementById("btnGelaendePunkt").addEventListener("click", () => {
+    tiefbau.gelaende.push({
+      station: tbZahl("gelStation", 0), hoehe: tbZahl("gelHoehe", 0),
+      querneigung: tbZahl("gelNeigung", 0),
+    });
+    tiefbau.gelaende.sort((a, b) => a.station - b.station);
+    if (tiefbauErgebnis) tiefbauRechnen(); else renderTiefbau();
+  });
+
+  document.getElementById("btnMassen").addEventListener("click", tiefbauRechnen);
+
+  document.getElementById("btnLageplan").addEventListener("click", () => {
+    if (!tiefbau.achse.length) { setStatus("Zuerst die Achse anlegen.", "error"); return; }
+    const { trasse, stationen } = tiefbauStand();
+    sheetArt = "lageplan";
+    document.getElementById("sheetBody").innerHTML = lageplanSVG({ trasse, stationen, projekt: projektKopf() });
+    document.getElementById("sheetTitle").textContent = "Lageplan der Achse";
+    document.getElementById("sheetCounter").textContent =
+      `${trasse.elemente.length} Elemente · ${tbText(trasse.laenge)} m`;
+    document.getElementById("sheetOverlay").hidden = false;
+  });
+
+  document.getElementById("btnHoehenplan").addEventListener("click", () => {
+    const e = tiefbauErgebnis || tiefbauRechnen();
+    if (!e) return;
+    sheetArt = "hoehenplan";
+    document.getElementById("sheetBody").innerHTML = laengsschnittSVG({
+      trasse: e.trasse, gradiente: e.gradiente, gelaende: tiefbau.gelaende,
+      stationen: e.stationen, projekt: projektKopf(), massen: e.massen,
+    });
+    document.getElementById("sheetTitle").textContent = "Höhenplan mit Massenlinie";
+    document.getElementById("sheetCounter").textContent =
+      `${e.stationen.length} Stationen · Überschuss ${tbText(e.massen.summe.abtrag - e.massen.summe.auftrag, 1)} m³`;
+    document.getElementById("sheetOverlay").hidden = false;
+  });
+
+  /** Querprofilblatt Nummer i (sechs Profile je Blatt). */
+  function zeigeQuerprofile(nummer) {
+    const e = tiefbauErgebnis;
+    if (!e) return;
+    const proBlatt = 6;
+    const blaetter = Math.max(1, Math.ceil(e.stationen.length / proBlatt));
+    querprofilBlatt = ((nummer % blaetter) + blaetter) % blaetter;
+    const teil = e.stationen.slice(querprofilBlatt * proBlatt, (querprofilBlatt + 1) * proBlatt)
+      .map((st) => ({ station: st, profil: e.profilBei(st) }));
+    sheetArt = "querprofile";
+    document.getElementById("sheetBody").innerHTML = querprofilSVG({
+      profile: teil, projekt: projektKopf(), blattNr: querprofilBlatt + 1, blaetter,
+    });
+    document.getElementById("sheetTitle").textContent = "Querprofile";
+    document.getElementById("sheetCounter").textContent =
+      `Blatt ${querprofilBlatt + 1} von ${blaetter} · ${teil.length} Profile`;
+    document.getElementById("sheetOverlay").hidden = false;
+  }
+
+  document.getElementById("btnQuerprofile").addEventListener("click", () => {
+    const e = tiefbauErgebnis || tiefbauRechnen();
+    if (!e) return;
+    zeigeQuerprofile(0);
+  });
+
+  document.getElementById("btnErdCsv").addEventListener("click", () => {
+    const e = tiefbauErgebnis || tiefbauRechnen();
+    if (!e) return;
+    const rows = [["Massenberechnung und Kostenschätzung Erdarbeiten – "
+      + (document.getElementById("projectName").value || "Projekt")]];
+    rows.push(["Achslänge [m]", e.trasse.laenge.toFixed(3), "Querprofile", e.stationen.length,
+      "Profilabstand [m]", tbZahl("profilAbstand", 20)]);
+    rows.push(["Regelquerschnitt", `Fahrbahn ${e.qs.fahrbahn} m`, `Querneigung ${e.qs.querneigung} %`,
+      `Bankett ${e.qs.bankett} m`, `Oberbau ${e.qs.oberbau} m`, `Oberboden ${e.qs.oberboden} m`,
+      `Böschung Auftrag 1:${e.qs.boeschungAuftrag}`, `Böschung Abtrag 1:${e.qs.boeschungAbtrag}`]);
+    rows.push([]);
+    rows.push(["Achse"]);
+    rows.push(["Nr", "Art", "Station von", "Station bis", "Länge [m]", "Radius [m]", "Radius Ende [m]",
+      "A", "Rechts Anfang", "Hoch Anfang", "Richtung Anfang [Grad]"]);
+    e.trasse.elemente.forEach((el) => {
+      rows.push([el.nummer, TRASSE_ARTEN[el.art].name, el.station.toFixed(3), el.stationEnde.toFixed(3),
+        el.laenge.toFixed(3), el.radius || "", el.art === "klothoide" ? el.radiusEnde : "",
+        el.A ? el.A.toFixed(2) : "", el.x.toFixed(3), el.y.toFixed(3),
+        ((el.richtung * 180) / Math.PI).toFixed(4)]);
+    });
+    rows.push([]);
+    rows.push(["Querprofile"]);
+    rows.push(["Station", "Gradiente [m]", "Gelände [m]", "A Abtrag [m2]", "A Auftrag [m2]",
+      "A Oberboden [m2]", "A Oberbau [m2]", "Breite [m]"]);
+    e.massen.profile.forEach((p) => {
+      rows.push([stationText(p.station), p.profil.achshoehe.toFixed(3), p.profil.gelaende.hoehe.toFixed(3),
+        p.profil.flaechen.abtrag.toFixed(3), p.profil.flaechen.auftrag.toFixed(3),
+        p.profil.flaechen.oberboden.toFixed(3), p.profil.flaechen.oberbau.toFixed(3),
+        p.profil.breite.toFixed(3)]);
+    });
+    rows.push([]);
+    rows.push(["Massen je Feld (Mittelwertverfahren und Prismenformel)"]);
+    rows.push(["von", "bis", "e [m]", "V Abtrag [m3]", "V Auftrag [m3]", "V Abtrag Prisma [m3]",
+      "V Auftrag Prisma [m3]", "V Oberboden [m3]", "V Oberbau [m3]"]);
+    e.massen.felder.forEach((f) => {
+      rows.push([stationText(f.von), stationText(f.bis), f.abstand.toFixed(2), f.abtrag.toFixed(2),
+        f.auftrag.toFixed(2), f.abtragPrisma.toFixed(2), f.auftragPrisma.toFixed(2),
+        f.oberboden.toFixed(2), f.oberbau.toFixed(2)]);
+    });
+    const s = e.massen.summe;
+    rows.push(["Summe", "", "", s.abtrag.toFixed(2), s.auftrag.toFixed(2), s.abtragPrisma.toFixed(2),
+      s.auftragPrisma.toFixed(2), s.oberboden.toFixed(2), s.oberbau.toFixed(2)]);
+    rows.push([]);
+    const a = e.ausgleich;
+    rows.push(["Massenausgleich", a.boden.name]);
+    rows.push(["Auflockerungsfaktor", a.boden.auflockerung, "Verdichtungsfaktor", a.boden.verdichtung,
+      "wiederverwendbar [%]", a.boden.wiederverwendung]);
+    rows.push(["Abtrag fest [m3]", a.abtragFest.toFixed(2)]);
+    rows.push(["davon brauchbar [m3]", a.brauchbarFest.toFixed(2)]);
+    rows.push(["Auftrag verdichtet [m3]", a.auftragVerdichtet.toFixed(2)]);
+    rows.push(["aus dem Abtrag eingebaut [m3]", a.einbauAusAbtragVerdichtet.toFixed(2)]);
+    rows.push(["Fehlmenge verdichtet [m3]", a.fehlmengeVerdichtet.toFixed(2)]);
+    rows.push(["zu liefern fest [m3]", a.lieferungFest.toFixed(2)]);
+    rows.push(["Abfuhr fest [m3]", a.abfuhrFest.toFixed(2), "Abfuhr lose [m3]", a.abfuhrLose.toFixed(2)]);
+    rows.push([]);
+    rows.push(["Kostenschätzung Erdarbeiten"]);
+    rows.push(["Pos", "Kurztext", "Menge", "Einheit", "EP [EUR]", "GP [EUR]", "Hinweis"]);
+    e.kosten.zeilen.forEach((zl) => {
+      rows.push([zl.nr, zl.kurz, zl.menge.toFixed(2), zl.einheit, zl.ep.toFixed(2), zl.gp.toFixed(2), zl.hinweis || ""]);
+    });
+    rows.push(["", "Summe (ohne Umsatzsteuer)", "", "", "", e.kosten.summe.toFixed(2)]);
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Erdmassen_${name}.csv`, "\ufeff" + zuCsv(rows), "text/csv;charset=utf-8;");
+    setStatus("Massen und Kostenschätzung als CSV ausgegeben – mit Achse, Querprofilen und Massenausgleich.", "ok");
+  });
+
   /* ------------------------------------------- Bedienung der Baustelle */
 
   document.getElementById("btnAufmassNeu").addEventListener("click", () => {
@@ -4284,6 +4747,27 @@
       naechsteBetonId: model.nextBetonId,
       naechsteAussparungId: model.nextAussparungId,
       achsraster: rasterVorgabe(),
+      // Tiefbau: Achse, Gradiente und Gelände gehören zum Projekt.
+      // Die Punktwolke des Bestands nicht – sie wäre zu groß.
+      tiefbau: {
+        achse: tiefbau.achse, gradiente: tiefbau.gradiente, gelaende: tiefbau.gelaende,
+        start: {
+          x: field("achseStartX"), y: field("achseStartY"),
+          richtung: field("achseStartRichtung"), station: field("achseStartStation"),
+        },
+        querschnitt: {
+          fahrbahn: field("qsFahrbahn"), querneigung: field("qsQuerneigung"),
+          dach: field("qsDach"), bankett: field("qsBankett"),
+          bankettNeigung: field("qsBankettNeigung"), oberbau: field("qsOberbau"),
+          oberboden: field("qsOberboden"), boeschungAuftrag: field("qsBoeschungAuftrag"),
+          boeschungAbtrag: field("qsBoeschungAbtrag"), profilAbstand: field("profilAbstand"),
+        },
+        boden: {
+          art: field("bodenArt"), auflockerung: field("bodenAuflockerung"),
+          verdichtung: field("bodenVerdichtung"), wieder: field("bodenWieder"),
+          transportKm: field("transportKm"), transportPreis: field("transportPreis"),
+        },
+      },
       betonbau: {
         arbeitsraum: field("arbeitsraum"), preisBeton: field("preisBeton"),
         preisSchalung: field("preisSchalung"), preisBewehrung: field("preisBewehrung"),
@@ -4323,6 +4807,11 @@
     model.nextTagId = data.naechsteTagId
       || (Math.max(0, ...(data.bautagebuch || []).map((t) => t.id)) + 1);
     model.nextAussparungId = data.naechsteAussparungId || 1;
+    // Tiefbau
+    tiefbau.achse = (data.tiefbau && data.tiefbau.achse) || [];
+    tiefbau.gradiente = (data.tiefbau && data.tiefbau.gradiente) || [];
+    tiefbau.gelaende = (data.tiefbau && data.tiefbau.gelaende) || [];
+    tiefbauErgebnis = null;
     Object.keys(materialPreise).forEach((k) => delete materialPreise[k]);
     Object.assign(materialPreise, data.baustoffpreise || {});
 
@@ -4353,6 +4842,31 @@
       set("rasterBeschriftungX", data.achsraster.beschriftungX, "zahlen");
       set("rasterBeschriftungZ", data.achsraster.beschriftungZ, "buchstaben");
       set("rasterToleranz", data.achsraster.toleranz, "0.05");
+    }
+    if (data.tiefbau) {
+      const t = data.tiefbau;
+      if (t.start) {
+        set("achseStartX", t.start.x, "0"); set("achseStartY", t.start.y, "0");
+        set("achseStartRichtung", t.start.richtung, "0"); set("achseStartStation", t.start.station, "0");
+      }
+      if (t.querschnitt) {
+        const q = t.querschnitt;
+        set("qsFahrbahn", q.fahrbahn, "6.50"); set("qsQuerneigung", q.querneigung, "2.5");
+        set("qsDach", q.dach, "dach"); set("qsBankett", q.bankett, "1.50");
+        set("qsBankettNeigung", q.bankettNeigung, "12"); set("qsOberbau", q.oberbau, "0.55");
+        set("qsOberboden", q.oberboden, "0.25");
+        set("qsBoeschungAuftrag", q.boeschungAuftrag, "1.5");
+        set("qsBoeschungAbtrag", q.boeschungAbtrag, "1.5");
+        set("profilAbstand", q.profilAbstand, "20");
+      }
+      if (t.boden) {
+        set("bodenArt", t.boden.art, "lehm");
+        set("bodenAuflockerung", t.boden.auflockerung, "1.25");
+        set("bodenVerdichtung", t.boden.verdichtung, "0.92");
+        set("bodenWieder", t.boden.wieder, "60");
+        set("transportKm", t.boden.transportKm, "12");
+        set("transportPreis", t.boden.transportPreis, "0.35");
+      }
     }
     if (data.betonbau) {
       set("arbeitsraum", data.betonbau.arbeitsraum, "0.50");

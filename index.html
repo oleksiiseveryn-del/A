@@ -85,6 +85,7 @@
     <button class="ribbon-tab" data-band="plaene" role="tab">Pläne</button>
     <button class="ribbon-tab" data-band="baustelle" role="tab">Baustelle</button>
     <button class="ribbon-tab" data-band="bestand" role="tab">Bestand</button>
+    <button class="ribbon-tab" data-band="tiefbau" role="tab">Tiefbau</button>
     <button class="ribbon-tab" data-band="koordination" role="tab">Koordination</button>
     <button class="ribbon-tab" data-band="auswertung" role="tab">Auswertung</button>
 
@@ -412,6 +413,69 @@
     </div>
   </div>
 
+  <!-- ================================================ Tiefbau -->
+  <div class="ribbon-band" data-band="tiefbau" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnAchseElement" data-reiter="tiefbau" title="Element an die Achse anhängen: Gerade, Bogen oder Klothoide">
+          <span class="ribbon-icon">↝</span><span class="ribbon-label">Element<br>anhängen</span></button>
+        <label class="ribbon-feld"><span>Art</span>
+          <select id="achseArt">
+            <option value="gerade">Gerade</option>
+            <option value="bogen">Kreisbogen</option>
+            <option value="klothoide">Klothoide</option>
+          </select></label>
+        <label class="ribbon-feld"><span>Länge [m]</span>
+          <input type="number" id="achseLaenge" step="5" min="1" value="100"></label>
+        <label class="ribbon-feld"><span>Radius [m]</span>
+          <input type="number" id="achseRadius" step="10" value="250" title="Positiv = Linkskurve, negativ = Rechtskurve"></label>
+      </div>
+      <div class="ribbon-caption">Achse</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnGradientePunkt" data-reiter="tiefbau" title="Neigungswechselpunkt an die Gradiente anhängen">
+          <span class="ribbon-icon">⌒</span><span class="ribbon-label">Gradienten-<br>punkt</span></button>
+        <button class="ribbon-btn" data-befehl="btnGelaendePunkt" data-reiter="tiefbau" title="Geländehöhe an einer Station eintragen">
+          <span class="ribbon-icon">⛰</span><span class="ribbon-label">Gelände-<br>punkt</span></button>
+      </div>
+      <div class="ribbon-caption">Höhen</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnMassen" data-reiter="tiefbau" title="Querprofile rechnen und Massen ermitteln">
+          <span class="ribbon-icon">Σ</span><span class="ribbon-label">Massen<br>rechnen</span></button>
+        <label class="ribbon-feld"><span>Profilabstand [m]</span>
+          <input type="number" id="profilAbstand" step="5" min="1" value="20"></label>
+      </div>
+      <div class="ribbon-caption">Massenberechnung</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnLageplan" data-reiter="tiefbau" title="Lageplan der Achse als Blatt A4 quer">
+          <span class="ribbon-icon">🗺</span><span class="ribbon-label">Lageplan</span></button>
+        <button class="ribbon-btn" data-befehl="btnHoehenplan" data-reiter="tiefbau" title="Höhenplan mit Massenlinie als Blatt A4 quer">
+          <span class="ribbon-icon">📈</span><span class="ribbon-label">Höhenplan</span></button>
+        <button class="ribbon-btn" data-befehl="btnQuerprofile" data-reiter="tiefbau" title="Querprofilblätter">
+          <span class="ribbon-icon">▥</span><span class="ribbon-label">Quer-<br>profile</span></button>
+        <button class="ribbon-btn" data-befehl="btnErdCsv" data-reiter="tiefbau" title="Massen und Kostenschätzung als CSV">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Massen<br>(CSV)</span></button>
+      </div>
+      <div class="ribbon-caption">Pläne und Ausgabe</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="tabTiefbau" title="Achse, Gradiente, Gelände und Massen zeigen">
+          <span class="ribbon-icon">📋</span><span class="ribbon-label">Tiefbauliste</span></button>
+      </div>
+      <div class="ribbon-caption">Ansicht</div>
+    </div>
+  </div>
+
   <div class="ribbon-band" data-band="koordination" hidden>
     <div class="ribbon-group">
       <div class="ribbon-items">
@@ -495,6 +559,7 @@
         <button class="tab-btn" id="tabPositionen">Positionen</button>
         <button class="tab-btn" id="tabBaustelle">Baustelle</button>
         <button class="tab-btn" id="tabBestand">Bestand</button>
+        <button class="tab-btn" id="tabTiefbau">Tiefbau</button>
         <button class="tab-btn" id="tabKoordination">Koordination</button>
         <button class="tab-btn" id="tabCutList">Stückliste</button>
       </div>
@@ -1460,6 +1525,169 @@
       <div class="layer-note" id="dxfStand"></div>
     </div>
 
+    <div class="result-panel-body" id="viewTiefbau" hidden>
+      <h3 class="section-title">Achse (Trassierung)</h3>
+      <p class="view-note">Die Achse besteht aus <strong>Geraden</strong>, <strong>Kreisbögen</strong> und
+        <strong>Klothoiden</strong>. Die Klothoide ist der Übergangsbogen, in dem die Krümmung mit der Weglänge
+        gleichmäßig wächst (A² = R · L); Gerade und Bogen werden geschlossen gerechnet, die Klothoide über die
+        Integration nach Simpson. Ein positiver Radius ist eine Links-, ein negativer eine Rechtskurve.
+        Geprüft werden Mindestradius, der Richtwert R/3 ≤ A ≤ R und Krümmungssprünge zwischen benachbarten
+        Elementen. <strong>Maßgebend</strong> sind die Grenzwerte der Entwurfsklasse nach RAL bzw. RASt – die
+        hinterlegten Werte sind sichtbare Richtwerte, keine Vorschrift.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="achseStartX">Anfang Rechts [m]</label>
+          <input type="number" id="achseStartX" step="1" value="0"></div>
+        <div class="field"><label for="achseStartY">Anfang Hoch [m]</label>
+          <input type="number" id="achseStartY" step="1" value="0"></div>
+        <div class="field"><label for="achseStartRichtung">Anfangsrichtung [°]</label>
+          <input type="number" id="achseStartRichtung" step="1" value="0"></div>
+        <div class="field"><label for="achseStartStation">Anfangsstation [m]</label>
+          <input type="number" id="achseStartStation" step="10" value="0"></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnAchseElement" title="Element anhängen">↝ Element anhängen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnAchseBeispiel" title="Beispielachse mit Übergangsbögen einsetzen">Beispiel einsetzen</button></div>
+      </div>
+      <table class="members-table" id="achseTable">
+        <thead><tr>
+          <th>Nr</th><th>Art</th><th>Länge [m]</th><th>Radius [m]</th><th>Radius Ende [m]</th>
+          <th>Station von</th><th>bis</th><th>A</th><th>Ende Rechts / Hoch</th><th>Richtung [°]</th><th></th>
+        </tr></thead>
+        <tbody id="achseBody"></tbody>
+      </table>
+      <div class="empty-state" id="achseEmpty">Noch keine Achse – Element anhängen oder Beispiel einsetzen.</div>
+
+      <h3 class="section-title">Gradiente (Höhenplan)</h3>
+      <p class="view-note">Neigungswechsel werden mit einer quadratischen Parabel ausgerundet. Bei Halbmesser H
+        und Neigungssprung Δs ist die Ausrundungslänge L = H · Δs, die Tangentenlänge T = L/2 und das Stichmaß
+        Δs · L/8. Kuppen und Wannen ergeben sich aus dem Vorzeichen des Neigungswechsels.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="gradStation">Station [m]</label>
+          <input type="number" id="gradStation" step="10" value="0"></div>
+        <div class="field"><label for="gradHoehe">Höhe [m NHN]</label>
+          <input type="number" id="gradHoehe" step="0.01" value="12.50"></div>
+        <div class="field"><label for="gradHalbmesser">Ausrundung H [m]</label>
+          <input type="number" id="gradHalbmesser" step="100" value="2500" title="0 = Knick ohne Ausrundung"></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnGradientePunkt">⌒ Punkt anhängen</button></div>
+      </div>
+      <table class="members-table" id="gradTable">
+        <thead><tr><th>Station</th><th>Höhe [m]</th><th>Ausrundung H [m]</th><th>Neigung danach [%]</th>
+          <th>Art</th><th>L [m]</th><th>T [m]</th><th>Stich [m]</th><th></th></tr></thead>
+        <tbody id="gradBody"></tbody>
+      </table>
+      <div class="empty-state" id="gradEmpty">Noch keine Gradiente.</div>
+
+      <h3 class="section-title">Gelände</h3>
+      <p class="view-note">Das Gelände wird je Station durch die <strong>Höhe in der Achse</strong> und die
+        <strong>Querneigung</strong> beschrieben; dazwischen wird linear interpoliert. Ein aufgemessenes
+        Geländemodell (DGM) oder ein Geländeprofil mit Knickpunkten ist <strong>nicht enthalten</strong> – für
+        die Kostenschätzung ist diese Beschreibung üblich, für die Abrechnung ist das Aufmaß maßgebend.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="gelStation">Station [m]</label>
+          <input type="number" id="gelStation" step="10" value="0"></div>
+        <div class="field"><label for="gelHoehe">Geländehöhe [m NHN]</label>
+          <input type="number" id="gelHoehe" step="0.01" value="12.00"></div>
+        <div class="field"><label for="gelNeigung">Querneigung [%]</label>
+          <input type="number" id="gelNeigung" step="0.5" value="0" title="Gefälle nach rechts, in Fahrtrichtung"></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnGelaendePunkt">⛰ Punkt anhängen</button></div>
+      </div>
+      <table class="members-table" id="gelTable">
+        <thead><tr><th>Station</th><th>Höhe [m]</th><th>Querneigung [%]</th><th></th></tr></thead>
+        <tbody id="gelBody"></tbody>
+      </table>
+      <div class="empty-state" id="gelEmpty">Noch keine Geländepunkte.</div>
+
+      <h3 class="section-title">Regelquerschnitt</h3>
+      <p class="view-note">Das <strong>Planum</strong> liegt lotrecht um die Oberbaudicke unter Fahrbahn und
+        Bankett; an der Planumskante beginnt die Böschung mit 1:n bis zum Schnitt mit dem Gelände. Gerechnet wird
+        gegen das Gelände <strong>nach Abtrag des Oberbodens</strong>; der Oberboden ist eine eigene Leistung
+        (Abtragen und Lagern nach DIN 18915). Die Oberbaudicke ist eine Eingabe – die Bauklasse folgt aus der
+        Belastung nach RStO. <strong>Nicht enthalten</strong>: Mulden und Gräben, Kurvenaufweitung, Verwindung
+        und Anrampung der Querneigung, Entwässerung.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="qsFahrbahn">Fahrbahn [m]</label>
+          <input type="number" id="qsFahrbahn" step="0.25" min="2" value="6.50"></div>
+        <div class="field"><label for="qsQuerneigung">Querneigung [%]</label>
+          <input type="number" id="qsQuerneigung" step="0.5" value="2.5"></div>
+        <div class="field"><label for="qsDach">Form</label>
+          <select id="qsDach">
+            <option value="dach" selected>Dachprofil</option>
+            <option value="einseitig">einseitiges Gefälle</option>
+          </select></div>
+        <div class="field"><label for="qsBankett">Bankett [m]</label>
+          <input type="number" id="qsBankett" step="0.25" min="0" value="1.50"></div>
+        <div class="field"><label for="qsBankettNeigung">Bankett [%]</label>
+          <input type="number" id="qsBankettNeigung" step="1" value="12"></div>
+        <div class="field"><label for="qsOberbau">Oberbau [m]</label>
+          <input type="number" id="qsOberbau" step="0.05" min="0" value="0.55"></div>
+        <div class="field"><label for="qsOberboden">Oberboden [m]</label>
+          <input type="number" id="qsOberboden" step="0.05" min="0" value="0.25"></div>
+        <div class="field"><label for="qsBoeschungAuftrag">Böschung Auftrag 1:n</label>
+          <input type="number" id="qsBoeschungAuftrag" step="0.25" min="0.5" value="1.5"></div>
+        <div class="field"><label for="qsBoeschungAbtrag">Böschung Abtrag 1:n</label>
+          <input type="number" id="qsBoeschungAbtrag" step="0.25" min="0.5" value="1.5"></div>
+      </div>
+
+      <h3 class="section-title">Massen und Massenausgleich</h3>
+      <p class="view-note">Aus den Querschnittsflächen zweier Nachbarprofile im Abstand e:
+        <strong>Mittelwertverfahren</strong> V = (A₁ + A₂)/2 · e und <strong>Prismenformel</strong>
+        V = e/6 · (A₁ + 4·A_m + A₂) mit dem an der halben Station gerechneten Mittelprofil. Beide werden geführt,
+        weil sie sich bei stark veränderlichen Profilen unterscheiden; <strong>Verfahren und Profilabstand sind
+        vertraglich zu vereinbaren</strong> (REB-Verfahrensbeschreibungen zur Massenberechnung aus Querprofilen,
+        VOB/C DIN 18300). Maßarten: <em>Festmaß</em> im Verband (so wird der Abtrag gemessen),
+        <em>Lockermaß</em> = Festmaß × Auflockerungsfaktor (so wird transportiert), <em>verdichtetes Maß</em>
+        = Festmaß × Verdichtungsfaktor (so wird der Auftrag gemessen).</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="bodenArt">Homogenbereich (DIN 18300)</label>
+          <select id="bodenArt"></select></div>
+        <div class="field"><label for="bodenAuflockerung">Auflockerung</label>
+          <input type="number" id="bodenAuflockerung" step="0.01" min="1" value="1.25"></div>
+        <div class="field"><label for="bodenVerdichtung">Verdichtung</label>
+          <input type="number" id="bodenVerdichtung" step="0.01" min="0.5" value="0.92"></div>
+        <div class="field"><label for="bodenWieder">wiederverwendbar [%]</label>
+          <input type="number" id="bodenWieder" step="5" min="0" max="100" value="60"></div>
+        <div class="field"><label for="transportKm">Transportweg [km]</label>
+          <input type="number" id="transportKm" step="1" min="0" value="12"></div>
+        <div class="field"><label for="transportPreis">Transport [€/m³·km]</label>
+          <input type="number" id="transportPreis" step="0.05" min="0" value="0.35"></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnMassen">Σ Massen rechnen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnLageplan" title="Lageplan der Achse als Blatt A4 quer">🗺 Lageplan</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnHoehenplan" title="Höhenplan mit Massenlinie">📈 Höhenplan</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnQuerprofile" title="Querprofilblätter">▥ Querprofile</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnErdCsv" title="Massen und Kostenschätzung als CSV">⬇ Massen (CSV)</button></div>
+      </div>
+      <div class="summary-bar" id="tiefbauKennzahlen"></div>
+      <div class="layer-note" id="tiefbauMeldungen"></div>
+
+      <table class="members-table" id="massenTable">
+        <thead><tr>
+          <th>von</th><th>bis</th><th>e [m]</th>
+          <th>A Abtrag [m²]</th><th>A Auftrag [m²]</th>
+          <th>V Abtrag [m³]</th><th>V Auftrag [m³]</th>
+          <th>V Abtrag Prisma</th><th>V Auftrag Prisma</th>
+          <th>Oberboden [m³]</th><th>Oberbau [m³]</th>
+        </tr></thead>
+        <tbody id="massenBody"></tbody>
+      </table>
+      <div class="empty-state" id="massenEmpty">Noch nicht gerechnet – „Σ Massen rechnen“.</div>
+
+      <h3 class="section-title">Kostenschätzung Erdarbeiten</h3>
+      <table class="members-table" id="erdKostenTable">
+        <thead><tr><th>Pos</th><th>Kurztext</th><th>Menge</th><th>Einheit</th><th>EP [€]</th><th>GP [€]</th><th>Hinweis</th></tr></thead>
+        <tbody id="erdKostenBody"></tbody>
+      </table>
+      <p class="view-note">Die Einheitspreise sind Anhaltswerte für die Kostenschätzung und durch die eigene
+        Kalkulation zu ersetzen. Entsorgungsklasse und Verwertbarkeit folgen aus dem Baugrundgutachten und der
+        Untersuchung nach LAGA/AVV.</p>
+    </div>
+
     <div class="result-panel-body" id="viewBestand" hidden>
       <h3 class="section-title">Bauen im Bestand: Punktwolke aus dem 3D-Laserscan</h3>
       <p class="view-note">Gelesen werden <strong>LAS</strong> (1.0 bis 1.4, Punktformate 0 bis 8),
@@ -1942,6 +2170,8 @@
 <script src="js/clash.js"></script>
   <script src="js/dxf.js"></script>
   <script src="js/pointcloud.js"></script>
+  <script src="js/civil.js"></script>
+  <script src="js/civilplan.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>
