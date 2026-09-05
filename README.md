@@ -41,6 +41,7 @@ schieben; Bedienelemente sind mindestens 44 pt hoch und Eingabefelder mindestens
 | Projektdatei | JSON mit dem vollständigen Modell |
 | Aufmaß und Bautagebuch | CSV sowie Aufmaßblatt und Tagesbericht als SVG im Blatt A4 quer |
 | Koordinationsmodell | IFC4 nach ISO 16739 (OpenBIM) mit Eigenschaftssätzen; Kollisionsbefunde als CSV |
+| Zeichnung für CAD | DXF R12 (AC1009) als Grundriss oder räumliches Modell, in Metern oder Millimetern, Ebenen nach Bauteilart |
 | Papier und PDF | über *Drucken*; aus dem Blattfenster kommt das Blatt allein auf das Papier |
 
 **↗ Weitergeben** übergibt die zuletzt erzeugte Datei an das Systemmenü des Geräts
@@ -80,6 +81,7 @@ js/
   attributes.js           Bauteilattribute: Feuerwiderstand, Baustoff, Gewerk
   clash.js                Kollisionsprüfung im Koordinationsmodell
   ifc.js                  IFC-Export nach ISO 16739 (IFC4)
+  dxf.js                  DXF-Export R12 für AutoCAD, Allplan und andere CAD
 python/                   Bewehrung und Herstellungsunterlagen (46 Prüfungen)
 desktop/                  Windows-Anwendung (Electron) – siehe desktop/README.md
 tools/

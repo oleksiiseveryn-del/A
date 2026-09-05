@@ -381,6 +381,8 @@
       <div class="ribbon-items">
         <button class="ribbon-btn primary gross" data-befehl="btnIfcExport" data-reiter="koordination" title="Modell als IFC4 für andere Fachplanungen und für Lumion oder Twinmotion">
           <span class="ribbon-icon">🔗</span><span class="ribbon-label">IFC4<br>ausgeben</span></button>
+        <button class="ribbon-btn primary gross" data-befehl="btnDxfExport" data-reiter="koordination" title="Modell als DXF R12 für AutoCAD, Allplan, ArchiCAD und andere CAD-Programme">
+          <span class="ribbon-icon">📐</span><span class="ribbon-label">DXF<br>ausgeben</span></button>
       </div>
       <div class="ribbon-caption">OpenBIM</div>
     </div>
@@ -1368,6 +1370,47 @@
         IfcGrid, Verschneidungen der Bauteile untereinander und die Mengen nach Base Quantities. Die Geometrie ist
         die Rohbaugeometrie der Achsen und Regelabmessungen, nicht die verschnittene Ausführungsgeometrie.</p>
       <div class="layer-note" id="ifcStand"></div>
+
+      <p class="view-note">Der <strong>DXF-Export</strong> schreibt das Modell als Zeichnung in der Fassung
+        <strong>R12 (AC1009)</strong> – die Fassung mit der größten Reichweite: AutoCAD, Allplan, ArchiCAD,
+        BricsCAD, Revit, QCAD und LibreCAD lesen sie ohne Nacharbeit. Wählbar sind der <em>Grundriss</em>
+        (Draufsicht, flach in der Ebene z = 0, je Geschoss eigene Ebenen wie BETON_STUETZE_EG) und das
+        <em>Modell</em> (die Körper räumlich als Flächen an ihrer wirklichen Höhenlage). Die Ebenen folgen der
+        Bauteilart und tragen feste Farben. Die Maßeinheit ist eine Festlegung: im Hochbau meist Millimeter,
+        im Tiefbau und in Lageplänen Meter.
+        <strong>DWG</strong> ist das nicht offengelegte Hausformat von AutoCAD und ohne fremde
+        Programmbibliothek nicht zu schreiben; DXF ist der offene Weg dorthin und wird von AutoCAD verlustfrei
+        geöffnet. <strong>Nicht enthalten</strong>: Bemaßung, Schraffur, Blöcke sowie Aussparungen und
+        Öffnungen – ausgegeben wird die Rohbaugeometrie der Achsen und Regelabmessungen.</p>
+
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="dxfModus">Inhalt</label>
+          <select id="dxfModus" title="Grundriss für die Zeichnung, Modell für die räumliche Weitergabe">
+            <option value="grundriss" selected>Grundriss (flach, je Geschoss)</option>
+            <option value="modell">Modell (räumlich als Flächen)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="dxfEinheit">Maßeinheit</label>
+          <select id="dxfEinheit" title="Zeicheneinheit der DXF-Datei">
+            <option value="m" selected>Meter</option>
+            <option value="mm">Millimeter</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="dxfText">Beschriftung</label>
+          <select id="dxfText" title="Bauteilbezeichnungen als Text mit ausgeben">
+            <option value="ja" selected>Bezeichnungen mit ausgeben</option>
+            <option value="nein">ohne Beschriftung</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnDxfExport" title="Modell als DXF R12 für CAD ausgeben">📐 DXF ausgeben</button>
+        </div>
+      </div>
+      <div class="layer-note" id="dxfStand"></div>
     </div>
 
     <div class="result-panel-body" id="viewCutList" hidden>
@@ -1706,6 +1749,7 @@
 <script src="js/attributes.js"></script>
 <script src="js/ifc.js"></script>
 <script src="js/clash.js"></script>
+  <script src="js/dxf.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

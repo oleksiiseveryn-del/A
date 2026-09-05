@@ -95,6 +95,30 @@ function sectionProfile(family, profile) {
   }
 }
 
+/**
+ * Äußere Abmessungen des Querschnitts in mm: Breite, Höhe und ob er rund ist.
+ *
+ * Die Profiltabelle führt h und b nur für die Walzprofile mit Steg und
+ * Flansch. Für Hohlprofile, Rohre und Winkel stehen die Maße im Namen
+ * ("RHS 100x100x6", "Rohr 48.3x3.2", "L 50x50x5"); sie werden hier aus dem
+ * Umriss abgegriffen. Gebraucht werden sie überall dort, wo ein Stab durch
+ * seinen umschriebenen Körper dargestellt wird: räumliche Ansicht,
+ * Kollisionsprüfung, IFC und DXF.
+ */
+function sectionOuter(family, profile) {
+  const s = sectionProfile(family, profile);
+  if (s.round) return { b: s.d, h: s.d, rund: true };
+  const punkte = s.outline.concat(...(s.extra || []));
+  if (!punkte.length) return { b: 100, h: 100, rund: false };
+  const xs = punkte.map((p) => p[0]);
+  const ys = punkte.map((p) => p[1]);
+  return {
+    b: Math.max(...xs) - Math.min(...xs),
+    h: Math.max(...ys) - Math.min(...ys),
+    rund: false,
+  };
+}
+
 /** Größte Querschnittsabmessung in mm - für Kameraabstand und Fangtoleranzen. */
 function sectionSize(family, profile) {
   const s = sectionProfile(family, profile);

@@ -2425,11 +2425,14 @@
       // Querschnittsmaße aus der Profiltabelle: sie bestimmen den Körper,
       // mit dem der Stab in IFC und in der Kollisionsprüfung erscheint
       const tabelle = STEEL_DB[design.family];
-      const profil = (tabelle && tabelle.find((x) => design.profileName.indexOf(x.name) === 0)) || {};
+      const profil = tabelle && tabelle.find((x) => design.profileName.indexOf(x.name) === 0);
       const laenge = memberLength(member);
       const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z;
-      const hProfil = (profil.h || 100) / 1000;
-      const bProfil = (profil.b || 100) / 1000;
+      // Äußere Profilmaße: bei Hohlprofilen, Rohren und Winkeln stehen sie
+      // im Profilnamen und nicht als Spalte in der Tabelle
+      const mass = profil ? sectionOuter(design.family, profil) : { h: 100, b: 100 };
+      const hProfil = mass.h / 1000;
+      const bProfil = mass.b / 1000;
       // Der Stab kann schräg oder lotrecht stehen. Für die Kollisionsprüfung
       // zählt seine wirkliche Ausdehnung: im Grundriss die waagerechte
       // Projektion, in der Höhe der Bereich zwischen beiden Knoten – jeweils
@@ -2443,10 +2446,17 @@
           laenge: Math.max(grundriss, bProfil),
           breite: bProfil,
           hoehe: Math.max(Math.abs(dy), hProfil),
-          // Für IFC wird das Profil entlang der Stabachse ausgetragen;
-          // die Richtung steht im Koordinatensystem der IFC-Datei (x, z, y)
+          // Für IFC und DXF wird das Profil entlang der Stabachse ausgetragen;
+          // die Richtung steht im Koordinatensystem der Ausgabe (x, z, y)
           achse: { x: dx / laenge, y: dz / laenge, z: dy / laenge },
           achslaenge: laenge,
+          // Anfangsknoten des Stabes: von hier aus wird ausgetragen. Ohne
+          // ihn säße der Stab um seine halbe Länge versetzt, weil die Lage
+          // die Mitte des Prismas für die Kollisionsprüfung beschreibt.
+          start: { x: a.x, y: a.z, z: a.y },
+          // Querschnitt des Profils. Die Höhe des Prismas oben ist die
+          // lotrechte Ausdehnung des Stabes und nicht seine Profilhöhe.
+          querschnitt: { b: bProfil, h: hProfil },
         },
         lage: {
           x: (a.x + b.x) / 2, y: (a.z + b.z) / 2,
@@ -3511,6 +3521,25 @@
       + `${(inhalt.length / 1024).toFixed(0)} kB · Schema IFC4 (ISO 16739).`;
     setStatus(`IFC4 ausgegeben: ${bauteile.length} Bauteile, ${eintraege} Einträge. `
       + "Bewehrung, Räume und Achsraster sind nicht enthalten.", "ok");
+  });
+
+  document.getElementById("btnDxfExport").addEventListener("click", () => {
+    const { bauteile } = modellBauteile();
+    if (!bauteile.length) { setStatus("Keine Bauteile vorhanden.", "error"); return; }
+    const modus = document.getElementById("dxfModus").value;
+    const einheit = document.getElementById("dxfEinheit").value;
+    const mitText = document.getElementById("dxfText").value === "ja";
+    const inhalt = dxfExport({ projekt: projektKopf(), bauteile, modus, einheit, text: mitText });
+    const bericht = dxfBericht(inhalt, bauteile, modus, einheit);
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`${name}_${modus === "modell" ? "Modell" : "Grundriss"}.dxf`, inhalt, "application/dxf");
+    document.getElementById("dxfStand").textContent =
+      `Zuletzt ausgegeben: ${bericht.modus} · ${bericht.bauteile} Bauteile · `
+      + `${bericht.elemente} Zeichenelemente auf ${bericht.ebenen} Ebenen · `
+      + `Einheit ${bericht.einheit} · ${(bericht.groesse / 1024).toFixed(0)} kB · Fassung R12 (AC1009).`;
+    setStatus(`DXF ausgegeben: ${bericht.modus}, ${bericht.elemente} Zeichenelemente auf `
+      + `${bericht.ebenen} Ebenen, Einheit ${bericht.einheit}. `
+      + "Bemaßung, Schraffur und Öffnungen sind nicht enthalten.", "ok");
   });
 
   /* ------------------------------------------- Bedienung der Baustelle */

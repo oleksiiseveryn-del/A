@@ -278,8 +278,10 @@ function ifcExport(daten) {
       profil = d.add(`IFCCIRCLEPROFILEDEF(.AREA.,$,#${d.achse2d(d.punkt(0, 0), d.richtung(1, 0))},`
         + `${ifcZahl(k.durchmesser / 2)})`);
     } else {
-      const qb = k.achse ? k.breite : k.laenge;
-      const qh = k.achse ? k.hoehe : k.breite;
+      // Bei Bauteilen mit eigener Achse ist der Querschnitt das Profil und
+      // nicht der Hüllkörper, mit dem die Kollisionsprüfung rechnet.
+      const qb = k.achse ? ((k.querschnitt && k.querschnitt.b) || k.breite) : k.laenge;
+      const qh = k.achse ? ((k.querschnitt && k.querschnitt.h) || k.hoehe) : k.breite;
       profil = d.add(`IFCRECTANGLEPROFILEDEF(.AREA.,$,#${d.achse2d(d.punkt(0, 0), d.richtung(1, 0))},`
         + `${ifcZahl(qb)},${ifcZahl(qh)})`);
     }
@@ -348,9 +350,16 @@ function ifcExport(daten) {
     const g = geschosse.find((x) => x.name === b.geschoss) || geschosse[0];
 
     const lage = b.lage || { x: 0, y: 0, z: 0, drehung: 0 };
-    const rad = ((lage.drehung || 0) * Math.PI) / 180;
-    const richtung = d.richtung(Math.cos(rad), Math.sin(rad), 0);
-    const ort = d.ort(d.achse3d(d.punkt(lage.x, lage.y, lage.z - g.kote), hochachse, richtung), g.ort);
+    const kk = b.koerper || {};
+    // Bauteile mit eigener Achse – die Stäbe des Stahlbaus – werden an ihrem
+    // Anfangsknoten abgesetzt und von dort ausgetragen. Ihr Bauteilsystem
+    // bleibt achsparallel zur Welt: die Achse ist bereits in Weltrichtungen
+    // angegeben und darf nicht ein zweites Mal gedreht werden.
+    const eigeneAchse = !!(kk.achse && kk.start);
+    const bezug = eigeneAchse ? kk.start : lage;
+    const rad = eigeneAchse ? 0 : ((lage.drehung || 0) * Math.PI) / 180;
+    const richtung = eigeneAchse ? xAchse : d.richtung(Math.cos(rad), Math.sin(rad), 0);
+    const ort = d.ort(d.achse3d(d.punkt(bezug.x, bezug.y, bezug.z - g.kote), hochachse, richtung), g.ort);
     const gestalt = koerper(b.koerper);
 
     // Nach IFC4 folgen auf Tag die Aufzählungen der jeweiligen Klasse:
