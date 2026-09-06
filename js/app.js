@@ -272,6 +272,9 @@
     bauErgebnis = null;
     fassadeErgebnis = null;
     fassadeKostenErgebnis = null;
+    skriptGraph = { knoten: [], kanten: [], naechsteId: 1 };
+    skriptErgebnis = null;
+    skriptAuswahl = null;
     punktwolke = null;
     scanSchnitt = null;
     scanWaende = null;
@@ -2923,6 +2926,7 @@
     fertigteile: { button: document.getElementById("tabFertigteile"), view: document.getElementById("viewFertigteile") },
     logistik: { button: document.getElementById("tabLogistik"), view: document.getElementById("viewLogistik") },
     fassade: { button: document.getElementById("tabFassade"), view: document.getElementById("viewFassade") },
+    skript: { button: document.getElementById("tabSkript"), view: document.getElementById("viewSkript") },
     bestand: { button: document.getElementById("tabBestand"), view: document.getElementById("viewBestand") },
     gelaende: { button: document.getElementById("tabGelaende"), view: document.getElementById("viewGelaende") },
     tiefbau: { button: document.getElementById("tabTiefbau"), view: document.getElementById("viewTiefbau") },
@@ -2944,6 +2948,7 @@
     if (which === "fertigteile") renderFertigteile();
     if (which === "logistik") renderLogistik();
     if (which === "fassade") renderFassade();
+    if (which === "skript") renderSkript();
     if (which === "bestand") renderBestand();
     if (which === "gelaende") renderGelaende();
     if (which === "tiefbau") renderTiefbau();
@@ -3012,6 +3017,7 @@
     if (!TABS.fertigteile.view.hidden) renderFertigteile();
     if (!TABS.logistik.view.hidden) renderLogistik();
     if (!TABS.fassade.view.hidden) renderFassade();
+    if (!TABS.skript.view.hidden) renderSkript();
     if (!TABS.bestand.view.hidden) renderBestand();
     if (!TABS.gelaende.view.hidden) renderGelaende();
     if (!TABS.tiefbau.view.hidden) renderTiefbau();
@@ -5886,6 +5892,620 @@
     setStatus("Felder, Nachweise, Pfosten, Riegel, Wärmeschutz, Mengen und Kosten als CSV ausgegeben.", "ok");
   });
 
+  /* ============================== Visuelles Skripten */
+
+  let skriptGraph = { knoten: [], kanten: [], naechsteId: 1 };
+  let skriptErgebnis = null;
+  let skriptAuswahl = null;
+  let skriptSicht = { x: 0, y: 0, zoom: 1 };
+  let skriptZieh = null;        // laufende Zeigerbewegung
+
+  /** Auswahllisten für Vorlagen und Knoten füllen. */
+  (function fuelleSkriptlisten() {
+    const v = document.getElementById("skriptVorlage");
+    v.innerHTML = Object.keys(VS_VORLAGEN)
+      .map((k) => `<option value="${k}">${VS_VORLAGEN[k].name}</option>`).join("");
+    v.value = "stuetzenraster";
+    const k = document.getElementById("skriptKnotenTyp");
+    const nachGruppe = {};
+    Object.keys(VS_KNOTEN).forEach((id) => {
+      const g = VS_KNOTEN[id].gruppe;
+      if (!nachGruppe[g]) nachGruppe[g] = [];
+      nachGruppe[g].push(id);
+    });
+    k.innerHTML = Object.keys(VS_GRUPPEN).map((g) => {
+      const liste = nachGruppe[g] || [];
+      if (!liste.length) return "";
+      return `<optgroup label="${VS_GRUPPEN[g].name}">`
+        + liste.map((id) => `<option value="${id}">${VS_KNOTEN[id].name}</option>`).join("")
+        + "</optgroup>";
+    }).join("");
+    k.value = "zahl";
+    v.addEventListener("change", () => {
+      document.getElementById("skriptVorlagenNote").textContent =
+        (VS_VORLAGEN[v.value] || {}).beschreibung || "";
+    });
+    document.getElementById("skriptVorlagenNote").textContent =
+      VS_VORLAGEN.stuetzenraster.beschreibung;
+  }());
+
+  /** Bildpunkt der Zeichenfläche in Graphkoordinaten umrechnen. */
+  function skriptPunkt(ereignis) {
+    const flaeche = document.getElementById("skriptCanvas");
+    const r = flaeche.getBoundingClientRect();
+    // Das SVG füllt die Fläche und behält das Seitenverhältnis bei
+    const w = r.width / skriptSicht.zoom, h = r.height / skriptSicht.zoom;
+    return {
+      x: skriptSicht.x + ((ereignis.clientX - r.left) / r.width) * w,
+      y: skriptSicht.y + ((ereignis.clientY - r.top) / r.height) * h,
+    };
+  }
+
+  function skriptRechnen(still) {
+    if (!skriptGraph.knoten.length) {
+      skriptErgebnis = null;
+      renderSkript();
+      if (!still) setStatus("Der Graph ist leer – eine Vorlage laden oder Knoten hinzufügen.", "error");
+      return null;
+    }
+    const beginn = Date.now();
+    skriptErgebnis = vsAuswerten(skriptGraph);
+    skriptErgebnis.ms = Date.now() - beginn;
+    renderSkript();
+    if (!still) {
+      const a = skriptErgebnis.anzahl;
+      const teile = [];
+      if (a.stab) teile.push(`${a.stab} Stäbe`);
+      if (a.stuetze) teile.push(`${a.stuetze} Stützen`);
+      if (a.balken) teile.push(`${a.balken} Balken`);
+      if (a.wand) teile.push(`${a.wand} Wände`);
+      setStatus(`${a.knoten} Knoten mit ${a.kanten} Verbindungen gerechnet (${skriptErgebnis.ms} ms): `
+        + (teile.length ? `${teile.join(", ")} als Vorschau. „⬇ Ins Modell übernehmen“ legt sie an.`
+          : "keine Bauteile – ein Knoten „Ins Modell“ sammelt sie.")
+        + (skriptErgebnis.meldungen.length
+          ? ` ${skriptErgebnis.meldungen.length} Meldungen.` : ""),
+      skriptErgebnis.meldungen.length ? "error" : "ok");
+    }
+    return skriptErgebnis;
+  }
+
+  function zeichneSkript() {
+    const flaeche = document.getElementById("skriptCanvas");
+    const r = flaeche.getBoundingClientRect();
+    /* Solange die Ansicht verborgen ist, hat die Fläche keine Maße. Dann
+       wird nicht mit einem geratenen Format gezeichnet – sonst stimmt der
+       Ausschnitt nicht und das Antippen träfe daneben –, sondern im
+       nächsten Bild noch einmal versucht. */
+    if (r.width < 20 || r.height < 20) {
+      window.requestAnimationFrame(() => {
+        const r2 = flaeche.getBoundingClientRect();
+        if (r2.width >= 20 && r2.height >= 20) zeichneSkript();
+      });
+      return;
+    }
+    flaeche.innerHTML = vsGraphSVG(skriptGraph, {
+      auswahl: skriptAuswahl, sicht: skriptSicht,
+      ziehVon: skriptZieh && skriptZieh.art === "kante" ? skriptZieh.von : null,
+      ziehZu: skriptZieh && skriptZieh.art === "kante" ? skriptZieh.zu : null,
+      kanteHervor: skriptZieh && skriptZieh.art === "kanteHervor" ? skriptZieh.index : null,
+    }, skriptErgebnis, r.width, r.height);
+  }
+
+  // Ändert sich die Breite der Fläche – Fenstergröße, Menüband, Drehen des
+  // Tablets –, muss neu gezeichnet werden, sonst passen Ausschnitt und
+  // Treffpunkte nicht mehr zusammen
+  if (window.ResizeObserver) {
+    let letzteBreite = 0, letzteHoehe = 0;
+    new window.ResizeObserver((eintraege) => {
+      const r = eintraege[0].contentRect;
+      if (Math.abs(r.width - letzteBreite) < 1 && Math.abs(r.height - letzteHoehe) < 1) return;
+      letzteBreite = r.width; letzteHoehe = r.height;
+      if (!TABS.skript.view.hidden) zeichneSkript();
+    }).observe(document.getElementById("skriptCanvas"));
+  }
+
+  /** Alles ins Bild rücken. */
+  function skriptAllesZeigen() {
+    if (!skriptGraph.knoten.length) { skriptSicht = { x: 0, y: 0, zoom: 1 }; zeichneSkript(); return; }
+    const flaeche = document.getElementById("skriptCanvas");
+    const r = flaeche.getBoundingClientRect();
+    if (r.width < 20 || r.height < 20) {
+      window.requestAnimationFrame(skriptAllesZeigen);
+      return;
+    }
+    const g = vsGrenzen(vsLayout(skriptGraph));
+    const rand = 30;
+    const bx = (g.maxX - g.minX) + 2 * rand, by = (g.maxY - g.minY) + 2 * rand;
+    const zoom = Math.min(r.width / bx, r.height / by, 1.6);
+    skriptSicht = {
+      zoom,
+      x: g.minX - rand - (r.width / zoom - bx) / 2,
+      y: g.minY - rand - (r.height / zoom - by) / 2,
+    };
+    zeichneSkript();
+  }
+
+  function renderSkript() {
+    document.getElementById("skriptEmpty").hidden = skriptGraph.knoten.length > 0;
+    zeichneSkript();
+    renderSkriptEigenschaften();
+    document.getElementById("skriptVorschau").innerHTML =
+      vsVorschauSVG(skriptErgebnis, 300, 190);
+
+    const kennzahl = (label, wert, warnung) =>
+      `<div class="stat"><span class="label">${label}</span>`
+      + `<span class="value${warnung ? " warnwert" : ""}">${wert}</span></div>`;
+    const e = skriptErgebnis;
+    document.getElementById("skriptKennzahlen").innerHTML = e
+      ? kennzahl("Knoten", e.anzahl.knoten)
+        + kennzahl("Verbindungen", e.anzahl.kanten)
+        + kennzahl("Punkte", e.punkte.length)
+        + kennzahl("Linien", e.linien.length)
+        + (e.anzahl.stab ? kennzahl("Stäbe", e.anzahl.stab) : "")
+        + (e.anzahl.stuetze ? kennzahl("Stützen", e.anzahl.stuetze) : "")
+        + (e.anzahl.balken ? kennzahl("Balken", e.anzahl.balken) : "")
+        + (e.anzahl.wand ? kennzahl("Wände", e.anzahl.wand) : "")
+        + kennzahl("Bauteile gesamt", e.anzahl.bauteile)
+        + kennzahl("Rechenzeit", `${e.ms} ms`)
+        + (e.meldungen.length ? kennzahl("Meldungen", e.meldungen.length, true) : "")
+      : (skriptGraph.knoten.length
+        ? kennzahl("Knoten", skriptGraph.knoten.length)
+          + kennzahl("Ergebnis", "noch nicht gerechnet", true)
+        : "");
+
+    document.getElementById("skriptMeldungen").innerHTML = e
+      ? (e.meldungen.length
+        ? e.meldungen.slice(0, 8).map((m) =>
+          `<div class="${m.art === "fehler" ? "warnwert" : ""}">! ${m.text}</div>`).join("")
+        : "Der Graph rechnet vollständig durch.")
+      : "";
+
+    // Angezeigte Werte
+    const wBody = document.getElementById("skriptWerteBody");
+    wBody.innerHTML = "";
+    const anzeigen = (e && e.anzeigen) || [];
+    document.getElementById("skriptWerteEmpty").hidden = anzeigen.length > 0;
+    anzeigen.forEach((a) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td>${a.knoten}</td><td>${a.titel}</td><td>${a.werte.length}</td>`
+        + `<td>${a.werte.slice(0, 12).map((w) => vsWertText(w)).join(" · ")}`
+        + `${a.werte.length > 12 ? ` … und ${a.werte.length - 12} weitere` : ""}</td>`;
+      wBody.appendChild(tr);
+    });
+
+    // Erzeugte Bauteile, nach Art zusammengefasst
+    const bBody = document.getElementById("skriptBauteilBody");
+    bBody.innerHTML = "";
+    const bauteile = (e && e.bauteile) || [];
+    document.getElementById("skriptBauteilEmpty").hidden = bauteile.length > 0;
+    const gruppen = new Map();
+    bauteile.forEach((b) => {
+      const schluessel = b.art === "stab" ? `stab|${b.profil}|${b.guete}|${b.typ}`
+        : b.art === "stuetze" ? `stuetze|${b.masse.laenge}×${b.masse.breite}|${b.guete}`
+          : b.art === "balken" ? `balken|${b.masse.breite}×${b.masse.hoehe}|${b.guete}`
+            : `wand|${b.kind}|${b.hoehe}`;
+      if (!gruppen.has(schluessel)) gruppen.set(schluessel, { b, anzahl: 0, laenge: 0 });
+      const gr = gruppen.get(schluessel);
+      gr.anzahl += 1;
+      gr.laenge += b.laenge || (b.p1 && b.p2
+        ? Math.hypot(b.p2.x - b.p1.x, b.p2.z - b.p1.z) : (b.masse ? b.masse.hoehe || 0 : 0));
+    });
+    gruppen.forEach((gr) => {
+      const b = gr.b;
+      const name = { stab: "Stahlstab", stuetze: "Betonstütze", balken: "Betonbalken",
+        wand: "Wand" }[b.art] || b.art;
+      const angabe = b.art === "stab" ? `${b.profil} · ${b.guete}`
+        : b.art === "wand" ? (BAUTEILTYPEN[b.kind] ? BAUTEILTYPEN[b.kind].name : b.kind)
+          : `${b.guete}`;
+      const masse = b.art === "stab" ? `${tbText(gr.laenge, 2)} m gesamt`
+        : b.art === "stuetze" ? `${tbText(b.masse.laenge)} × ${tbText(b.masse.breite)} × `
+          + `${tbText(b.masse.hoehe)} m`
+          : b.art === "balken" ? `${tbText(b.masse.breite)} × ${tbText(b.masse.hoehe)} m · `
+            + `${tbText(gr.laenge, 2)} m gesamt`
+            : `Höhe ${tbText(b.hoehe)} m · ${tbText(gr.laenge, 2)} m gesamt`;
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td><strong>${name}</strong></td><td>${gr.anzahl}</td>`
+        + `<td>${angabe}</td><td>${masse}</td>`;
+      bBody.appendChild(tr);
+    });
+  }
+
+  /** Eigenschaftenleiste des gewählten Knotens. */
+  function renderSkriptEigenschaften() {
+    const ziel = document.getElementById("skriptEigenschaften");
+    const titel = document.getElementById("skriptEigenschaftenTitel");
+    const k = skriptGraph.knoten.find((n) => n.id === skriptAuswahl);
+    if (!k) {
+      titel.textContent = "Eigenschaften";
+      ziel.innerHTML = '<p class="vs-hinweis">Einen Knoten antippen, um seine Werte zu ändern. '
+        + "Auf einen Anschluss tippen und ziehen verbindet; ein Tipp auf eine Verbindung löst sie.</p>";
+      return;
+    }
+    const def = VS_KNOTEN[k.typ];
+    titel.textContent = def.name;
+    let html = `<p class="vs-beschreibung">${def.beschreibung || ""}</p>`;
+
+    (def.felder || []).forEach((f) => {
+      const wert = k.werte[f.id] !== undefined ? k.werte[f.id] : f.standard;
+      if (f.art === "wahl") {
+        html += `<label>${f.name}<select data-vsfeld="${f.id}">`
+          + f.werte.map(([w, n]) => `<option value="${w}"${w === wert ? " selected" : ""}>${n}</option>`).join("")
+          + "</select></label>";
+      } else if (f.art === "profilfamilie") {
+        html += `<label>${f.name}<select data-vsfeld="${f.id}">`
+          + Object.keys(STEEL_DB).map((fam) =>
+            `<option value="${fam}"${fam === wert ? " selected" : ""}>`
+            + `${FAMILY_LABELS[fam] || fam}</option>`).join("")
+          + "</select></label>";
+      } else if (f.art === "profil") {
+        const liste = STEEL_DB[k.werte.familie] || STEEL_DB.IPE;
+        html += `<label>${f.name}<select data-vsfeld="${f.id}">`
+          + liste.map((pr) => `<option value="${pr.name}"`
+            + `${pr.name === wert ? " selected" : ""}>${pr.name}</option>`).join("")
+          + "</select></label>";
+      } else if (f.regler) {
+        const min = k.werte.min !== undefined ? k.werte.min : 0;
+        const max = k.werte.max !== undefined ? k.werte.max : 20;
+        // geläufige Schrittweite statt eines krummen Bruchteils
+        const spanne = Math.abs(max - min) || 1;
+        const schritt = spanne >= 100 ? 1 : (spanne >= 10 ? 0.1 : 0.01);
+        html += `<label>${f.name}: <strong>${tbText(wert, 3)}</strong>`
+          + `<input type="range" data-vsfeld="${f.id}" min="${min}" max="${max}" `
+          + `step="${schritt}" value="${wert}">`
+          + `<input type="number" data-vsfeld="${f.id}" step="${schritt}" value="${wert}"></label>`;
+      } else if (f.art === "zahl") {
+        html += `<label>${f.name}<input type="number" data-vsfeld="${f.id}" `
+          + `step="0.05" value="${wert}"></label>`;
+      } else {
+        html += `<label>${f.name}<input type="text" data-vsfeld="${f.id}" `
+          + `value="${String(wert).replace(/"/g, "&quot;")}"></label>`;
+      }
+    });
+
+    // Freie Eingänge: was nicht verbunden ist, lässt sich hier eintragen
+    const frei = vsFreieEingaenge(skriptGraph, k.id).filter((e) => e.art === "zahl");
+    if (frei.length) {
+      html += '<p class="vs-hinweis">Nicht verbundene Eingänge:</p>';
+      frei.forEach((e) => {
+        const wert = k.werte[`in_${e.id}`] !== undefined ? k.werte[`in_${e.id}`] : e.standard;
+        html += `<label class="vs-frei">${e.name}<input type="number" `
+          + `data-vseingang="${e.id}" step="0.05" value="${wert === null ? "" : wert}"></label>`;
+      });
+    }
+
+    html += `<button class="tool-btn" data-vsweg="${k.id}">✕ Knoten löschen</button>`;
+    ziel.innerHTML = html;
+  }
+
+  /* ---- Zeigerbedienung der Zeichenfläche */
+
+  const skriptFlaeche = document.getElementById("skriptCanvas");
+
+  skriptFlaeche.addEventListener("pointerdown", (ev) => {
+    const p = skriptPunkt(ev);
+    const lage = vsLayout(skriptGraph);
+    const treffer = vsTreffer(lage, p.x, p.y);
+    skriptFlaeche.setPointerCapture(ev.pointerId);
+
+    if (treffer && treffer.art === "ausgang") {
+      const l = lage.get(treffer.knoten);
+      const port = l.ausgaenge.find((a) => a.id === treffer.port);
+      skriptZieh = { art: "kante", vonKnoten: treffer.knoten, vonAusgang: treffer.port,
+        von: { x: port.x, y: port.y }, zu: p };
+      zeichneSkript();
+      return;
+    }
+    if (treffer && treffer.art === "eingang") {
+      // Auf einen belegten Eingang tippen löst die Verbindung
+      const weg = skriptGraph.kanten.findIndex((k) =>
+        k.nachKnoten === treffer.knoten && k.nachEingang === treffer.port);
+      if (weg >= 0) {
+        skriptGraph.kanten.splice(weg, 1);
+        skriptRechnen(true);
+        setStatus("Verbindung gelöst.", "ok");
+        return;
+      }
+      skriptAuswahl = treffer.knoten;
+      renderSkript();
+      return;
+    }
+    if (treffer && treffer.art === "knoten") {
+      skriptAuswahl = treffer.knoten;
+      const k = skriptGraph.knoten.find((n) => n.id === treffer.knoten);
+      skriptZieh = { art: "knoten", id: treffer.knoten, dx: p.x - k.x, dy: p.y - k.y, bewegt: false };
+      renderSkript();
+      return;
+    }
+    // Auf eine Verbindung getippt?
+    const kante = vsKanteTreffer(skriptGraph, lage, p.x, p.y);
+    if (kante) {
+      skriptGraph.kanten.splice(kante.index, 1);
+      skriptAuswahl = null;
+      skriptRechnen(true);
+      setStatus("Verbindung gelöst.", "ok");
+      return;
+    }
+    // sonst: Ausschnitt verschieben
+    skriptZieh = { art: "sicht", x: p.x, y: p.y };
+    skriptFlaeche.classList.add("zieht");
+  });
+
+  skriptFlaeche.addEventListener("pointermove", (ev) => {
+    if (!skriptZieh) return;
+    const p = skriptPunkt(ev);
+    if (skriptZieh.art === "kante") { skriptZieh.zu = p; zeichneSkript(); return; }
+    if (skriptZieh.art === "knoten") {
+      const k = skriptGraph.knoten.find((n) => n.id === skriptZieh.id);
+      if (!k) return;
+      k.x = Math.round((p.x - skriptZieh.dx) / 5) * 5;
+      k.y = Math.round((p.y - skriptZieh.dy) / 5) * 5;
+      skriptZieh.bewegt = true;
+      zeichneSkript();
+      return;
+    }
+    if (skriptZieh.art === "sicht") {
+      skriptSicht.x -= p.x - skriptZieh.x;
+      skriptSicht.y -= p.y - skriptZieh.y;
+      zeichneSkript();
+    }
+  });
+
+  skriptFlaeche.addEventListener("pointerup", (ev) => {
+    skriptFlaeche.classList.remove("zieht");
+    if (!skriptZieh) return;
+    if (skriptZieh.art === "kante") {
+      const p = skriptPunkt(ev);
+      const treffer = vsTreffer(vsLayout(skriptGraph), p.x, p.y);
+      if (treffer && treffer.art === "eingang") {
+        const pruefung = vsVerbindungPruefen(skriptGraph, skriptZieh.vonKnoten,
+          skriptZieh.vonAusgang, treffer.knoten, treffer.port);
+        if (!pruefung.erlaubt) {
+          setStatus(pruefung.grund, "error");
+        } else {
+          skriptGraph.kanten.push({ vonKnoten: skriptZieh.vonKnoten,
+            vonAusgang: skriptZieh.vonAusgang, nachKnoten: treffer.knoten,
+            nachEingang: treffer.port });
+          skriptZieh = null;
+          skriptRechnen(true);
+          setStatus("Verbindung hergestellt.", "ok");
+          return;
+        }
+      }
+    }
+    if (skriptZieh.art === "knoten" && skriptZieh.bewegt) { skriptZieh = null; zeichneSkript(); return; }
+    skriptZieh = null;
+    zeichneSkript();
+  });
+  skriptFlaeche.addEventListener("pointercancel", () => {
+    skriptZieh = null; skriptFlaeche.classList.remove("zieht"); zeichneSkript();
+  });
+
+  skriptFlaeche.addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    const p = skriptPunkt(ev);
+    const faktor = ev.deltaY < 0 ? 1.12 : 1 / 1.12;
+    const neu = Math.max(0.25, Math.min(2.5, skriptSicht.zoom * faktor));
+    // Der Punkt unter dem Zeiger bleibt stehen
+    skriptSicht.x = p.x - (p.x - skriptSicht.x) * (skriptSicht.zoom / neu);
+    skriptSicht.y = p.y - (p.y - skriptSicht.y) * (skriptSicht.zoom / neu);
+    skriptSicht.zoom = neu;
+    zeichneSkript();
+  }, { passive: false });
+
+  /* ---- Eigenschaftenleiste */
+
+  document.getElementById("skriptEigenschaften").addEventListener("input", (ev) => {
+    const k = skriptGraph.knoten.find((n) => n.id === skriptAuswahl);
+    if (!k) return;
+    const feld = ev.target.dataset.vsfeld;
+    const eingang = ev.target.dataset.vseingang;
+    if (feld) {
+      const def = VS_KNOTEN[k.typ].felder.find((f) => f.id === feld);
+      k.werte[feld] = def && def.art === "zahl"
+        ? (parseFloat(String(ev.target.value).replace(",", ".")) || 0) : ev.target.value;
+      if (feld === "familie") {
+        // Beim Wechsel der Profilreihe gilt das erste Profil der neuen Reihe
+        const liste = STEEL_DB[k.werte.familie] || [];
+        if (!liste.some((pr) => pr.name === k.werte.profil)) {
+          k.werte.profil = liste.length ? liste[0].name : "";
+        }
+      }
+    } else if (eingang) {
+      const z = parseFloat(String(ev.target.value).replace(",", "."));
+      k.werte[`in_${eingang}`] = Number.isFinite(z) ? z : undefined;
+    } else return;
+    skriptRechnen(true);
+  });
+
+  document.getElementById("skriptEigenschaften").addEventListener("click", (ev) => {
+    const weg = ev.target.closest("[data-vsweg]");
+    if (!weg) return;
+    const id = weg.dataset.vsweg;
+    skriptGraph.knoten = skriptGraph.knoten.filter((n) => n.id !== id);
+    skriptGraph.kanten = skriptGraph.kanten.filter((k) =>
+      k.vonKnoten !== id && k.nachKnoten !== id);
+    skriptAuswahl = null;
+    skriptRechnen(true);
+    setStatus(`Knoten ${id} gelöscht.`, "ok");
+  });
+
+  /* ---- Knöpfe */
+
+  document.getElementById("btnSkriptRechnen").addEventListener("click", () => skriptRechnen());
+  document.getElementById("btnSkriptZoom").addEventListener("click", () => skriptAllesZeigen());
+
+  document.getElementById("btnSkriptVorlage").addEventListener("click", () => {
+    const name = document.getElementById("skriptVorlage").value;
+    const graph = vsVorlage(name);
+    if (!graph) { setStatus("Vorlage nicht gefunden.", "error"); return; }
+    skriptGraph = graph;
+    skriptAuswahl = null;
+    skriptRechnen(true);
+    skriptAllesZeigen();
+    const e = skriptErgebnis;
+    setStatus(`Vorlage „${VS_VORLAGEN[name].name}“ geladen: ${e.anzahl.knoten} Knoten, `
+      + `${e.anzahl.bauteile} Bauteile in der Vorschau. ${VS_VORLAGEN[name].beschreibung} `
+      + "Die Schieberegler in der Eigenschaftenleiste ändern das Ergebnis sofort.", "ok");
+  });
+
+  document.getElementById("btnSkriptKnoten").addEventListener("click", () => {
+    const typ = document.getElementById("skriptKnotenTyp").value;
+    const id = `${typ}${skriptGraph.naechsteId++}`;
+    // Neuer Knoten in die Mitte des sichtbaren Ausschnitts
+    const flaeche = document.getElementById("skriptCanvas");
+    const r = flaeche.getBoundingClientRect();
+    const k = vsNeuerKnoten(typ,
+      id,
+      Math.round((skriptSicht.x + (r.width / skriptSicht.zoom) / 2 - VS_MASS.breite / 2) / 5) * 5,
+      Math.round((skriptSicht.y + (r.height / skriptSicht.zoom) / 2 - 40) / 5) * 5);
+    skriptGraph.knoten.push(k);
+    skriptAuswahl = id;
+    skriptRechnen(true);
+    setStatus(`Knoten „${VS_KNOTEN[typ].name}“ angelegt. ${VS_KNOTEN[typ].beschreibung}`, "ok");
+  });
+
+  document.getElementById("btnSkriptOrdnen").addEventListener("click", () => {
+    if (!skriptGraph.knoten.length) { setStatus("Der Graph ist leer.", "error"); return; }
+    vsAnordnen(skriptGraph);
+    skriptRechnen(true);
+    skriptAllesZeigen();
+    setStatus("Knoten nach dem Datenfluss angeordnet: jede Spalte hängt von der davor ab.", "ok");
+  });
+
+  document.getElementById("btnSkriptLeeren").addEventListener("click", () => {
+    if (!skriptGraph.knoten.length) { setStatus("Der Graph ist bereits leer.", "error"); return; }
+    const anzahl = skriptGraph.knoten.length;
+    skriptGraph = { knoten: [], kanten: [], naechsteId: 1 };
+    skriptErgebnis = null;
+    skriptAuswahl = null;
+    skriptSicht = { x: 0, y: 0, zoom: 1 };
+    renderSkript();
+    setStatus(`${anzahl} Knoten entfernt. Das Modell bleibt unverändert – der Graph war nur `
+      + "eine Vorschau.", "ok");
+  });
+
+  /**
+   * Die erzeugten Bauteile wirklich anlegen.
+   *
+   * Stäbe brauchen Knotenpunkte; gleiche Punkte werden zusammengefasst,
+   * damit ein Fachwerk zusammenhängt und nicht aus lauter Einzelstäben
+   * besteht.
+   */
+  document.getElementById("btnSkriptModell").addEventListener("click", () => {
+    const e = skriptErgebnis || skriptRechnen();
+    if (!e) return;
+    if (!e.bauteile.length) {
+      setStatus("Der Graph erzeugt keine Bauteile. Ein Knoten „Ins Modell“ sammelt sie – "
+        + "die Bauteilknoten müssen mit ihm verbunden sein.", "error");
+      return;
+    }
+    const toleranz = 1e-6;
+    const knotenIndex = (p) => {
+      for (let i = 0; i < model.nodes.length; i++) {
+        const n = model.nodes[i];
+        if (Math.abs(n.x - p.x) < toleranz && Math.abs(n.y - p.y) < toleranz
+          && Math.abs(n.z - p.z) < toleranz) return i;
+      }
+      model.nodes.push({ x: p.x, y: p.y, z: p.z });
+      return model.nodes.length - 1;
+    };
+    let staebe = 0, beton = 0, waende = 0;
+    e.bauteile.forEach((b) => {
+      if (b.art === "stab") {
+        const a = knotenIndex(b.a), c = knotenIndex(b.b);
+        if (a === c) return;
+        const id = model.nextId++;
+        model.members.set(id, { id, a, b: c, type: b.typ || "beam",
+          loadType: "none", force: 0, moment: 0, beta: 1.0,
+          family: b.familie, profile: b.profil, steelGrade: b.guete });
+        staebe += 1;
+      } else if (b.art === "stuetze" || b.art === "balken") {
+        const kind = b.art === "stuetze" ? "stuetze" : "unterzug";
+        const typ = BETONTEILTYPEN[kind];
+        const id = model.nextBetonId++;
+        model.beton.set(id, { id, kind,
+          p1: { ...b.p1 }, p2: b.p2 ? { ...b.p2 } : null,
+          masse: Object.assign({}, typ.standard, b.masse),
+          guete: b.guete, expo: typ.expo, ds: 12, sauberkeit: true,
+          bewehrungsgrad: typ.bewehrung, anzahl: 1 });
+        beton += 1;
+      } else if (b.art === "wand") {
+        const typ = BAUTEILTYPEN[b.kind];
+        const id = model.nextElementId++;
+        model.elements.set(id, { id, kind: b.kind,
+          p1: { ...b.p1 }, p2: { ...b.p2 },
+          layers: typ.standard.map((l) => ({ ...l })),
+          hoehe: b.hoehe, breite: typ.breite, laenge: typ.laenge,
+          anzahl: 1, zielU: null, bemerkung: "aus dem Skript erzeugt" });
+        waende += 1;
+      }
+    });
+    lastSolution = null;
+    refreshAll();
+    const teile = [];
+    if (staebe) teile.push(`${staebe} Stäbe an ${model.nodes.length} Knoten`);
+    if (beton) teile.push(`${beton} Betonbauteile`);
+    if (waende) teile.push(`${waende} Wände`);
+    setStatus(`Ins Modell übernommen: ${teile.join(", ")}. Nachweise, Mengen und Kosten führen `
+      + "jetzt die zuständigen Register. Der Graph bleibt erhalten – ein zweites Übernehmen "
+      + "legt die Bauteile noch einmal an.", "ok");
+  });
+
+  document.getElementById("btnSkriptCsv").addEventListener("click", () => {
+    const e = skriptErgebnis || skriptRechnen();
+    if (!e) return;
+    const rows = [["Visuelles Skripten – " + (document.getElementById("projectName").value || "Projekt")]];
+    rows.push([`${e.anzahl.knoten} Knoten`, `${e.anzahl.kanten} Verbindungen`,
+      `${e.anzahl.bauteile} Bauteile`, `${e.ms} ms`]);
+    rows.push([]);
+    rows.push(["Knoten"]);
+    rows.push(["Kennung", "Art", "Gruppe", "Werte", "Ergebnis", "Meldung"]);
+    skriptGraph.knoten.forEach((k) => {
+      const def = VS_KNOTEN[k.typ] || {};
+      const erg = e.ergebnisse.get(k.id);
+      const erster = (def.ausgaenge || [])[0];
+      const liste = erg && erster ? erg[erster.id] || [] : [];
+      rows.push([k.id, def.name || k.typ, (VS_GRUPPEN[def.gruppe] || {}).name || "",
+        Object.keys(k.werte || {}).map((w) => `${w}=${k.werte[w]}`).join(" "),
+        liste.length ? `${liste.length} Werte: ${liste.slice(0, 8).map(vsWertText).join(" / ")}` : "",
+        e.fehler.get(k.id) || ""]);
+    });
+    rows.push([]);
+    rows.push(["Verbindungen"]);
+    rows.push(["von Knoten", "Ausgang", "nach Knoten", "Eingang"]);
+    skriptGraph.kanten.forEach((k) =>
+      rows.push([k.vonKnoten, k.vonAusgang, k.nachKnoten, k.nachEingang]));
+    if (e.anzeigen.length) {
+      rows.push([]);
+      rows.push(["Angezeigte Werte"]);
+      e.anzeigen.forEach((a) => {
+        rows.push([a.knoten, a.titel, a.werte.length]);
+        rows.push(["", "", "", ...a.werte.slice(0, 200).map(vsWertText)]);
+      });
+    }
+    rows.push([]);
+    rows.push(["Erzeugte Bauteile"]);
+    rows.push(["Nr", "Art", "Angaben", "x1", "Hoehe1", "z1", "x2", "Hoehe2", "z2", "Laenge [m]"]);
+    e.bauteile.forEach((b, i) => {
+      const p1 = b.a || b.p1 || { x: "", y: "", z: "" };
+      const p2 = b.b || b.p2 || { x: "", y: "", z: "" };
+      const angabe = b.art === "stab" ? `${b.profil} ${b.guete} ${b.typ}`
+        : b.art === "wand" ? `${b.kind} Hoehe ${b.hoehe}`
+          : `${b.guete} ${Object.keys(b.masse || {}).map((m) => `${m}=${b.masse[m]}`).join(" ")}`;
+      rows.push([i + 1, b.art, angabe,
+        p1.x, p1.y, p1.z, p2.x, p2.y, p2.z,
+        b.laenge !== undefined ? b.laenge.toFixed(3) : ""]);
+    });
+    if (e.meldungen.length) {
+      rows.push([]);
+      rows.push(["Meldungen"]);
+      e.meldungen.forEach((m) => rows.push([m.knoten || "", m.text]));
+    }
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Skript_${name}.csv`, "﻿" + zuCsv(rows), "text/csv;charset=utf-8;");
+    setStatus("Knoten, Verbindungen, angezeigte Werte und erzeugte Bauteile als CSV ausgegeben.", "ok");
+  });
+
   /* ============================== Geländemodell (DGM) */
 
   function dgmZahlFeld(id, ersatz) {
@@ -7073,6 +7693,9 @@
         },
         beginn: field("bauStart"),
       },
+      // Der Skriptgraph gehört zum Projekt; gerechnet wird beim Öffnen neu
+      skript: { knoten: skriptGraph.knoten, kanten: skriptGraph.kanten,
+        naechsteId: skriptGraph.naechsteId },
       // Fassade: die Parameter gehören zum Projekt, gerechnet wird neu
       fassade: {
         art: field("fasArt"), felder: field("fasFelder"), geschosse: field("fasGeschosse"),
@@ -7181,6 +7804,16 @@
       { vorgaenger: (v.vorgaenger || []).map((x) => Object.assign({}, x)) }));
     kranErgebnis = null; beErgebnis = null; bauErgebnis = null;
     fassadeErgebnis = null; fassadeKostenErgebnis = null;
+    // Skriptgraph
+    const sk = data.skript || {};
+    skriptGraph = {
+      knoten: (sk.knoten || []).map((k) => Object.assign({}, k,
+        { werte: Object.assign({}, k.werte) })),
+      kanten: (sk.kanten || []).map((k) => Object.assign({}, k)),
+      naechsteId: sk.naechsteId || ((sk.knoten || []).length + 1),
+    };
+    skriptErgebnis = null; skriptAuswahl = null;
+    skriptSicht = { x: 0, y: 0, zoom: 1 };
     Object.keys(materialPreise).forEach((k) => delete materialPreise[k]);
     Object.assign(materialPreise, data.baustoffpreise || {});
 

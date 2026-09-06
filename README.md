@@ -49,6 +49,7 @@ schieben; Bedienelemente sind mindestens 44 pt hoch und Eingabefelder mindestens
 | Fertigteile | Fertigteilblatt mit Ansicht, Querschnitt und Transportdaten als SVG; Elementliste, Fahrten, Montage und Kosten als CSV |
 | Baustellenlogistik | Baustelleneinrichtungsplan und Balkenplan als SVG; Kranprüfung, Flächenbedarf und Bauzeitenplan als CSV |
 | Fassade | Fassadenblatt mit Ansicht und Regeldetails als SVG; Felder, Nachweise, Wärmeschutz, Mengen und Kosten als CSV |
+| Visuelles Skripten | Knoten, Verbindungen, angezeigte Werte und erzeugte Bauteile als CSV; die Bauteile selbst gehen ins Modell |
 | Papier und PDF | über *Drucken*; aus dem Blattfenster kommt das Blatt allein auf das Papier |
 
 **↗ Weitergeben** übergibt die zuletzt erzeugte Datei an das Systemmenü des Geräts
@@ -101,6 +102,8 @@ js/
   siteplan.js             Baustelleneinrichtungsplan und Balkenplan
   facade.js               Fassade: Raster, Wind, Glas nach DIN 18008, Profile, U-Wert
   facadeplan.js           Fassadenblatt: Ansicht, Horizontal- und Vertikalschnitt
+  vscript.js              Visuelles Skripten: Knoten, Auswertung, Formelrechner
+  vscriptview.js          Zeichenfläche des Graphen und Vorschau der Geometrie
 python/                   Bewehrung und Herstellungsunterlagen (46 Prüfungen)
 desktop/                  Windows-Anwendung (Electron) – siehe desktop/README.md
 tools/
@@ -181,6 +184,50 @@ Bewehrung im Anschlagbereich, Fugen und Verbindungen, Zwischenlagerung und
 Stapelung, Toleranzen nach DIN 18203-1, Ladungssicherung nach VDI 2700.
 Die zulässigen Lasten der Ankersysteme sind Herstellerangaben aus der
 allgemeinen bauaufsichtlichen Zulassung.
+
+## Visuelles Skripten
+
+Das Register **Skript** ist ein Knotengraph, aus dem Geometrie und Bauteile
+entstehen. Der Graph ist ein **Datenfluss**: Knoten rechnen, Verbindungen führen
+Werte weiter, die Reihenfolge ergibt sich aus den Abhängigkeiten. Wird eine Zahl
+am Anfang geändert, läuft alles dahinter neu.
+
+| Regel | Bedeutung |
+|---|---|
+| Werte sind immer Listen | Eine einzelne Zahl ist eine Liste mit einem Element. Das erspart die Unterscheidung „ein Wert" / „viele Werte" an jedem Knoten |
+| Listenabgleich | Drei Werte am einen und einer am anderen Eingang: es wird dreimal gerechnet und der einzelne wiederholt. Die **längste Liste** bestimmt die Zahl der Durchläufe, kürzere werden mit ihrem letzten Wert aufgefüllt |
+| Sammeleingänge | Anschlüsse mit heller Füllung (Summe, laufende Summe, Punktraster, Kette, Teilliste) bekommen die Liste am Stück statt Wert für Wert |
+| Keine Rückkopplung | Eine Verbindung, die einen Kreis schließen würde, wird **gar nicht erst zugelassen**; ein Kreis im geladenen Graphen wird gemeldet |
+| Freie Eingänge | Was nicht verbunden ist, lässt sich in der Eigenschaftenleiste eintragen – für eine Konstante braucht es keinen eigenen Knoten |
+| Vorschau, nicht Modell | Der Graph ändert nichts. Erst **Ins Modell übernehmen** legt Bauteile an; gleiche Punkte werden dabei zu einem Knoten zusammengefasst, damit ein Fachwerk zusammenhängt |
+
+**Knoten**: Zahl mit Schieberegler, Zahlenliste, Reihe, Bereich, Punkt ·
+Grundrechenarten, Formel, Kennwert, laufende Summe, Teilliste · Punktraster,
+Verschieben, Drehen, Polarreihe, Linie, Kette, Punkt zerlegen · Stahlstab,
+Betonstütze, Betonbalken, Wand · Ins Modell, Werte anzeigen.
+
+**Formeln ohne `eval`**: Der Formelknoten hat einen eigenen Parser (rekursiver
+Abstieg) für + − · / ^, Klammern, `sin cos tan asin acos atan sqrt abs min max
+round floor ceil log exp` sowie `pi` und `e`. Winkel in Grad, Komma als
+Dezimaltrennzeichen, Argumente mit Semikolon (`max(a; b)`) wie in der deutschen
+Tabellenkalkulation. Das Vorzeichen bindet schwächer als das Hochzeichen:
+`−2^2` ist −4. Der Text des Anwenders wird **niemals als Programm ausgeführt**.
+
+**Vorlagen**: Stützenraster (Feldbreiten → laufende Summe → Achsen → Punktraster
+→ Stützen), Fachwerkbinder (Gurte als Kette, Diagonalen aus zwei gegeneinander
+versetzten Teillisten), Wandzug (geschlossener Umgang aus Eckpunkten), runde
+Stützenstellung (Polarreihe).
+
+**Bedienung**: Knoten ziehen verschiebt ihn, ein Tipp wählt ihn aus; von einem
+Ausgang zu einem Eingang ziehen verbindet; ein Tipp auf eine Verbindung oder auf
+einen belegten Eingang löst sie. Mausrad zoomt, Ziehen auf leerer Fläche
+verschiebt den Ausschnitt. Alles ist mit dem Finger bedienbar.
+
+**Nicht enthalten**: Datenbäume mit Verzweigungen (hier gibt es flache Listen),
+Schleifen und Rückkopplungen über den Graphen, benutzereigene Knoten, Flächen-
+und Volumenkörperverschneidung, Skripte in einer Programmiersprache. Was der
+Graph erzeugt, sind Bauteile der Anwendung – Nachweise, Mengen und Kosten führen
+die jeweiligen Register.
 
 ## Fassade
 

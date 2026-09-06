@@ -88,6 +88,7 @@
     <button class="ribbon-tab" data-band="fertigteile" role="tab">Fertigteile</button>
     <button class="ribbon-tab" data-band="logistik" role="tab">Logistik</button>
     <button class="ribbon-tab" data-band="fassade" role="tab">Fassade</button>
+    <button class="ribbon-tab" data-band="skript" role="tab">Skript</button>
     <button class="ribbon-tab" data-band="bestand" role="tab">Bestand</button>
     <button class="ribbon-tab" data-band="gelaende" role="tab">Gelände</button>
     <button class="ribbon-tab" data-band="tiefbau" role="tab">Tiefbau</button>
@@ -525,6 +526,43 @@
     </div>
   </div>
 
+  <!-- ============================================== Visuelles Skripten -->
+  <div class="ribbon-band" data-band="skript" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnSkriptRechnen" data-reiter="skript" title="Graph auswerten">
+          <span class="ribbon-icon">▶</span><span class="ribbon-label">Graph<br>rechnen</span></button>
+        <button class="ribbon-btn" data-befehl="btnSkriptOrdnen" data-reiter="skript" title="Knoten nach Datenfluss anordnen">
+          <span class="ribbon-icon">⊞</span><span class="ribbon-label">Knoten<br>ordnen</span></button>
+        <button class="ribbon-btn" data-befehl="btnSkriptLeeren" data-reiter="skript" title="Graph leeren">
+          <span class="ribbon-icon">🗑</span><span class="ribbon-label">Graph<br>leeren</span></button>
+      </div>
+      <div class="ribbon-caption">Graph</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnSkriptVorlage" data-reiter="skript" title="Vorlage laden">
+          <span class="ribbon-icon">📐</span><span class="ribbon-label">Vorlage<br>laden</span></button>
+        <button class="ribbon-btn" data-befehl="btnSkriptKnoten" data-reiter="skript" title="Knoten hinzufügen">
+          <span class="ribbon-icon">＋</span><span class="ribbon-label">Knoten<br>hinzufügen</span></button>
+      </div>
+      <div class="ribbon-caption">Aufbauen</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnSkriptModell" data-reiter="skript" title="Erzeugte Bauteile ins Modell übernehmen">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Ins Modell<br>übernehmen</span></button>
+        <button class="ribbon-btn" data-befehl="btnSkriptCsv" data-reiter="skript" title="Knoten, Werte und Bauteile als CSV">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Skript<br>(CSV)</span></button>
+        <button class="ribbon-btn" data-befehl="tabSkript" title="Zeichenfläche zeigen">
+          <span class="ribbon-icon">📋</span><span class="ribbon-label">Zeichen-<br>fläche</span></button>
+      </div>
+      <div class="ribbon-caption">Ergebnis</div>
+    </div>
+  </div>
+
   <!-- ================================================ Bestand (Punktwolke) -->
   <div class="ribbon-band" data-band="bestand" hidden>
     <div class="ribbon-group">
@@ -766,6 +804,7 @@
         <button class="tab-btn" id="tabFertigteile">Fertigteile</button>
         <button class="tab-btn" id="tabLogistik">Logistik</button>
         <button class="tab-btn" id="tabFassade">Fassade</button>
+        <button class="tab-btn" id="tabSkript">Skript</button>
         <button class="tab-btn" id="tabBestand">Bestand</button>
         <button class="tab-btn" id="tabGelaende">Gelände</button>
         <button class="tab-btn" id="tabTiefbau">Tiefbau</button>
@@ -2475,6 +2514,81 @@
       </table>
     </div>
 
+    <div class="result-panel-body" id="viewSkript" hidden>
+      <h3 class="section-title">Visuelles Skripten</h3>
+      <p class="view-note">Der Graph ist ein <strong>Datenfluss</strong>: Knoten rechnen, Verbindungen führen
+        Werte weiter. Es wird nichts von Hand aufgerufen – die Reihenfolge ergibt sich aus den Abhängigkeiten.
+        Ändern Sie eine Zahl am Anfang, läuft alles dahinter neu.
+        <strong>Werte sind immer Listen.</strong> Bekommt ein Knoten an einem Eingang drei und am anderen einen
+        Wert, wird dreimal gerechnet und der einzelne Wert wiederholt – die Regel <em>längste Liste</em>.
+        Anschlüsse mit heller Füllung wollen die ganze Liste am Stück (Summe, laufende Summe, Punktraster).
+        <strong>Rückkopplungen gibt es nicht</strong>: eine Verbindung, die einen Kreis schließen würde, wird
+        gar nicht erst zugelassen. Der Graph ist eine <strong>Vorschau</strong> – erst
+        „⬇ Ins Modell übernehmen“ legt Bauteile an.</p>
+
+      <div class="cutlist-controls">
+        <div class="field"><label for="skriptVorlage">Vorlage</label>
+          <select id="skriptVorlage"></select></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnSkriptVorlage">📐 Vorlage laden</button></div>
+        <div class="field"><label for="skriptKnotenTyp">Knoten</label>
+          <select id="skriptKnotenTyp"></select></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnSkriptKnoten">＋ Knoten hinzufügen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnSkriptRechnen">▶ Graph rechnen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnSkriptOrdnen" title="Knoten nach Datenfluss anordnen">⊞ Knoten ordnen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnSkriptZoom" title="Alles ins Bild">⤢ Alles zeigen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnSkriptModell" title="Erzeugte Bauteile anlegen">⬇ Ins Modell übernehmen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnSkriptCsv">⬇ Skript (CSV)</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnSkriptLeeren">🗑 Graph leeren</button></div>
+      </div>
+      <div class="layer-note" id="skriptVorlagenNote"></div>
+
+      <div class="vs-arbeitsflaeche">
+        <div class="vs-canvas" id="skriptCanvas"></div>
+        <div class="vs-seite">
+          <div class="vs-block">
+            <h4 class="vs-block-titel" id="skriptEigenschaftenTitel">Eigenschaften</h4>
+            <div id="skriptEigenschaften" class="vs-eigenschaften">
+              <p class="vs-hinweis">Einen Knoten antippen, um seine Werte zu ändern.
+                Auf einen Anschluss tippen und ziehen verbindet; ein Tipp auf eine
+                Verbindung löst sie.</p>
+            </div>
+          </div>
+          <div class="vs-block">
+            <h4 class="vs-block-titel">Vorschau der Geometrie</h4>
+            <div id="skriptVorschau" class="vs-vorschau"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="summary-bar" id="skriptKennzahlen"></div>
+      <div class="layer-note" id="skriptMeldungen"></div>
+      <div class="empty-state" id="skriptEmpty">Noch kein Graph – eine Vorlage laden oder Knoten hinzufügen.</div>
+
+      <h3 class="section-title">Angezeigte Werte</h3>
+      <p class="view-note">Der Knoten <strong>Werte anzeigen</strong> zeigt, was an einer Stelle des Graphen
+        wirklich ankommt – zum Nachsehen, bevor daraus Bauteile werden.</p>
+      <table class="members-table" id="skriptWerteTable">
+        <thead><tr><th>Knoten</th><th>Titel</th><th>Anzahl</th><th>Werte</th></tr></thead>
+        <tbody id="skriptWerteBody"></tbody>
+      </table>
+      <div class="empty-state" id="skriptWerteEmpty">Kein Knoten „Werte anzeigen“ im Graphen.</div>
+
+      <h3 class="section-title">Erzeugte Bauteile</h3>
+      <table class="members-table" id="skriptBauteilTable">
+        <thead><tr><th>Art</th><th>Anzahl</th><th>Angaben</th><th>Maße</th></tr></thead>
+        <tbody id="skriptBauteilBody"></tbody>
+      </table>
+      <div class="empty-state" id="skriptBauteilEmpty">Noch keine Bauteile – ein Knoten „Ins Modell“ sammelt sie.</div>
+    </div>
+
     <div class="result-panel-body" id="viewBestand" hidden>
       <h3 class="section-title">Bauen im Bestand: Punktwolke aus dem 3D-Laserscan</h3>
       <p class="view-note">Gelesen werden <strong>LAS</strong> (1.0 bis 1.4, Punktformate 0 bis 8),
@@ -2968,6 +3082,8 @@
   <script src="js/siteplan.js"></script>
   <script src="js/facade.js"></script>
   <script src="js/facadeplan.js"></script>
+  <script src="js/vscript.js"></script>
+  <script src="js/vscriptview.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>
