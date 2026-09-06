@@ -85,6 +85,7 @@
     <button class="ribbon-tab" data-band="plaene" role="tab">Pläne</button>
     <button class="ribbon-tab" data-band="baustelle" role="tab">Baustelle</button>
     <button class="ribbon-tab" data-band="anschluesse" role="tab">Anschlüsse</button>
+    <button class="ribbon-tab" data-band="fertigteile" role="tab">Fertigteile</button>
     <button class="ribbon-tab" data-band="bestand" role="tab">Bestand</button>
     <button class="ribbon-tab" data-band="gelaende" role="tab">Gelände</button>
     <button class="ribbon-tab" data-band="tiefbau" role="tab">Tiefbau</button>
@@ -411,6 +412,43 @@
     </div>
   </div>
 
+  <!-- ================================================ Fertigteile -->
+  <div class="ribbon-band" data-band="fertigteile" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnFtNeu" data-reiter="fertigteile" title="Fertigteil in die Elementliste aufnehmen">
+          <span class="ribbon-icon">🧱</span><span class="ribbon-label">Fertigteil<br>anlegen</span></button>
+        <label class="ribbon-feld"><span>Art</span>
+          <select id="ftArt"></select></label>
+        <label class="ribbon-feld"><span>Stück</span>
+          <input type="number" id="ftStueck" step="1" min="1" value="1"></label>
+      </div>
+      <div class="ribbon-caption">Elementliste</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnFtRechnen" data-reiter="fertigteile" title="Massen, Fahrten, Montage und Kosten rechnen">
+          <span class="ribbon-icon">Σ</span><span class="ribbon-label">Massen und<br>Fahrten</span></button>
+        <button class="ribbon-btn" data-befehl="btnFtBeispiel" data-reiter="fertigteile" title="Beispielhalle in Fertigteilen">
+          <span class="ribbon-icon">🏗</span><span class="ribbon-label">Beispiel</span></button>
+      </div>
+      <div class="ribbon-caption">Planung</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnFtBlatt" data-reiter="fertigteile" title="Fertigteilblatt mit Ansicht, Querschnitt und Transportdaten">
+          <span class="ribbon-icon">📄</span><span class="ribbon-label">Fertigteil-<br>blatt</span></button>
+        <button class="ribbon-btn" data-befehl="btnFtCsv" data-reiter="fertigteile" title="Elementliste, Fahrten, Montage und Kosten als CSV">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Element-<br>liste (CSV)</span></button>
+        <button class="ribbon-btn" data-befehl="tabFertigteile" title="Elementliste zeigen">
+          <span class="ribbon-icon">📋</span><span class="ribbon-label">Element-<br>liste</span></button>
+      </div>
+      <div class="ribbon-caption">Ausgabe</div>
+    </div>
+  </div>
+
   <!-- ================================================ Bestand (Punktwolke) -->
   <div class="ribbon-band" data-band="bestand" hidden>
     <div class="ribbon-group">
@@ -649,6 +687,7 @@
         <button class="tab-btn" id="tabPositionen">Positionen</button>
         <button class="tab-btn" id="tabBaustelle">Baustelle</button>
         <button class="tab-btn" id="tabAnschluss">Anschlüsse</button>
+        <button class="tab-btn" id="tabFertigteile">Fertigteile</button>
         <button class="tab-btn" id="tabBestand">Bestand</button>
         <button class="tab-btn" id="tabGelaende">Gelände</button>
         <button class="tab-btn" id="tabTiefbau">Tiefbau</button>
@@ -1942,6 +1981,115 @@
       <div class="layer-note" id="anschlussMeldungen"></div>
     </div>
 
+    <div class="result-panel-body" id="viewFertigteile" hidden>
+      <h3 class="section-title">Betonfertigteile</h3>
+      <p class="view-note">Ein Fertigteil ist drei Dinge zugleich: ein Bauteil im Modell, ein Stück Ladung auf
+        der Straße und ein Hub am Kran. Geführt werden die Regelquerschnitte mit ihren Hohlräumen
+        (Hohlplatte, Doppel-T, Doppelwand, Elementdecke, Sandwich), die Massen <strong>getrennt nach
+        Transport- und Endgewicht</strong> (der Ortbeton kommt erst auf der Baustelle dazu), die Last je
+        Transportanker, die Prüfung gegen die Grenzmaße der StVO und die Fahrten- und Montageplanung.
+        Wichte des Stahlbetons 25 kN/m³ nach DIN EN 1991-1-1, Tab. A.1.
+        <strong>Nicht geführt</strong>: Bemessung der Fertigteile (Biegung, Querkraft, Kippen, Vorspannung nach
+        DIN EN 1992-1-1), Nachweis der Transportanker und der Bewehrung im Anschlagbereich, Fugen und
+        Verbindungen, Zwischenlagerung und Stapelung, Toleranzen nach DIN 18203-1, Ladungssicherung nach
+        VDI 2700. Die Bewehrungsmenge ist ein Kennwert je Kubikmeter und ersetzt keine Bewehrungsplanung.</p>
+
+      <div class="cutlist-controls">
+        <div class="field"><label for="ftArtAnsicht">Art</label>
+          <select id="ftArtAnsicht"></select></div>
+        <div class="field"><label for="ftStueckAnsicht">Stück</label>
+          <input type="number" id="ftStueckAnsicht" step="1" min="1" value="1"></div>
+        <div class="field"><label for="ftAbschnitt">Bauabschnitt</label>
+          <input type="text" id="ftAbschnitt" value="BA 1" placeholder="BA 1"></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnFtNeu">🧱 Fertigteil anlegen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnFtBeispiel" title="Beispielhalle einsetzen">🏗 Beispiel</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnFtRechnen">Σ Massen und Fahrten</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnFtBlatt" title="Fertigteilblatt des gewählten Teils">📄 Fertigteilblatt</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnFtCsv" title="Elementliste als CSV">⬇ Elementliste (CSV)</button></div>
+      </div>
+
+      <div class="summary-bar" id="ftKennzahlen"></div>
+      <table class="members-table" id="ftTable">
+        <thead>
+          <tr>
+            <th>Pos</th><th>Art</th><th>Maße [m]</th><th>Stück</th><th>BA</th>
+            <th>V je Stück [m³]</th><th>Gewicht [t]</th><th>Bewehrung [kg]</th>
+            <th>Anker [kN]</th><th>Transport</th><th>Blatt</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="ftBody"></tbody>
+      </table>
+      <div class="empty-state" id="ftEmpty">Noch kein Fertigteil – Art wählen und „🧱 Fertigteil anlegen“.</div>
+      <div class="layer-note" id="ftMeldungen"></div>
+
+      <h3 class="section-title">Transport und Montage</h3>
+      <p class="view-note">Fertigteile werden <strong>gestapelt</strong> geladen: Platten und Binder in Stapeln
+        auf der Ladefläche, Wandtafeln stehend im Innenlader. Maßgebend sind Nutzlast, Stapelhöhe bzw.
+        Innenladerbreite und das <em>längste</em> Stück – nicht die Summe der Längen. Grenzen ohne Erlaubnis:
+        Breite 2,55 m, Höhe 4,00 m, Länge 16,50 m (Sattelzug), 40 t Gesamtgewicht; darüber Großraum- und
+        Schwertransport nach § 29 Abs. 3 und § 46 StVO. Die Montagereihenfolge folgt der Logik des
+        Fertigteilbaus: Gründung, Stützen, Binder, Decken, Wände, Treppen.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="ftNutzlast">Nutzlast [t]</label>
+          <input type="number" id="ftNutzlast" step="1" min="1" value="24"></div>
+        <div class="field"><label for="ftLadelaenge">Ladelänge [m]</label>
+          <input type="number" id="ftLadelaenge" step="0.1" min="2" value="13.6"></div>
+        <div class="field"><label for="ftStapelHoehe">Stapelhöhe [m]</label>
+          <input type="number" id="ftStapelHoehe" step="0.1" min="0.3" value="2.60"></div>
+        <div class="field"><label for="ftInnenlader">Innenlader [m]</label>
+          <input type="number" id="ftInnenlader" step="0.05" min="0.5" value="2.45"></div>
+        <div class="field"><label for="ftPsiDyn">ψ dynamisch</label>
+          <input type="number" id="ftPsiDyn" step="0.05" min="1" value="1.30"></div>
+        <div class="field"><label for="ftPsiHaft">ψ Haftung</label>
+          <input type="number" id="ftPsiHaft" step="0.05" min="1" value="1.20"></div>
+        <div class="field"><label for="ftAnkerZahl">Anker je Teil</label>
+          <input type="number" id="ftAnkerZahl" step="1" min="1" value="4"></div>
+        <div class="field"><label for="ftAnkerWinkel">Anschlagwinkel [°]</label>
+          <input type="number" id="ftAnkerWinkel" step="5" min="0" max="60" value="30"></div>
+      </div>
+      <div class="cutlist-controls">
+        <div class="field"><label for="ftHerstellung">Herstellung [€/m³]</label>
+          <input type="number" id="ftHerstellung" step="10" min="0" value="480"></div>
+        <div class="field"><label for="ftBewehrungPreis">Bewehrung [€/kg]</label>
+          <input type="number" id="ftBewehrungPreis" step="0.05" min="0" value="1.35"></div>
+        <div class="field"><label for="ftTransportFahrt">Transport [€/Fahrt]</label>
+          <input type="number" id="ftTransportFahrt" step="10" min="0" value="420"></div>
+        <div class="field"><label for="ftKranStunde">Kran [€/h]</label>
+          <input type="number" id="ftKranStunde" step="10" min="0" value="180"></div>
+        <div class="field"><label for="ftMontageStunde">Kolonne [€/h]</label>
+          <input type="number" id="ftMontageStunde" step="5" min="0" value="65"></div>
+        <div class="field"><label for="ftSchicht">Schicht [h]</label>
+          <input type="number" id="ftSchicht" step="0.5" min="1" value="8"></div>
+      </div>
+
+      <table class="members-table" id="ftFahrtenTable">
+        <thead><tr><th>Fahrt</th><th>Ladeweise</th><th>Stücke</th><th>Gewicht [t]</th>
+          <th>Stapel / Breite [m]</th><th>längstes Stück [m]</th><th>Hinweis</th></tr></thead>
+        <tbody id="ftFahrtenBody"></tbody>
+      </table>
+      <div class="empty-state" id="ftFahrtenEmpty">Noch nicht gerechnet – „Σ Massen und Fahrten“.</div>
+
+      <h3 class="section-title">Montagereihenfolge</h3>
+      <table class="members-table" id="ftMontageTable">
+        <thead><tr><th>Nr</th><th>Pos</th><th>Art</th><th>BA</th><th>Stück</th>
+          <th>Hub [t]</th><th>Kranzeit [h]</th></tr></thead>
+        <tbody id="ftMontageBody"></tbody>
+      </table>
+
+      <h3 class="section-title">Kostenschätzung Fertigteile</h3>
+      <table class="members-table" id="ftKostenTable">
+        <thead><tr><th>Pos</th><th>Kurztext</th><th>Menge</th><th>Einheit</th><th>EP [€]</th><th>GP [€]</th><th>Hinweis</th></tr></thead>
+        <tbody id="ftKostenBody"></tbody>
+      </table>
+      <p class="view-note">Die Einheitspreise sind Anhaltswerte für die Schätzung und durch die eigene
+        Kalkulation und die Angebote der Fertigteilwerke zu ersetzen.</p>
+    </div>
+
     <div class="result-panel-body" id="viewBestand" hidden>
       <h3 class="section-title">Bauen im Bestand: Punktwolke aus dem 3D-Laserscan</h3>
       <p class="view-note">Gelesen werden <strong>LAS</strong> (1.0 bis 1.4, Punktformate 0 bis 8),
@@ -2429,6 +2577,8 @@
   <script src="js/connections.js"></script>
   <script src="js/connectionplan.js"></script>
   <script src="js/terrain.js"></script>
+  <script src="js/precast.js"></script>
+  <script src="js/precastplan.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

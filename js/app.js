@@ -53,6 +53,8 @@
     nextAussparungId: 1,  // fortlaufende Nummer der Deckendurchbrüche
     anschluesse: new Map(),  // id -> Anschluss { id, memberId, art, ... }
     nextAnschlussId: 1,
+    fertigteile: new Map(),  // id -> Fertigteil { id, bezeichnung, art, felder, stueck }
+    nextFertigteilId: 1,
     aufmass: new Map(),   // id -> Aufmaßblatt { id, pos, kurztext, einheit, gewerk, grenze, ep, datum, aufgenommen, anerkannt, zeilen }
     nextAufmassId: 1,
     bautagebuch: new Map(), // id -> Bautag { id, datum, abschnitt, von, bis, pause, wetter, tempFrueh, …, firmen, geraete, leistungen, lieferungen, ereignisse }
@@ -234,6 +236,9 @@
     model.nextAufmassId = 1;
     model.anschluesse.clear();
     model.nextAnschlussId = 1;
+    model.fertigteile.clear();
+    model.nextFertigteilId = 1;
+    ftErgebnis = null;
     model.bautagebuch.clear();
     model.nextTagId = 1;
     pendingBetonPoint = null;
@@ -1168,6 +1173,10 @@
     if (sheetArt === "anschluss") {
       const an = model.anschluesse.get(anschlussBlattId);
       return blatt(`Anschluss_${name}_${(an && an.bezeichnung ? an.bezeichnung : "Anschluss").replace(/[^\w.-]+/g, "_")}.svg`);
+    }
+    if (sheetArt === "fertigteil") {
+      const ft = model.fertigteile.get(ftBlattId);
+      return blatt(`Fertigteil_${name}_${(ft && ft.bezeichnung ? ft.bezeichnung : "Element").replace(/[^\w.-]+/g, "_")}.svg`);
     }
     if (sheetArt === "gelaendeplan") return blatt(`Gelaendeplan_${name}.svg`);
     if (sheetArt === "lageplan") return blatt(`Lageplan_${name}.svg`);
@@ -2894,6 +2903,7 @@
     positionen: { button: document.getElementById("tabPositionen"), view: document.getElementById("viewPositionen") },
     baustelle: { button: document.getElementById("tabBaustelle"), view: document.getElementById("viewBaustelle") },
     anschluss: { button: document.getElementById("tabAnschluss"), view: document.getElementById("viewAnschluss") },
+    fertigteile: { button: document.getElementById("tabFertigteile"), view: document.getElementById("viewFertigteile") },
     bestand: { button: document.getElementById("tabBestand"), view: document.getElementById("viewBestand") },
     gelaende: { button: document.getElementById("tabGelaende"), view: document.getElementById("viewGelaende") },
     tiefbau: { button: document.getElementById("tabTiefbau"), view: document.getElementById("viewTiefbau") },
@@ -2912,6 +2922,7 @@
     if (which === "positionen") renderPositionsTable();
     if (which === "baustelle") renderBaustelle();
     if (which === "anschluss") renderAnschluesse();
+    if (which === "fertigteile") renderFertigteile();
     if (which === "bestand") renderBestand();
     if (which === "gelaende") renderGelaende();
     if (which === "tiefbau") renderTiefbau();
@@ -2977,6 +2988,7 @@
     if (!TABS.positionen.view.hidden) renderPositionsTable();
     if (!TABS.baustelle.view.hidden) renderBaustelle();
     if (!TABS.anschluss.view.hidden) renderAnschluesse();
+    if (!TABS.fertigteile.view.hidden) renderFertigteile();
     if (!TABS.bestand.view.hidden) renderBestand();
     if (!TABS.gelaende.view.hidden) renderGelaende();
     if (!TABS.tiefbau.view.hidden) renderTiefbau();
@@ -4250,6 +4262,376 @@
     setStatus(`${liste.length} Anschlüsse mit allen Einzelnachweisen als CSV ausgegeben.`, "ok");
   });
 
+  /* ============================== Betonfertigteile */
+
+  let ftBlattId = null;
+  let ftErgebnis = null;
+
+  /** Vorgaben aus den Eingabefeldern. */
+  function ftVorgaben() {
+    const w = (id, ersatz) => {
+      const el = document.getElementById(id);
+      const z = el ? parseFloat(el.value) : NaN;
+      return Number.isFinite(z) ? z : ersatz;
+    };
+    return {
+      nutzlast: w("ftNutzlast", 24), ladelaenge: w("ftLadelaenge", 13.6),
+      stapelHoehe: w("ftStapelHoehe", 2.6), innenladerBreite: w("ftInnenlader", 2.45),
+      psiDyn: w("ftPsiDyn", 1.3), psiHaft: w("ftPsiHaft", 1.2),
+      ankerZahl: Math.max(1, Math.round(w("ftAnkerZahl", 4))), ankerWinkel: w("ftAnkerWinkel", 30),
+      herstellung: w("ftHerstellung", 480), bewehrungPreis: w("ftBewehrungPreis", 1.35),
+      transportFahrt: w("ftTransportFahrt", 420), kranStunde: w("ftKranStunde", 180),
+      montageStunde: w("ftMontageStunde", 65), schichtStunden: w("ftSchicht", 8),
+    };
+  }
+
+  function ftListe() {
+    return Array.from(model.fertigteile.values());
+  }
+
+  /** Auswahllisten der Fertigteilarten füllen. */
+  (function fuelleFtArten() {
+    ["ftArt", "ftArtAnsicht"].forEach((id) => {
+      const wahl = document.getElementById(id);
+      if (!wahl) return;
+      wahl.innerHTML = Object.keys(FERTIGTEILARTEN)
+        .map((k) => `<option value="${k}">${FERTIGTEILARTEN[k].name}</option>`).join("");
+      wahl.value = "stuetze";
+    });
+    const a = document.getElementById("ftArt"), b = document.getElementById("ftArtAnsicht");
+    a.addEventListener("change", () => { b.value = a.value; });
+    b.addEventListener("change", () => { a.value = b.value; });
+    const sa = document.getElementById("ftStueck"), sb = document.getElementById("ftStueckAnsicht");
+    sa.addEventListener("change", () => { sb.value = sa.value; });
+    sb.addEventListener("change", () => { sa.value = sb.value; });
+  }());
+
+  function ftRechnen(still) {
+    const teile = ftListe();
+    if (!teile.length) {
+      ftErgebnis = null;
+      renderFertigteile();
+      if (!still) setStatus("Keine Fertigteile in der Liste.", "error");
+      return null;
+    }
+    const v = ftVorgaben();
+    const fahrten = ftFahrten(teile, v);
+    const montage = ftMontage(teile, v);
+    const kosten = ftKosten(teile, fahrten, montage, v);
+    const massen = teile.map((t) => ftGeometrie(t));
+    ftErgebnis = {
+      fahrten, montage, kosten, vorgaben: v,
+      stueck: massen.reduce((sum, m) => sum + m.stueck, 0),
+      volumen: massen.reduce((sum, m) => sum + m.volumenTransportGesamt, 0),
+      volumenEnde: massen.reduce((sum, m) => sum + m.volumenEndeGesamt, 0),
+      masse: massen.reduce((sum, m) => sum + m.masseTransportGesamt, 0),
+      bewehrung: massen.reduce((sum, m) => sum + m.bewehrungGesamt, 0),
+      ortbeton: massen.reduce((sum, m) => sum + m.ortbetonGesamt, 0),
+      schwerstes: massen.reduce((sum, m) => Math.max(sum, m.masseTransport), 0),
+    };
+    renderFertigteile();
+    if (!still) {
+      setStatus(`${ftErgebnis.stueck} Fertigteile: ${tbText(ftErgebnis.volumen, 1)} m³, `
+        + `${tbText(ftErgebnis.masse / 1000, 1)} t · ${fahrten.anzahl} Fahrten `
+        + `(${tbText(fahrten.auslastung * 100, 0)} % Auslastung`
+        + `${fahrten.sonderfahrten ? `, ${fahrten.sonderfahrten} Sonderfahrten` : ""}) · `
+        + `${tbText(montage.stunden, 1)} h Kranzeit = ${tbText(montage.tage, 1)} Tage · `
+        + `Kostenschätzung ${tbText(kosten.summe, 2)} €.`, "ok");
+    }
+    return ftErgebnis;
+  }
+
+  function renderFertigteile() {
+    const teile = ftListe();
+    document.getElementById("ftEmpty").hidden = teile.length > 0;
+    const body = document.getElementById("ftBody");
+    body.innerHTML = "";
+    const meldungen = [];
+    const v = ftVorgaben();
+
+    teile.forEach((t) => {
+      const art = FERTIGTEILARTEN[t.art];
+      const m = ftGeometrie(t);
+      const an = ftAnschlagen(m, v);
+      const tr2 = ftTransportPruefung(m, v);
+      const felder = Object.keys(art.felder).map((k) =>
+        `<label class="ft-mass">${k}<input type="number" step="0.05" data-ft="${t.id}" `
+        + `data-feld="${k}" value="${(t.felder && t.felder[k] !== undefined ? t.felder[k] : art.felder[k])}"></label>`).join("");
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input type="text" data-ft="${t.id}" data-feld="bezeichnung" value="${t.bezeichnung}"></td>
+        <td><select data-ft="${t.id}" data-feld="art">
+          ${Object.keys(FERTIGTEILARTEN).map((k) => `<option value="${k}"${k === t.art ? " selected" : ""}>${FERTIGTEILARTEN[k].name}</option>`).join("")}
+        </select></td>
+        <td class="ft-masse-zelle"><div>${felder}</div></td>
+        <td><input type="number" step="1" min="1" data-ft="${t.id}" data-feld="stueck" value="${t.stueck}"></td>
+        <td><input type="text" data-ft="${t.id}" data-feld="abschnitt" value="${t.abschnitt || ""}"></td>
+        <td>${tbText(m.volumenTransport, 3)}${m.ortbeton > 1e-6 ? `<div class="layer-note">+ ${tbText(m.ortbeton, 3)} Ortbeton</div>` : ""}</td>
+        <td><strong>${tbText(m.masseTransport / 1000, 2)}</strong>
+          <div class="layer-note">${tbText(m.masseTransportGesamt / 1000, 1)} t gesamt</div></td>
+        <td>${tbText(m.bewehrung, 1)}</td>
+        <td>${tbText(an.jeAnker, 1)}</td>
+        <td>${tr2.meldungen.length
+          ? `<span class="cut-warning">${tr2.meldungen.length} Hinweis${tr2.meldungen.length === 1 ? "" : "e"}</span>`
+          : `<span class="anschluss-marke">${tr2.stehend ? "stehend" : "liegend"}</span>`}</td>
+        <td><button class="tool-btn" data-ft-blatt="${t.id}" title="Fertigteilblatt">📄</button></td>
+        <td><button class="row-remove" data-ft-weg="${t.id}" title="Fertigteil löschen">✕</button></td>`;
+      body.appendChild(tr);
+      tr2.meldungen.forEach((x) => meldungen.push({ pos: t.bezeichnung, m: x }));
+      m.hinweise.forEach((h) => meldungen.push({ pos: t.bezeichnung, m: { art: "hinweis", text: h } }));
+    });
+
+    document.getElementById("ftMeldungen").innerHTML = meldungen.length
+      ? meldungen.slice(0, 12).map((x) => `<div class="${x.m.art === "warnung" ? "warnwert" : ""}">`
+        + `${x.m.art === "warnung" ? "!" : "ℹ"} ${x.pos}: ${x.m.text}</div>`).join("")
+      : (teile.length ? "Alle Teile halten die Grenzmaße ohne Erlaubnis ein." : "");
+
+    const kennzahl = (label, wert, warnung) =>
+      `<div class="stat"><span class="label">${label}</span>`
+      + `<span class="value${warnung ? " warnwert" : ""}">${wert}</span></div>`;
+
+    const fBody = document.getElementById("ftFahrtenBody");
+    const mBody = document.getElementById("ftMontageBody");
+    const kBody = document.getElementById("ftKostenBody");
+    fBody.innerHTML = ""; mBody.innerHTML = ""; kBody.innerHTML = "";
+    document.getElementById("ftFahrtenEmpty").hidden = !!ftErgebnis;
+
+    if (!ftErgebnis) {
+      document.getElementById("ftKennzahlen").innerHTML = teile.length
+        ? kennzahl("Positionen", teile.length)
+          + kennzahl("Stück", teile.reduce((s2, t) => s2 + (t.stueck || 1), 0))
+          + kennzahl("Fahrten", "noch nicht gerechnet", true)
+        : "";
+      return;
+    }
+
+    const e = ftErgebnis;
+    document.getElementById("ftKennzahlen").innerHTML =
+      kennzahl("Positionen", teile.length)
+      + kennzahl("Stück", e.stueck)
+      + kennzahl("Fertigteilbeton", `${tbText(e.volumen, 1)} m³`)
+      + (e.ortbeton > 0.01 ? kennzahl("Ortbeton", `${tbText(e.ortbeton, 1)} m³`) : "")
+      + kennzahl("Gewicht", `${tbText(e.masse / 1000, 1)} t`)
+      + kennzahl("schwerstes Teil", `${tbText(e.schwerstes / 1000, 2)} t`)
+      + kennzahl("Bewehrung", `${tbText(e.bewehrung, 0)} kg`)
+      + kennzahl("Fahrten", e.fahrten.anzahl, e.fahrten.sonderfahrten > 0)
+      + kennzahl("Auslastung", `${tbText(e.fahrten.auslastung * 100, 0)} %`)
+      + kennzahl("Kranzeit", `${tbText(e.montage.stunden, 1)} h`)
+      + kennzahl("Montagedauer", `${tbText(e.montage.tage, 1)} Tage`)
+      + kennzahl("Kosten", `${tbText(e.kosten.summe, 2)} €`);
+
+    e.fahrten.fahrten.forEach((f) => {
+      const nach = {};
+      f.stuecke.forEach((s2) => { nach[s2.bezeichnung] = (nach[s2.bezeichnung] || 0) + 1; });
+      const tr = document.createElement("tr");
+      tr.className = f.sonder ? "durchdringung" : "";
+      tr.innerHTML = `
+        <td>${f.nummer}</td>
+        <td>${f.stehend ? "stehend (Innenlader)" : "liegend (Stapel)"}</td>
+        <td>${Object.entries(nach).map(([k, n]) => `${n} × ${k}`).join(", ")}</td>
+        <td>${tbText(f.masse / 1000, 2)}</td>
+        <td>${tbText(f.platz, 2)} / ${tbText(f.grenzePlatz, 2)}</td>
+        <td>${tbText(f.laenge, 2)}</td>
+        <td>${f.sonder ? '<span class="cut-warning">Großraum- oder Schwertransport</span>' : ""}</td>`;
+      fBody.appendChild(tr);
+    });
+
+    e.montage.zeilen.forEach((z) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${z.reihenfolge}</td>
+        <td>${z.teil.bezeichnung}</td>
+        <td>${z.massen.name}</td>
+        <td>${z.abschnitt}</td>
+        <td>${z.massen.stueck}</td>
+        <td>${tbText(z.hub, 2)}</td>
+        <td>${tbText(z.stunden, 2)}</td>`;
+      mBody.appendChild(tr);
+    });
+
+    e.kosten.zeilen.forEach((zl) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${zl.nr}</td><td>${zl.kurz}</td><td>${tbText(zl.menge, 2)}</td><td>${zl.einheit}</td>
+        <td>${tbText(zl.ep, 2)}</td><td><strong>${tbText(zl.gp, 2)}</strong></td>
+        <td class="layer-note">${zl.hinweis || ""}</td>`;
+      kBody.appendChild(tr);
+    });
+    const summe = document.createElement("tr");
+    summe.innerHTML = `<td></td><td><strong>Summe Fertigteile</strong></td><td></td><td></td><td></td>`
+      + `<td><strong>${tbText(e.kosten.summe, 2)}</strong></td>`
+      + `<td class="layer-note">${tbText(e.kosten.jeStueck, 2)} €/Stück · `
+      + `${tbText(e.kosten.jeKubik, 2)} €/m³ · ohne Umsatzsteuer</td>`;
+    kBody.appendChild(summe);
+  }
+
+  /* ---- Bedienung Fertigteile */
+
+  document.getElementById("viewFertigteile").addEventListener("change", (e) => {
+    const ziel = e.target;
+    if (!ziel.dataset.ft) return;
+    const t = model.fertigteile.get(parseInt(ziel.dataset.ft, 10));
+    if (!t) return;
+    const feld = ziel.dataset.feld;
+    if (feld === "bezeichnung" || feld === "abschnitt") t[feld] = ziel.value;
+    else if (feld === "art") {
+      t.art = ziel.value;
+      // Beim Wechsel der Art gelten die Maße der neuen Art
+      t.felder = Object.assign({}, FERTIGTEILARTEN[ziel.value].felder);
+    } else if (feld === "stueck") t.stueck = Math.max(1, parseInt(ziel.value, 10) || 1);
+    else {
+      t.felder = Object.assign({}, FERTIGTEILARTEN[t.art].felder, t.felder, { [feld]: parseFloat(ziel.value) || 0 });
+    }
+    if (ftErgebnis) ftRechnen(true); else renderFertigteile();
+  });
+
+  document.getElementById("viewFertigteile").addEventListener("click", (e) => {
+    const weg = e.target.closest("[data-ft-weg]");
+    if (weg) {
+      model.fertigteile.delete(parseInt(weg.dataset.ftWeg, 10));
+      if (ftErgebnis) ftRechnen(true); else renderFertigteile();
+      return;
+    }
+    const blatt = e.target.closest("[data-ft-blatt]");
+    if (blatt) zeigeFertigteilblatt(parseInt(blatt.dataset.ftBlatt, 10));
+  });
+
+  function neuesFertigteil(art, stueck, abschnitt) {
+    const vorlage = FERTIGTEILARTEN[art];
+    const id = model.nextFertigteilId++;
+    const teil = {
+      id, art, bezeichnung: `${vorlage.kuerzel}${id}`,
+      felder: Object.assign({}, vorlage.felder),
+      stueck: Math.max(1, stueck || 1), abschnitt: abschnitt || "",
+    };
+    model.fertigteile.set(id, teil);
+    return teil;
+  }
+
+  document.getElementById("btnFtNeu").addEventListener("click", () => {
+    const art = document.getElementById("ftArtAnsicht").value;
+    const stueck = parseInt(document.getElementById("ftStueckAnsicht").value, 10) || 1;
+    const abschnitt = document.getElementById("ftAbschnitt").value;
+    const teil = neuesFertigteil(art, stueck, abschnitt);
+    const m = ftGeometrie(teil);
+    if (ftErgebnis) ftRechnen(true); else renderFertigteile();
+    setStatus(`${FERTIGTEILARTEN[art].name} ${teil.bezeichnung} angelegt: ${teil.stueck} Stück à `
+      + `${tbText(m.volumenTransport, 3)} m³ und ${tbText(m.masseTransport / 1000, 2)} t. `
+      + "Maße in der Zeile anpassen.", "ok");
+  });
+
+  document.getElementById("btnFtBeispiel").addEventListener("click", () => {
+    // Hallenbau in Fertigteilen: Köcher, Stützen, Binder, Dachplatten, Wände
+    model.fertigteile.clear();
+    model.nextFertigteilId = 1;
+    [
+      ["koecher", 12, "BA 1", { laenge: 1.8, breite: 1.8, hoehe: 1.0, koecherLaenge: 0.6, koecherBreite: 0.6, koecherTiefe: 0.8 }],
+      ["stuetze", 12, "BA 1", { laenge: 8.0, breite: 0.4, hoehe: 0.4 }],
+      ["satteldachbinder", 6, "BA 1", { laenge: 24.0, breite: 0.3, hoehe: 1.0, neigung: 6 }],
+      ["ttplatte", 20, "BA 2", { laenge: 15.0, breite: 2.4, hoehe: 0.6, platte: 0.06, rippeOben: 0.24, rippeUnten: 0.14 }],
+      ["sandwichwand", 24, "BA 2", { laenge: 6.0, hoehe: 3.6, tragschale: 0.18, daemmung: 0.12, vorsatzschale: 0.07 }],
+      ["treppenlauf", 4, "BA 3", { geschosshoehe: 2.8, steigungen: 16, auftritt: 0.28, laufbreite: 1.2, dicke: 0.18 }],
+    ].forEach(([art, stueck, ba, felder]) => {
+      const t = neuesFertigteil(art, stueck, ba);
+      t.felder = Object.assign({}, FERTIGTEILARTEN[art].felder, felder);
+    });
+    ftRechnen();
+    setStatus("Beispielhalle in Fertigteilen eingesetzt: Köcherfundamente, Stützen, Satteldachbinder "
+      + "24 m, TT-Platten, Sandwichwände und Treppenläufe. Zum Prüfen und Überschreiben gedacht.", "ok");
+  });
+
+  document.getElementById("btnFtRechnen").addEventListener("click", () => ftRechnen());
+  ["ftNutzlast", "ftLadelaenge", "ftStapelHoehe", "ftInnenlader", "ftPsiDyn", "ftPsiHaft",
+    "ftAnkerZahl", "ftAnkerWinkel", "ftHerstellung", "ftBewehrungPreis", "ftTransportFahrt",
+    "ftKranStunde", "ftMontageStunde", "ftSchicht"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", () => { if (ftErgebnis) ftRechnen(true); });
+  });
+
+  function zeigeFertigteilblatt(id) {
+    const teil = model.fertigteile.get(id);
+    if (!teil) { setStatus("Zuerst ein Fertigteil anlegen.", "error"); return; }
+    ftBlattId = id;
+    const v = ftVorgaben();
+    const massen = ftGeometrie(teil);
+    sheetArt = "fertigteil";
+    document.getElementById("sheetBody").innerHTML = fertigteilblattSVG({
+      teil, massen, anschlagen: ftAnschlagen(massen, v),
+      transport: ftTransportPruefung(massen, v), projekt: projektKopf(),
+    });
+    document.getElementById("sheetTitle").textContent = `Fertigteil ${teil.bezeichnung}`;
+    const liste = ftListe();
+    document.getElementById("sheetCounter").textContent =
+      `${liste.indexOf(teil) + 1} von ${liste.length} · ${massen.name} · `
+      + `${tbText(massen.masseTransport / 1000, 2)} t je Stück`;
+    document.getElementById("sheetOverlay").hidden = false;
+  }
+
+  document.getElementById("btnFtBlatt").addEventListener("click", () => {
+    const liste = ftListe();
+    if (!liste.length) { setStatus("Zuerst ein Fertigteil anlegen.", "error"); return; }
+    zeigeFertigteilblatt(ftBlattId && model.fertigteile.has(ftBlattId) ? ftBlattId : liste[0].id);
+  });
+
+  document.getElementById("btnFtCsv").addEventListener("click", () => {
+    const e = ftErgebnis || ftRechnen();
+    if (!e) return;
+    const teile = ftListe();
+    const v = e.vorgaben;
+    const rows = [["Fertigteile – " + (document.getElementById("projectName").value || "Projekt")]];
+    rows.push(["Wichte Stahlbeton [kN/m3]", 25, "nach DIN EN 1991-1-1 Tab. A.1"]);
+    rows.push([]);
+    rows.push(["Elementliste"]);
+    rows.push(["Pos", "Art", "Bauabschnitt", "Stueck", "Masse [m]", "V je Stueck [m3]",
+      "V gesamt [m3]", "Ortbeton [m3]", "Gewicht je Stueck [t]", "Gewicht gesamt [t]",
+      "Bewehrung [kg]", "Last je Anker [kN]", "Ladeweise", "Hinweise"]);
+    teile.forEach((t) => {
+      const m = ftGeometrie(t);
+      const an = ftAnschlagen(m, v);
+      const tr = ftTransportPruefung(m, v);
+      const masse = Object.entries(Object.assign({}, FERTIGTEILARTEN[t.art].felder, t.felder))
+        .map(([k, w]) => `${k} ${w}`).join(" / ");
+      rows.push([t.bezeichnung, m.name, t.abschnitt || "", m.stueck, masse,
+        m.volumenTransport.toFixed(3), m.volumenTransportGesamt.toFixed(2), m.ortbetonGesamt.toFixed(2),
+        (m.masseTransport / 1000).toFixed(3), (m.masseTransportGesamt / 1000).toFixed(2),
+        m.bewehrungGesamt.toFixed(1), an.jeAnker.toFixed(1),
+        tr.stehend ? "stehend" : "liegend",
+        tr.meldungen.map((x) => x.text).join(" | ")]);
+    });
+    rows.push(["Summe", "", "", e.stueck, "", "", e.volumen.toFixed(2), e.ortbeton.toFixed(2),
+      "", (e.masse / 1000).toFixed(2), e.bewehrung.toFixed(1)]);
+    rows.push([]);
+    rows.push(["Transport", `Nutzlast ${v.nutzlast} t`, `Ladelaenge ${v.ladelaenge} m`,
+      `Stapelhoehe ${v.stapelHoehe} m`, `Innenlader ${v.innenladerBreite} m`]);
+    rows.push(["Fahrt", "Ladeweise", "Stuecke", "Gewicht [t]", "Stapel [m]", "laengstes Stueck [m]", "Art"]);
+    e.fahrten.fahrten.forEach((f) => {
+      const nach = {};
+      f.stuecke.forEach((s2) => { nach[s2.bezeichnung] = (nach[s2.bezeichnung] || 0) + 1; });
+      rows.push([f.nummer, f.stehend ? "stehend" : "liegend",
+        Object.entries(nach).map(([k, n]) => `${n} x ${k}`).join(", "),
+        (f.masse / 1000).toFixed(2), f.platz.toFixed(2), f.laenge.toFixed(2),
+        f.sonder ? "Grossraum- oder Schwertransport" : "Regelfahrt"]);
+    });
+    rows.push([]);
+    rows.push(["Montagereihenfolge"]);
+    rows.push(["Nr", "Pos", "Art", "Bauabschnitt", "Stueck", "Hub [t]", "Kranzeit [h]"]);
+    e.montage.zeilen.forEach((z) => {
+      rows.push([z.reihenfolge, z.teil.bezeichnung, z.massen.name, z.abschnitt,
+        z.massen.stueck, z.hub.toFixed(2), z.stunden.toFixed(2)]);
+    });
+    rows.push(["Summe", "", "", "", "", `schwerster Hub ${e.montage.schwersterHub.toFixed(2)} t`,
+      e.montage.stunden.toFixed(2)]);
+    rows.push([]);
+    rows.push(["Kostenschaetzung"]);
+    rows.push(["Pos", "Kurztext", "Menge", "Einheit", "EP [EUR]", "GP [EUR]", "Hinweis"]);
+    e.kosten.zeilen.forEach((zl) => {
+      rows.push([zl.nr, zl.kurz, zl.menge.toFixed(2), zl.einheit, zl.ep.toFixed(2), zl.gp.toFixed(2), zl.hinweis || ""]);
+    });
+    rows.push(["", "Summe (ohne Umsatzsteuer)", "", "", "", e.kosten.summe.toFixed(2)]);
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Fertigteile_${name}.csv`, "\ufeff" + zuCsv(rows), "text/csv;charset=utf-8;");
+    setStatus(`Elementliste, Fahrten, Montagereihenfolge und Kosten als CSV ausgegeben.`, "ok");
+  });
+
   /* ============================== Geländemodell (DGM) */
 
   function dgmZahlFeld(id, ersatz) {
@@ -5411,6 +5793,8 @@
       betonteile: Array.from(model.beton.values()),
       anschluesse: Array.from(model.anschluesse.values()),
       naechsteAnschlussId: model.nextAnschlussId,
+      fertigteile: Array.from(model.fertigteile.values()),
+      naechsteFertigteilId: model.nextFertigteilId,
       aufmass: Array.from(model.aufmass.values()),
       naechsteAufmassId: model.nextAufmassId,
       bautagebuch: Array.from(model.bautagebuch.values()),
@@ -5474,6 +5858,9 @@
     (data.betonteile || []).forEach((b) => model.beton.set(b.id, b));
     model.nextBetonId = data.naechsteBetonId || (model.beton.size + 1);
     (data.anschluesse || []).forEach((a) => model.anschluesse.set(a.id, a));
+    (data.fertigteile || []).forEach((t) => model.fertigteile.set(t.id, t));
+    model.nextFertigteilId = data.naechsteFertigteilId
+      || (Math.max(0, ...(data.fertigteile || []).map((t) => t.id)) + 1);
     model.nextAnschlussId = data.naechsteAnschlussId
       || (Math.max(0, ...(data.anschluesse || []).map((a) => a.id)) + 1);
     (data.aufmass || []).forEach((a) => model.aufmass.set(a.id, a));

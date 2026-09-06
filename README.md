@@ -46,6 +46,7 @@ schieben; Bedienelemente sind mindestens 44 pt hoch und Eingabefelder mindestens
 | Tiefbau | Lageplan, Höhenplan mit Massenlinie und Querprofilblätter als SVG; Massen und Kostenschätzung als CSV |
 | Anschlüsse | Anschlussblatt mit Skizze und Nachweisprotokoll als SVG; Einzelnachweise als CSV |
 | Geländemodell | Geländeplan mit Höhenlinien als SVG; Höhenpunkte, Kennwerte und Aushub als CSV |
+| Fertigteile | Fertigteilblatt mit Ansicht, Querschnitt und Transportdaten als SVG; Elementliste, Fahrten, Montage und Kosten als CSV |
 | Papier und PDF | über *Drucken*; aus dem Blattfenster kommt das Blatt allein auf das Papier |
 
 **↗ Weitergeben** übergibt die zuletzt erzeugte Datei an das Systemmenü des Geräts
@@ -92,6 +93,8 @@ js/
   connections.js          Anschluesse nach DIN EN 1993-1-8 (Schrauben, Naehte, T-Stummel)
   connectionplan.js       Anschlussblatt mit Skizze und Nachweisprotokoll
   terrain.js              Geländemodell: Vermaschung, Hoehenlinien, Volumen
+  precast.js              Fertigteile: Geometrie, Gewichte, Transport, Montage
+  precastplan.js          Fertigteilblatt mit Ansicht, Querschnitt und Daten
 python/                   Bewehrung und Herstellungsunterlagen (46 Prüfungen)
 desktop/                  Windows-Anwendung (Electron) – siehe desktop/README.md
 tools/
@@ -150,6 +153,28 @@ oder PLY aus. **Nicht erkannt**: Rundungen, im Aufriss schräge Wände, Stützen
 Wände hinter Einbauten. Die Punktwolke wird **nicht** in der Projektdatei
 gespeichert; sie ist nach dem Öffnen neu zu laden. Das Ergebnis der Erkennung ist
 ein Vorschlag für die Bestandsaufnahme und **ersetzt das Aufmaß vor Ort nicht**.
+
+## Betonfertigteile
+
+Das Register **Fertigteile** führt das Element als Bauteil, als Ladung und
+als Kranhub an derselben Geometrie:
+
+| Schritt | Rechenweg |
+|---|---|
+| Geometrie | Regelquerschnitte mit Hohlräumen: Hohlplatte (Kerne), Doppel-T (Rippen als Trapez), Doppelwand, Elementdecke, Sandwich, Stütze, Binder, Satteldachbinder, Treppenlauf, Köcher |
+| Massen | Wichte 25 kN/m³ (DIN EN 1991-1-1, Tab. A.1); **Transportgewicht und Endgewicht getrennt** – bei Doppelwand und Elementdecke kommt der Ortbeton erst auf der Baustelle dazu |
+| Anschlagen | F = m · g · ψ_dyn · ψ_haft / (n · cos α), zusätzlich der Fall „nur zwei Anker tragen" |
+| Transport | Prüfung gegen Breite 2,55 m, Höhe 4,00 m, Länge 16,50 m und 40 t; darüber Großraum- und Schwertransport nach § 29 Abs. 3 und § 46 StVO |
+| Fahrten | Fertigteile werden **gestapelt** geladen: maßgebend sind Nutzlast, Stapelhöhe bzw. Innenladerbreite und das *längste* Stück – nicht die Summe der Längen |
+| Montage | Reihenfolge Gründung → Stützen → Binder → Decken → Wände → Treppen, Kranzeit je Stück, Dauer in Schichten |
+| Kosten | Herstellung je m³, Bewehrung je kg, Transport je Fahrt, Montage je Kranstunde, Ortbetonergänzung |
+
+**Nicht geführt**: Bemessung der Fertigteile (Biegung, Querkraft, Kippen,
+Vorspannung nach DIN EN 1992-1-1), Nachweis der Transportanker und der
+Bewehrung im Anschlagbereich, Fugen und Verbindungen, Zwischenlagerung und
+Stapelung, Toleranzen nach DIN 18203-1, Ladungssicherung nach VDI 2700.
+Die zulässigen Lasten der Ankersysteme sind Herstellerangaben aus der
+allgemeinen bauaufsichtlichen Zulassung.
 
 ## Geländemodell
 

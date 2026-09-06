@@ -1493,3 +1493,15 @@ header.app-header {
 #anschlussTable td { white-space: nowrap; }
 #anschlussTable td:nth-child(10) input { width: 3.6em; min-width: 3.6em; margin-right: 2px; }
 #anschlussTable .tool-btn { padding: 4px 8px; }
+
+/* Fertigteiltabelle: je Art andere Maße, deshalb kleine beschriftete Felder */
+#ftTable .ft-masse-zelle { white-space: normal; }
+/* Die Maßfelder stehen nebeneinander und brechen erst um, wenn die Spalte
+   voll ist – sonst wird jede Zeile so hoch wie die Zahl der Maße. */
+#ftTable .ft-masse-zelle > div { display: flex; flex-wrap: wrap; gap: 2px 8px; width: 300px; }
+#ftTable .ft-mass { display: flex; flex-direction: column; font-size: 10px;
+  color: var(--text-muted); }
+#ftTable .ft-mass input { width: 4.6em; min-width: 4.6em; font-size: 12px; }
+#ftTable input[type="number"] { width: 4.6em; min-width: 4.6em; }
+#ftTable input[type="text"] { width: 6.5em; min-width: 5em; }
+#ftTable .tool-btn { padding: 4px 8px; }
