@@ -87,6 +87,7 @@
     <button class="ribbon-tab" data-band="anschluesse" role="tab">Anschlüsse</button>
     <button class="ribbon-tab" data-band="fertigteile" role="tab">Fertigteile</button>
     <button class="ribbon-tab" data-band="logistik" role="tab">Logistik</button>
+    <button class="ribbon-tab" data-band="fassade" role="tab">Fassade</button>
     <button class="ribbon-tab" data-band="bestand" role="tab">Bestand</button>
     <button class="ribbon-tab" data-band="gelaende" role="tab">Gelände</button>
     <button class="ribbon-tab" data-band="tiefbau" role="tab">Tiefbau</button>
@@ -489,6 +490,41 @@
     </div>
   </div>
 
+  <!-- ============================================================= Fassade -->
+  <div class="ribbon-band" data-band="fassade" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnFassadeRechnen" data-reiter="fassade" title="Raster bilden und alle Nachweise führen">
+          <span class="ribbon-icon">🪟</span><span class="ribbon-label">Fassade<br>rechnen</span></button>
+        <button class="ribbon-btn" data-befehl="btnFassadeBeispiel" data-reiter="fassade" title="Beispielfassade einsetzen">
+          <span class="ribbon-icon">🏢</span><span class="ribbon-label">Beispiel</span></button>
+      </div>
+      <div class="ribbon-caption">Parametrische Fassade</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnFassadeProfilSuchen" data-reiter="fassade" title="Kleinstes Profil suchen, das Spannung und Durchbiegung einhält">
+          <span class="ribbon-icon">🔎</span><span class="ribbon-label">Profil<br>suchen</span></button>
+        <button class="ribbon-btn" data-befehl="btnFassadeGlasSuchen" data-reiter="fassade" title="Leichtesten Glasaufbau suchen, der den Nachweis hält">
+          <span class="ribbon-icon">🔬</span><span class="ribbon-label">Aufbau<br>suchen</span></button>
+      </div>
+      <div class="ribbon-caption">Bemessung</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnFassadeBlatt" data-reiter="fassade" title="Fassadenblatt mit Ansicht und Regeldetails">
+          <span class="ribbon-icon">📄</span><span class="ribbon-label">Fassaden-<br>blatt</span></button>
+        <button class="ribbon-btn" data-befehl="btnFassadeCsv" data-reiter="fassade" title="Felderliste, Nachweise, Mengen und Kosten als CSV">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Fassade<br>(CSV)</span></button>
+        <button class="ribbon-btn" data-befehl="tabFassade" title="Fassadenliste zeigen">
+          <span class="ribbon-icon">📋</span><span class="ribbon-label">Fassaden-<br>liste</span></button>
+      </div>
+      <div class="ribbon-caption">Ausgabe</div>
+    </div>
+  </div>
+
   <!-- ================================================ Bestand (Punktwolke) -->
   <div class="ribbon-band" data-band="bestand" hidden>
     <div class="ribbon-group">
@@ -729,6 +765,7 @@
         <button class="tab-btn" id="tabAnschluss">Anschlüsse</button>
         <button class="tab-btn" id="tabFertigteile">Fertigteile</button>
         <button class="tab-btn" id="tabLogistik">Logistik</button>
+        <button class="tab-btn" id="tabFassade">Fassade</button>
         <button class="tab-btn" id="tabBestand">Bestand</button>
         <button class="tab-btn" id="tabGelaende">Gelände</button>
         <button class="tab-btn" id="tabTiefbau">Tiefbau</button>
@@ -2250,6 +2287,194 @@
       <div class="layer-note" id="bauMeldungen"></div>
     </div>
 
+    <div class="result-panel-body" id="viewFassade" hidden>
+      <h3 class="section-title">Fassade als parametrisches Bauteil</h3>
+      <p class="view-note">Aus Feldbreiten, Geschosshöhen und der Brüstungshöhe entsteht das vollständige
+        Raster mit Pfosten, Riegeln und Feldern. Wird ein Maß geändert, wird alles neu gebildet – Nachweise,
+        Mengen und Kosten folgen mit. Die Feldbreiten und Geschosshöhen werden als Liste eingetragen
+        (z. B. <code>1,35 1,35 1,35</code>); eine einzelne Zahl mit einem <code>×</code> davor wiederholt sie
+        (z. B. <code>6× 1,35</code>).</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="fasArt">Bauart</label>
+          <select id="fasArt"></select></div>
+        <div class="field"><label for="fasFelder">Feldbreiten [m]</label>
+          <input type="text" id="fasFelder" value="6× 1,35"></div>
+        <div class="field"><label for="fasGeschosse">Geschosshöhen [m]</label>
+          <input type="text" id="fasGeschosse" value="5× 3,60"></div>
+        <div class="field"><label for="fasBruestung">Brüstungsriegel [m]</label>
+          <input type="number" id="fasBruestung" step="0.05" min="0" value="0.90"
+                 title="Höhe des Riegels über Oberkante Rohdecke; 0 = kein Brüstungsriegel"></div>
+        <div class="field"><label for="fasSturz">Sturzriegel [m]</label>
+          <input type="number" id="fasSturz" step="0.05" min="0" value="0"
+                 title="Abstand des oberen Riegels unter der Decke; 0 = kein Sturzriegel"></div>
+        <div class="field"><label for="fasBruestungPaneel">Brüstungsfeld</label>
+          <select id="fasBruestungPaneel">
+            <option value="paneel" selected>Paneel</option>
+            <option value="glas">Verglasung</option>
+          </select></div>
+      </div>
+
+      <h3 class="section-title">Füllung und Profile</h3>
+      <p class="view-note">Der Glasaufbau bestimmt Gewicht, U-Wert und Nachweis. Die
+        <strong>Profilkennwerte sind Richtwerte einer Regelserie</strong>, damit gerechnet werden kann, bevor
+        das System feststeht – Widerstandsmoment, Trägheitsmoment und U<sub>f</sub> sind der Systemunterlage
+        des Herstellers zu entnehmen und in der Profiltabelle unten zu überschreiben.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="fasGlas">Glasaufbau</label>
+          <select id="fasGlas"></select></div>
+        <div class="field"><label for="fasPaneel">Paneel</label>
+          <select id="fasPaneel"></select></div>
+        <div class="field"><label for="fasPfostenProfil">Pfostenprofil</label>
+          <select id="fasPfostenProfil"></select></div>
+        <div class="field"><label for="fasRiegelProfil">Riegelprofil</label>
+          <select id="fasRiegelProfil"></select></div>
+        <div class="field"><label for="fasLegierung">Legierung</label>
+          <select id="fasLegierung"></select></div>
+        <div class="field"><label for="fasGammaM1">γ<sub>M1</sub></label>
+          <input type="number" id="fasGammaM1" step="0.05" min="1" value="1.10"></div>
+      </div>
+
+      <h3 class="section-title">Windlast nach DIN EN 1991-1-4 mit deutschem NA</h3>
+      <p class="view-note">Der <strong>vereinfachte Geschwindigkeitsdruck</strong> q<sub>p</sub> gilt bis
+        25 m Gebäudehöhe; darüber ist q<sub>p</sub>(z) nach dem Regelverfahren zu bestimmen – die Rechnung
+        meldet das und rechnet nicht weiter. Für Bauteile der Außenhaut gilt c<sub>pe,1</sub> bis 1 m²
+        Lasteinzugsfläche und c<sub>pe,10</sub> ab 10 m², dazwischen wird über den Logarithmus der Fläche
+        interpoliert. <strong>Maßgebend ist für die Fassade in aller Regel der Sog im Eckbereich A</strong>,
+        nicht der Druck in der Feldmitte; der Innendruck wirkt der Außenwirkung entgegen und vergrößert sie.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="fasWindzone">Windzone</label>
+          <select id="fasWindzone">
+            <option value="1">1 (22,5 m/s)</option>
+            <option value="2" selected>2 (25,0 m/s)</option>
+            <option value="3">3 (27,5 m/s)</option>
+            <option value="4">4 (30,0 m/s)</option>
+          </select></div>
+        <div class="field"><label for="fasGelaende">Gelände</label>
+          <select id="fasGelaende">
+            <option value="binnenland" selected>Binnenland</option>
+            <option value="kueste">Küste und Inseln der Ostsee</option>
+          </select></div>
+        <div class="field"><label for="fasHoehe">Gebäudehöhe [m]</label>
+          <input type="number" id="fasHoehe" step="0.5" min="1" value="18"></div>
+        <div class="field"><label for="fasBereich">Druckbereich</label>
+          <select id="fasBereich">
+            <option value="A" selected>A – Eckbereich (Sog)</option>
+            <option value="B">B – Sog</option>
+            <option value="C">C – Sog</option>
+            <option value="D">D – angeströmt (Druck)</option>
+            <option value="E">E – abgewandt (Sog)</option>
+          </select></div>
+        <div class="field"><label for="fasCpiPlus">c<sub>pi</sub> Druck</label>
+          <input type="number" id="fasCpiPlus" step="0.05" value="0.2"></div>
+        <div class="field"><label for="fasCpiMinus">c<sub>pi</sub> Sog</label>
+          <input type="number" id="fasCpiMinus" step="0.05" value="-0.3"></div>
+      </div>
+
+      <h3 class="section-title">Glasnachweis nach DIN 18008</h3>
+      <p class="view-note">Die Scheibe wird als <strong>allseitig linienförmig gelagerte Rechteckplatte</strong>
+        gerechnet (Kirchhoff, Navier-Reihe) – linear, also ohne die günstige Membranwirkung großer
+        Durchbiegungen; das liegt auf der sicheren Seite. Der Widerstand ist
+        R<sub>d</sub> = k<sub>mod</sub>·k<sub>c</sub>·f<sub>k</sub>/γ<sub>M</sub>; bei vorgespanntem Glas
+        entfällt k<sub>mod</sub>. Wirken Wind und Klimalast zusammen, bekommt <strong>jede Einwirkung den
+        k<sub>mod</sub> ihrer eigenen Dauer</strong> und die Ausnutzungen werden summiert (DIN EN 16612).
+        Beim Isolierglas wird die Kopplung über das Gaspolster aus derselben Reihe hergeleitet, mit der auch
+        die Spannungen gerechnet werden; ausgegeben wird die gleichwertige Kennlänge a*, damit sie gegen
+        DIN 18008-1 Anhang A und die Systemunterlage geprüft werden kann.
+        <strong>Nicht geführt</strong>: absturzsichernde Verglasung nach DIN 18008-4 (Pendelschlagversuch),
+        begehbare Verglasung, Überkopfverglasung mit Resttragfähigkeit.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="fasKc">k<sub>c</sub></label>
+          <input type="number" id="fasKc" step="0.1" min="0.1" value="1.0"
+                 title="Konstruktionsbeiwert nach DIN 18008-1"></div>
+        <div class="field"><label for="fasGlasDurchbiegung">Durchbiegung a/…</label>
+          <input type="number" id="fasGlasDurchbiegung" step="10" min="10" value="100"
+                 title="Richtwert der Praxis; DIN 18008 gibt für Vertikalverglasung keine Grenze vor"></div>
+        <div class="field"><label for="fasKlimaSommer">Klima Sommer ΔT / Δp / ΔH</label>
+          <input type="text" id="fasKlimaSommer" value="20 / -2 / 600"
+                 title="Temperaturänderung [K], meteorologische Luftdruckänderung [kN/m²], Ortshöhendifferenz [m]"></div>
+        <div class="field"><label for="fasKlimaWinter">Klima Winter ΔT / Δp / ΔH</label>
+          <input type="text" id="fasKlimaWinter" value="-25 / 4 / -300"></div>
+        <div class="field"><label for="fasKlimaC">Beiwerte c₁ / c₂ / c₃</label>
+          <input type="text" id="fasKlimaC" value="0,34 / -1,0 / 0,012"
+                 title="p₀ = c₁·ΔT + c₂·Δp_met + c₃·ΔH nach DIN 18008-1 Anhang A"></div>
+        <div class="field"><label for="fasPfostenGrenze">Pfosten f ≤ [mm]</label>
+          <input type="number" id="fasPfostenGrenze" step="1" min="1" value="15"
+                 title="L/200, höchstens dieser Wert; über 3 m Stützweite L/300 + 5 mm"></div>
+        <div class="field"><label for="fasRiegelGlasTeiler">Riegel unter Glas L/…</label>
+          <input type="number" id="fasRiegelGlasTeiler" step="50" min="50" value="500"
+                 title="Durchbiegung des Riegels in der Fassadenebene; maßgebend ist der Randverbund der aufstehenden Scheibe"></div>
+        <div class="field"><label for="fasRiegelGlasGrenze">… höchstens [mm]</label>
+          <input type="number" id="fasRiegelGlasGrenze" step="0.5" min="0.5" value="3"></div>
+      </div>
+      <div class="cutlist-controls">
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnFassadeRechnen">🪟 Fassade rechnen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnFassadeBeispiel" title="Beispielfassade einsetzen">🏢 Beispiel</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnFassadeProfilSuchen" title="Kleinstes Profil suchen, das Spannung und Durchbiegung einhält">🔎 Profil suchen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnFassadeGlasSuchen" title="Leichtesten Glasaufbau suchen, der den Nachweis hält">🔬 Aufbau suchen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnFassadeBlatt" title="Fassadenblatt mit Ansicht und Regeldetails">📄 Fassadenblatt</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnFassadeCsv" title="Felder, Nachweise, Mengen und Kosten">⬇ Fassade (CSV)</button></div>
+      </div>
+      <div class="summary-bar" id="fassadeKennzahlen"></div>
+      <div class="layer-note" id="fassadeMeldungen"></div>
+      <div class="empty-state" id="fassadeEmpty">Noch nicht gerechnet – Maße eintragen und „🪟 Fassade rechnen“.</div>
+
+      <h3 class="section-title">Felder</h3>
+      <table class="members-table" id="fassadeFeldTable">
+        <thead><tr><th>Feld</th><th>Lage</th><th>Breite [m]</th><th>Höhe [m]</th><th>Fläche [m²]</th>
+          <th>Füllung</th><th>w<sub>k</sub> [kN/m²]</th><th>φ</th><th>maßgebende Scheibe</th>
+          <th>σ / R<sub>d</sub> [N/mm²]</th><th>η</th><th>f [mm]</th><th>Gewicht [kg]</th></tr></thead>
+        <tbody id="fassadeFeldBody"></tbody>
+      </table>
+      <div class="layer-note" id="fassadeFeldHinweis"></div>
+
+      <h3 class="section-title">Pfosten und Riegel</h3>
+      <table class="members-table" id="fassadeProfilTable">
+        <thead><tr><th>Bauteil</th><th>Profil</th><th>Länge [m]</th><th>Einzug [m]</th>
+          <th>q [kN/m]</th><th>M<sub>Ed</sub> [kNm]</th><th>σ [N/mm²]</th><th>η</th>
+          <th>f [mm]</th><th>zul. f [mm]</th><th>Auflager [kN]</th></tr></thead>
+        <tbody id="fassadeProfilBody"></tbody>
+      </table>
+
+      <h3 class="section-title">Wärmeschutz, Mengen und Kosten</h3>
+      <p class="view-note">Der U-Wert der Vorhangfassade folgt <strong>DIN EN ISO 12631</strong>:
+        flächengewichtet über Verglasung, Paneele und Rahmen, zuzüglich der längenbezogenen Wärmebrücke des
+        Randverbunds (Ψ<sub>g</sub>). Ψ hängt vom Abstandhalter und vom Profil ab und ist eine Eingabe.
+        Ob der Wert genügt, entscheidet die Gesamtbilanz nach <strong>GEG</strong> (Referenzgebäudeverfahren),
+        nicht der Einzelwert.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="fasPsiGlas">Ψ Glasrand [W/(m·K)]</label>
+          <input type="number" id="fasPsiGlas" step="0.01" min="0" value="0.08"></div>
+        <div class="field"><label for="fasPsiPaneel">Ψ Paneelrand</label>
+          <input type="number" id="fasPsiPaneel" step="0.01" min="0" value="0.08"></div>
+        <div class="field"><label for="fasAluPreis">Aluminium [€/kg]</label>
+          <input type="number" id="fasAluPreis" step="0.5" min="0" value="14.5"></div>
+        <div class="field"><label for="fasGlasPreis">Verglasung [€/m²]</label>
+          <input type="number" id="fasGlasPreis" step="5" min="0" value="145"></div>
+        <div class="field"><label for="fasPaneelPreis">Paneel [€/m²]</label>
+          <input type="number" id="fasPaneelPreis" step="5" min="0" value="120"></div>
+        <div class="field"><label for="fasMontagePreis">Montage [€/m²]</label>
+          <input type="number" id="fasMontagePreis" step="5" min="0" value="95"></div>
+        <div class="field"><label for="fasTransportPreis">Transport [€/m²]</label>
+          <input type="number" id="fasTransportPreis" step="1" min="0" value="18"></div>
+        <div class="field"><label for="fasLagerPreis">Lagerung [€/m²]</label>
+          <input type="number" id="fasLagerPreis" step="0.5" min="0" value="4.5"></div>
+        <div class="field"><label for="fasBearbeitungPreis">Bearbeitung [€/m²]</label>
+          <input type="number" id="fasBearbeitungPreis" step="1" min="0" value="22"></div>
+      </div>
+      <div class="summary-bar" id="fassadeUKennzahlen"></div>
+      <table class="members-table" id="fassadeKostenTable">
+        <thead><tr><th>Pos</th><th>Kurztext</th><th>Menge</th><th>Einheit</th>
+          <th>EP [€]</th><th>GP [€]</th><th>Hinweis</th></tr></thead>
+        <tbody id="fassadeKostenBody"></tbody>
+      </table>
+    </div>
+
     <div class="result-panel-body" id="viewBestand" hidden>
       <h3 class="section-title">Bauen im Bestand: Punktwolke aus dem 3D-Laserscan</h3>
       <p class="view-note">Gelesen werden <strong>LAS</strong> (1.0 bis 1.4, Punktformate 0 bis 8),
@@ -2741,6 +2966,8 @@
   <script src="js/precastplan.js"></script>
   <script src="js/site.js"></script>
   <script src="js/siteplan.js"></script>
+  <script src="js/facade.js"></script>
+  <script src="js/facadeplan.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

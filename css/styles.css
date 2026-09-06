@@ -1505,3 +1505,17 @@ header.app-header {
 #ftTable input[type="number"] { width: 4.6em; min-width: 4.6em; }
 #ftTable input[type="text"] { width: 6.5em; min-width: 5em; }
 #ftTable .tool-btn { padding: 4px 8px; }
+
+/* Fassade: die Klimalastfelder tragen drei Zahlen mit Trennzeichen und
+   brauchen mehr Platz als ein gewöhnliches Eingabefeld; die Feldliste
+   führt in der ersten Spalte mehrere Kennungen und darf nicht auf
+   Buchstabenbreite zusammenfallen. */
+#viewFassade #fasKlimaSommer,
+#viewFassade #fasKlimaWinter,
+#viewFassade #fasKlimaC { min-width: 13em; }
+#viewFassade #fasFelder,
+#viewFassade #fasGeschosse { min-width: 12em; }
+#fassadeFeldTable td:first-child { min-width: 11em; white-space: normal; }
+#fassadeFeldTable td:nth-child(6) { min-width: 12em; white-space: normal; }
+#fassadeProfilTable td:first-child { min-width: 12em; white-space: normal; }
+#fassadeProfilTable td:nth-child(2) { min-width: 11em; white-space: normal; }

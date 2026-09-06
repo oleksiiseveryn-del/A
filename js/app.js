@@ -270,6 +270,8 @@
     kranErgebnis = null;
     beErgebnis = null;
     bauErgebnis = null;
+    fassadeErgebnis = null;
+    fassadeKostenErgebnis = null;
     punktwolke = null;
     scanSchnitt = null;
     scanWaende = null;
@@ -1190,6 +1192,7 @@
       const ft = model.fertigteile.get(ftBlattId);
       return blatt(`Fertigteil_${name}_${(ft && ft.bezeichnung ? ft.bezeichnung : "Element").replace(/[^\w.-]+/g, "_")}.svg`);
     }
+    if (sheetArt === "fassade") return blatt(`Fassade_${name}.svg`);
     if (sheetArt === "beplan") return blatt(`Baustelleneinrichtungsplan_${name}.svg`);
     if (sheetArt === "balkenplan") return blatt(`Bauzeitenplan_${name}.svg`);
     if (sheetArt === "gelaendeplan") return blatt(`Gelaendeplan_${name}.svg`);
@@ -2919,6 +2922,7 @@
     anschluss: { button: document.getElementById("tabAnschluss"), view: document.getElementById("viewAnschluss") },
     fertigteile: { button: document.getElementById("tabFertigteile"), view: document.getElementById("viewFertigteile") },
     logistik: { button: document.getElementById("tabLogistik"), view: document.getElementById("viewLogistik") },
+    fassade: { button: document.getElementById("tabFassade"), view: document.getElementById("viewFassade") },
     bestand: { button: document.getElementById("tabBestand"), view: document.getElementById("viewBestand") },
     gelaende: { button: document.getElementById("tabGelaende"), view: document.getElementById("viewGelaende") },
     tiefbau: { button: document.getElementById("tabTiefbau"), view: document.getElementById("viewTiefbau") },
@@ -2939,6 +2943,7 @@
     if (which === "anschluss") renderAnschluesse();
     if (which === "fertigteile") renderFertigteile();
     if (which === "logistik") renderLogistik();
+    if (which === "fassade") renderFassade();
     if (which === "bestand") renderBestand();
     if (which === "gelaende") renderGelaende();
     if (which === "tiefbau") renderTiefbau();
@@ -3006,6 +3011,7 @@
     if (!TABS.anschluss.view.hidden) renderAnschluesse();
     if (!TABS.fertigteile.view.hidden) renderFertigteile();
     if (!TABS.logistik.view.hidden) renderLogistik();
+    if (!TABS.fassade.view.hidden) renderFassade();
     if (!TABS.bestand.view.hidden) renderBestand();
     if (!TABS.gelaende.view.hidden) renderGelaende();
     if (!TABS.tiefbau.view.hidden) renderTiefbau();
@@ -5254,6 +5260,632 @@
     setStatus("Kranprüfung, Flächenbedarf, Einrichtungsflächen und Bauzeitenplan als CSV ausgegeben.", "ok");
   });
 
+  /* ============================== Fassade als parametrisches Bauteil */
+
+  let fassadeErgebnis = null;
+  let fassadeKostenErgebnis = null;
+
+  /** Auswahllisten des Registers füllen. */
+  (function fuelleFassadenlisten() {
+    const setze = (id, obj, name, standard) => {
+      const wahl = document.getElementById(id);
+      if (!wahl) return;
+      wahl.innerHTML = Object.keys(obj)
+        .map((k) => `<option value="${k}">${name(obj[k], k)}</option>`).join("");
+      wahl.value = standard;
+    };
+    setze("fasArt", FASSADEN_ARTEN, (a) => a.name, "pfostenriegel");
+    setze("fasGlas", GLASAUFBAUTEN, (a) => a.name, "iso3vsg");
+    setze("fasPaneel", PANEELE, (a) => a.name, "sandwich");
+    setze("fasLegierung", ALU_LEGIERUNGEN, (a) => a.name, "6060 T66");
+    const pfosten = {}, riegel = {};
+    Object.keys(FASSADENPROFILE).forEach((k) => {
+      (k.startsWith("RI") ? riegel : pfosten)[k] = FASSADENPROFILE[k];
+    });
+    setze("fasPfostenProfil", pfosten,
+      (p, k) => `${k} · W ${fasZahl(p.Wy, 1)} cm³ · I ${fasZahl(p.Iy, 0)} cm⁴`, "PR 50/165");
+    setze("fasRiegelProfil", riegel,
+      (p, k) => `${k} · W ${fasZahl(p.Wy, 1)} cm³ · I ${fasZahl(p.Iy, 0)} cm⁴`, "RI 50/85");
+  }());
+
+  /**
+   * Maßliste lesen: „1,35 1,35 1,35" oder kurz „6× 1,35".
+   *
+   * Die Kurzform spart Tipparbeit bei Regelfassaden; beide Schreibweisen
+   * dürfen gemischt werden.
+   */
+  function fassadeMasse(text) {
+    const werte = [];
+    // Zuerst die Wiederholung „6× 1,35", sonst eine einzelne Zahl. Über
+    // ein Trennzeichen darf nicht getrennt werden – „6×" und „1,35"
+    // gehören zusammen, auch wenn ein Leerzeichen dazwischen steht.
+    const muster = /(\d+)\s*[×xX*]\s*(\d+(?:[.,]\d+)?)|(\d+(?:[.,]\d+)?)/g;
+    let treffer;
+    while ((treffer = muster.exec(String(text || ""))) !== null) {
+      if (treffer[1] !== undefined) {
+        const n = Math.min(200, parseInt(treffer[1], 10) || 0);
+        const w = parseFloat(treffer[2].replace(",", "."));
+        if (Number.isFinite(w) && w > 0) for (let i = 0; i < n; i++) werte.push(w);
+      } else {
+        const w = parseFloat(treffer[3].replace(",", "."));
+        if (Number.isFinite(w) && w > 0) werte.push(w);
+      }
+    }
+    return werte;
+  }
+
+  function fassadeMasseText(werte) {
+    if (!werte.length) return "";
+    const gleich = werte.every((w) => Math.abs(w - werte[0]) < 1e-9);
+    return gleich && werte.length > 1
+      ? `${werte.length}× ${tbText(werte[0])}`
+      : werte.map((w) => tbText(w)).join(" ");
+  }
+
+  /** Drei Zahlen aus einem Feld „20 / -2 / 600" lesen. */
+  function fassadeDrei(id, ersatz) {
+    const teile = String(document.getElementById(id).value || "").split(/[\s/;]+/)
+      .map((t) => parseFloat(t.replace(",", "."))).filter((z) => Number.isFinite(z));
+    return teile.length === 3 ? teile : ersatz;
+  }
+
+  /** Vorgaben aus den Eingabefeldern des Registers. */
+  function fassadeVorgaben() {
+    const w = (id, ersatz) => {
+      const el = document.getElementById(id);
+      const z = el ? parseFloat(el.value) : NaN;
+      return Number.isFinite(z) ? z : ersatz;
+    };
+    const s = fassadeDrei("fasKlimaSommer", [20, -2, 600]);
+    const wi = fassadeDrei("fasKlimaWinter", [-25, 4, -300]);
+    const c = fassadeDrei("fasKlimaC", [0.34, -1.0, 0.012]);
+    return Object.assign({}, FASSADEN_VORGABEN, {
+      windzone: parseInt(document.getElementById("fasWindzone").value, 10) || 2,
+      gelaende: document.getElementById("fasGelaende").value,
+      gebaeudehoehe: w("fasHoehe", 18),
+      druckbereich: document.getElementById("fasBereich").value,
+      cpiPlus: w("fasCpiPlus", 0.2), cpiMinus: w("fasCpiMinus", -0.3),
+      legierung: document.getElementById("fasLegierung").value,
+      gammaM1: w("fasGammaM1", 1.1),
+      kc: w("fasKc", 1.0),
+      glasDurchbiegung: Math.max(10, w("fasGlasDurchbiegung", 100)),
+      pfostenGrenze: w("fasPfostenGrenze", 15),
+      riegelGrenze: w("fasPfostenGrenze", 15),
+      riegelGlasDurchbiegung: Math.max(50, w("fasRiegelGlasTeiler", 500)),
+      riegelGlasGrenze: Math.max(0.5, w("fasRiegelGlasGrenze", 3)),
+      klimaSommer: { dT: s[0], dPmet: s[1], dH: s[2] },
+      klimaWinter: { dT: wi[0], dPmet: wi[1], dH: wi[2] },
+      klimaC1: c[0], klimaC2: c[1], klimaC3: c[2],
+      psiGlasrand: w("fasPsiGlas", 0.08), psiPaneelrand: w("fasPsiPaneel", 0.08),
+      aluPreis: w("fasAluPreis", 14.5), glasPreis: w("fasGlasPreis", 145),
+      paneelPreis: w("fasPaneelPreis", 120), montagePreis: w("fasMontagePreis", 95),
+      transportPreis: w("fasTransportPreis", 18), lagerPreis: w("fasLagerPreis", 4.5),
+      bearbeitungPreis: w("fasBearbeitungPreis", 22),
+    });
+  }
+
+  /** Fassadenparameter aus den Eingabefeldern. */
+  function fassadeParameter() {
+    const w = (id, ersatz) => {
+      const z = parseFloat(document.getElementById(id).value);
+      return Number.isFinite(z) ? z : ersatz;
+    };
+    return {
+      art: document.getElementById("fasArt").value,
+      felder: fassadeMasse(document.getElementById("fasFelder").value),
+      geschosse: fassadeMasse(document.getElementById("fasGeschosse").value),
+      bruestung: w("fasBruestung", 0), sturz: w("fasSturz", 0),
+      pfostenProfil: document.getElementById("fasPfostenProfil").value,
+      riegelProfil: document.getElementById("fasRiegelProfil").value,
+      glas: document.getElementById("fasGlas").value,
+      paneel: document.getElementById("fasPaneel").value,
+      bruestungAlsPaneel: document.getElementById("fasBruestungPaneel").value === "paneel",
+    };
+  }
+
+  function fassadeRechnen(still) {
+    const p = fassadeParameter();
+    if (!p.felder.length || !p.geschosse.length) {
+      fassadeErgebnis = null; fassadeKostenErgebnis = null;
+      renderFassade();
+      if (!still) setStatus("Feldbreiten und Geschosshöhen eintragen, z. B. „6× 1,35“ und „5× 3,60“.", "error");
+      return null;
+    }
+    if (p.felder.length * p.geschosse.length > 600) {
+      fassadeErgebnis = null; fassadeKostenErgebnis = null;
+      renderFassade();
+      if (!still) setStatus(`${p.felder.length} Felder × ${p.geschosse.length} Geschosse sind zu viel `
+        + "für eine Ansicht. Die Fassade abschnittsweise rechnen.", "error");
+      return null;
+    }
+    const v = fassadeVorgaben();
+    const beginn = Date.now();
+    fassadeErgebnis = fassadeAuswerten(p, v);
+    fassadeKostenErgebnis = fassadeKosten(fassadeErgebnis, v);
+    fassadeErgebnis.ms = Date.now() - beginn;
+    renderFassade();
+    if (!still) {
+      const e = fassadeErgebnis;
+      if (e.wind.qp === null) {
+        setStatus(e.meldungen[0] ? e.meldungen[0].text : "Windlast nicht bestimmbar.", "error");
+      } else {
+        setStatus(`${e.art.name} ${tbText(e.mengen.breite)} × ${tbText(e.mengen.hoehe)} m = `
+          + `${tbText(e.mengen.flaeche, 1)} m² mit ${e.mengen.felder} Feldern: w_k = `
+          + `${tbText(e.wind.wk)} kN/m², größte Ausnutzung ${tbText(e.groessteAusnutzung * 100, 0)} %, `
+          + `U_cw = ${tbText(e.uWert.ucw, 2)} W/(m²K), ${tbText(e.mengen.masseJeQm, 1)} kg/m². `
+          + (e.erfuellt ? "Alle geführten Nachweise sind erfüllt."
+            : `${e.nichtErfuellt} Nachweise sind nicht erfüllt.`)
+          + ` Kostenschätzung ${tbText(fassadeKostenErgebnis.summe, 2)} € = `
+          + `${tbText(fassadeKostenErgebnis.jeQm, 2)} €/m².`,
+        e.erfuellt ? "ok" : "error");
+      }
+    }
+    return fassadeErgebnis;
+  }
+
+  function renderFassade() {
+    const e = fassadeErgebnis;
+    document.getElementById("fassadeEmpty").hidden = !!e;
+    const feldBody = document.getElementById("fassadeFeldBody");
+    const profilBody = document.getElementById("fassadeProfilBody");
+    const kostenBody = document.getElementById("fassadeKostenBody");
+    feldBody.innerHTML = ""; profilBody.innerHTML = ""; kostenBody.innerHTML = "";
+    const kennzahl = (label, wert, warnung) =>
+      `<div class="stat"><span class="label">${label}</span>`
+      + `<span class="value${warnung ? " warnwert" : ""}">${wert}</span></div>`;
+
+    if (!e) {
+      document.getElementById("fassadeKennzahlen").innerHTML = "";
+      document.getElementById("fassadeUKennzahlen").innerHTML = "";
+      document.getElementById("fassadeMeldungen").innerHTML = "";
+      document.getElementById("fassadeFeldHinweis").textContent = "";
+      return;
+    }
+
+    document.getElementById("fassadeKennzahlen").innerHTML =
+      kennzahl("Fassade", `${tbText(e.mengen.breite)} × ${tbText(e.mengen.hoehe)} m`)
+      + kennzahl("Fläche", `${tbText(e.mengen.flaeche, 1)} m²`)
+      + kennzahl("Felder", e.mengen.felder)
+      + kennzahl("Glasanteil", `${tbText(e.mengen.glasanteil * 100, 0)} %`)
+      + (e.wind.qp !== null
+        ? kennzahl("q_p", `${tbText(e.wind.qp)} kN/m²`)
+          + kennzahl("c_pe", tbText(e.wind.cpe))
+          + kennzahl("w_k", `${tbText(e.wind.wk)} kN/m²`)
+        : kennzahl("Wind", "nicht bestimmt", true))
+      + kennzahl("größte Ausnutzung", `${tbText(e.groessteAusnutzung * 100, 0)} %`,
+        e.groessteAusnutzung > 1)
+      + kennzahl("nicht erfüllt", e.nichtErfuellt, e.nichtErfuellt > 0)
+      + kennzahl("Gewicht", `${tbText(e.mengen.masseJeQm, 1)} kg/m²`)
+      + kennzahl("Anker H / V", `${tbText(e.ankerHorizontal)} / ${tbText(e.ankerVertikal)} kN`);
+
+    document.getElementById("fassadeMeldungen").innerHTML = e.meldungen.length
+      ? e.meldungen.slice(0, 10).map((m) =>
+        `<div class="${m.art === "fehler" ? "warnwert" : ""}">`
+        + `${m.art === "fehler" ? "!" : "ℹ"} ${m.text}</div>`).join("")
+        + (e.meldungen.length > 10 ? `<div>… und ${e.meldungen.length - 10} weitere.</div>` : "")
+      : "Alle geführten Nachweise sind erfüllt.";
+
+    /* ---- Felder: gleiche Felder werden zusammengefasst, sonst steht die
+       Tabelle bei 60 Feldern voller Wiederholungen */
+    const gruppen = new Map();
+    e.felder.forEach((f) => {
+      const schluessel = `${f.fuellung}|${f.breite.toFixed(3)}|${f.hoehe.toFixed(3)}|${f.lage}`;
+      if (!gruppen.has(schluessel)) gruppen.set(schluessel, { feld: f, namen: [], anzahl: 0 });
+      const gr = gruppen.get(schluessel);
+      gr.anzahl += 1;
+      if (gr.namen.length < 3) gr.namen.push(f.name);
+    });
+    gruppen.forEach((gr) => {
+      const f = gr.feld;
+      const n = f.nachweis;
+      const sc = n && n.massgebend;
+      const tr = document.createElement("tr");
+      if (!f.erfuellt) tr.className = "durchdringung";
+      tr.innerHTML = `
+        <td><strong>${gr.anzahl} ×</strong> ${gr.namen.join(", ")}${gr.anzahl > gr.namen.length ? " …" : ""}</td>
+        <td>${f.lage}</td>
+        <td>${tbText(f.breite)}</td>
+        <td>${tbText(f.hoehe)}</td>
+        <td>${tbText(f.flaeche, 2)}</td>
+        <td>${f.aufbau}</td>
+        <td>${f.wind.qp !== null ? tbText(f.wind.wk) : "–"}</td>
+        <td>${n ? tbText(n.phi, 4) : "–"}</td>
+        <td>${sc ? `${sc.nr} ${sc.lage} · ${sc.kurz} ${sc.lagen.join("+")}` : "–"}</td>
+        <td>${sc && sc.ergebnis ? `${tbText(sc.ergebnis.sigma, 1)} / ${tbText(sc.ergebnis.rd, 1)}` : "–"}</td>
+        <td>${n ? `<strong class="${n.eta > 1 ? "warnwert" : ""}">${tbText(n.eta * 100, 0)} %</strong>` : "–"}</td>
+        <td>${n && n.massgebendW && n.massgebendW.ergebnis
+          ? `<span class="${n.etaW > 1 ? "warnwert" : ""}">${tbText(n.massgebendW.ergebnis.durchbiegung, 1)}`
+            + ` / ${tbText(n.massgebendW.ergebnis.wZul, 1)}</span>` : "–"}</td>
+        <td>${tbText(f.gewicht * f.flaeche, 0)}</td>`;
+      feldBody.appendChild(tr);
+    });
+    document.getElementById("fassadeFeldHinweis").textContent =
+      `${e.felder.length} Felder in ${gruppen.size} Bauarten zusammengefasst. `
+      + (e.felder[0] && e.felder[0].nachweis
+        ? `Isolierglas: gleichwertige Kennlänge a* = ${tbText(
+          e.felder.find((f) => f.nachweis && f.nachweis.kopplung.aStern)
+            ? e.felder.find((f) => f.nachweis && f.nachweis.kopplung.aStern).nachweis.kopplung.aStern
+            : 0, 0)} mm – gegen DIN 18008-1 Anhang A und die Systemunterlage prüfen.`
+        : "");
+
+    /* ---- Pfosten und Riegel: je Bauteilart das ungünstigste zeigen */
+    const zeigeProfil = (name, obj, istRiegel) => {
+      const n = obj.nachweis;
+      if (!n) return;
+      const tr = document.createElement("tr");
+      if (!obj.erfuellt) tr.className = "durchdringung";
+      const f = istRiegel ? n.fw : n.f;
+      const fz = istRiegel ? n.fZulW : n.fZul;
+      tr.innerHTML = `
+        <td><strong>${name}</strong></td>
+        <td>${n.profil} · ${n.legierung.name}</td>
+        <td>${tbText(n.laenge)}</td>
+        <td>${tbText(istRiegel ? n.einflusshoehe : n.einflussbreite)}</td>
+        <td>${tbText(istRiegel ? n.qwK : n.qk, 3)}</td>
+        <td>${tbText(istRiegel ? n.Mw : n.M, 3)}</td>
+        <td>${tbText(n.sigma, 1)} / ${tbText(n.fRd, 1)}</td>
+        <td><strong class="${n.eta > 1 ? "warnwert" : ""}">${tbText(n.eta * 100, 0)} %</strong></td>
+        <td><span class="${f > fz ? "warnwert" : ""}">${tbText(f, 2)}</span></td>
+        <td>${tbText(fz, 1)}</td>
+        <td>${tbText(istRiegel ? n.auflager : n.horizontal, 2)}</td>`;
+      profilBody.appendChild(tr);
+    };
+    const schlimmster = (liste) => liste.reduce((s, x) =>
+      (x.nachweis && (!s || x.nachweis.eta > s.nachweis.eta)) ? x : s, null);
+    const pf = schlimmster(e.pfosten), rg = schlimmster(e.riegel);
+    if (pf) zeigeProfil(`Pfosten ${pf.achse}${pf.geschoss} (maßgebend von ${e.pfosten.length})`, pf, false);
+    if (rg) zeigeProfil(`Riegel ${rg.name} (maßgebend von ${e.riegel.length})`, rg, true);
+    const pfF = schlimmster(e.pfosten.filter((x) => x.nachweis
+      && x.nachweis.etaF > (pf ? pf.nachweis.etaF : 0)));
+    if (pfF && pfF !== pf) zeigeProfil(`Pfosten ${pfF.achse}${pfF.geschoss} (größte Durchbiegung)`, pfF, false);
+
+    /* ---- Wärmeschutz und Kosten */
+    const u = e.uWert;
+    document.getElementById("fassadeUKennzahlen").innerHTML = u
+      ? kennzahl("U_cw", `${tbText(u.ucw, 2)} W/(m²K)`)
+        + kennzahl("davon Glas", tbText(u.anteilGlas, 3))
+        + kennzahl("Paneel", tbText(u.anteilPaneel, 3))
+        + kennzahl("Rahmen", tbText(u.anteilRahmen, 3))
+        + kennzahl("Randverbund", tbText(u.anteilRand, 3))
+        + kennzahl("Rahmenanteil", `${tbText(u.rahmenanteil * 100, 1)} %`)
+        + kennzahl("Aluminium", `${tbText(e.mengen.aluMasse, 0)} kg`)
+        + kennzahl("Verglasung", `${tbText(e.mengen.glasFlaeche, 1)} m²`)
+        + kennzahl("Paneele", `${tbText(e.mengen.paneelFlaeche, 1)} m²`)
+        + kennzahl("Kosten", `${tbText(fassadeKostenErgebnis.jeQm, 2)} €/m²`)
+      : "";
+
+    if (fassadeKostenErgebnis) {
+      fassadeKostenErgebnis.zeilen.forEach((z) => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td>${z.nr}</td><td>${z.kurz}</td><td>${tbText(z.menge, 2)}</td>`
+          + `<td>${z.einheit}</td><td>${tbText(z.ep, 2)}</td>`
+          + `<td><strong>${tbText(z.gp, 2)}</strong></td>`
+          + `<td class="layer-note">${z.hinweis || ""}</td>`;
+        kostenBody.appendChild(tr);
+      });
+      const summe = document.createElement("tr");
+      summe.innerHTML = `<td></td><td><strong>Summe Fassade</strong></td><td></td><td></td><td></td>`
+        + `<td><strong>${tbText(fassadeKostenErgebnis.summe, 2)}</strong></td>`
+        + `<td class="layer-note">${tbText(fassadeKostenErgebnis.jeQm, 2)} €/m² · `
+        + `Material ${tbText(fassadeKostenErgebnis.material, 0)} € · `
+        + `Leistung ${tbText(fassadeKostenErgebnis.leistung, 0)} € · ohne Umsatzsteuer</td>`;
+      kostenBody.appendChild(summe);
+    }
+  }
+
+  /* ---- Bedienung Fassade */
+
+  document.getElementById("btnFassadeRechnen").addEventListener("click", () => fassadeRechnen());
+
+  document.getElementById("btnFassadeBeispiel").addEventListener("click", () => {
+    document.getElementById("fasArt").value = "pfostenriegel";
+    document.getElementById("fasFelder").value = "6× 1,35";
+    document.getElementById("fasGeschosse").value = "5× 3,60";
+    document.getElementById("fasBruestung").value = "0.90";
+    document.getElementById("fasSturz").value = "0";
+    document.getElementById("fasBruestungPaneel").value = "paneel";
+    document.getElementById("fasGlas").value = "iso3vsg";
+    document.getElementById("fasPaneel").value = "sandwich";
+    document.getElementById("fasPfostenProfil").value = "PR 50/165";
+    document.getElementById("fasRiegelProfil").value = "RI 50/85";
+    document.getElementById("fasWindzone").value = "2";
+    document.getElementById("fasGelaende").value = "binnenland";
+    document.getElementById("fasHoehe").value = "18";
+    document.getElementById("fasBereich").value = "A";
+    fassadeRechnen();
+    setStatus("Beispielfassade eingesetzt: Pfosten-Riegel-Fassade 8,10 × 18,00 m, sechs Achsen à 1,35 m, "
+      + "fünf Geschosse à 3,60 m mit Brüstungspaneel bis 0,90 m, 3-fach Isolierglas. "
+      + "Windzone 2 Binnenland, Eckbereich – zum Prüfen und Überschreiben gedacht.", "ok");
+  });
+
+  /**
+   * Kleinstes Profil suchen, das Spannung und Durchbiegung einhält.
+   *
+   * Durchgegangen wird die Profilserie nach steigender Bautiefe; genommen
+   * wird das erste, mit dem alle Pfosten und Riegel den Nachweis halten.
+   * Das ersetzt keine Systemwahl – es zeigt, in welcher Größenordnung die
+   * Bautiefe liegen muss.
+   */
+  document.getElementById("btnFassadeProfilSuchen").addEventListener("click", () => {
+    const p = fassadeParameter();
+    if (!p.felder.length || !p.geschosse.length) {
+      setStatus("Zuerst Feldbreiten und Geschosshöhen eintragen.", "error"); return;
+    }
+    const v = fassadeVorgaben();
+    const nachTiefe = (vor) => Object.keys(FASSADENPROFILE)
+      .filter((k) => k.startsWith(vor))
+      .sort((a, b) => FASSADENPROFILE[a].bautiefe - FASSADENPROFILE[b].bautiefe);
+    let gefundenP = null, gefundenR = null;
+    // Bleibt die Serie zu schwach, wird gesagt, woran es liegt – die
+    // Spannung, die Durchbiegung aus Wind oder die aus dem Glasgewicht
+    let bestP = null, bestR = null;
+    nachTiefe("PR").some((k) => {
+      const e = fassadeAuswerten(Object.assign({}, p, { pfostenProfil: k }), v);
+      const schlimm = e.pfosten.reduce((s2, x) => (x.nachweis
+        && (!s2 || Math.max(x.nachweis.eta, x.nachweis.etaF)
+          > Math.max(s2.nachweis.eta, s2.nachweis.etaF))) ? x : s2, null);
+      bestP = { profil: k, x: schlimm };
+      if (e.pfosten.every((x) => x.erfuellt)) { gefundenP = k; return true; }
+      return false;
+    });
+    nachTiefe("RI").some((k) => {
+      const e = fassadeAuswerten(Object.assign({}, p,
+        { pfostenProfil: gefundenP || p.pfostenProfil, riegelProfil: k }), v);
+      const schlimm = e.riegel.reduce((s2, x) => (x.nachweis
+        && (!s2 || x.nachweis.massgebend.eta > s2.nachweis.massgebend.eta)) ? x : s2, null);
+      bestR = { profil: k, x: schlimm };
+      if (e.riegel.every((x) => x.erfuellt)) { gefundenR = k; return true; }
+      return false;
+    });
+    if (!gefundenP || !gefundenR) {
+      const gruende = [];
+      if (!gefundenP && bestP && bestP.x) {
+        const n = bestP.x.nachweis;
+        gruende.push(`Pfosten: auch mit ${bestP.profil} bleibt `
+          + (n.etaF > n.eta
+            ? `die Durchbiegung bei ${tbText(n.f, 1)} mm von zulässig ${tbText(n.fZul, 1)} mm`
+            : `die Spannung bei ${tbText(n.sigma, 0)} von ${tbText(n.fRd, 0)} N/mm²`));
+      }
+      if (gefundenP) gruende.push(`Pfosten: ${gefundenP} würde reichen`);
+      if (!gefundenR && bestR && bestR.x) {
+        const n = bestR.x.nachweis;
+        gruende.push(`Riegel: auch mit ${bestR.profil} führt ${n.massgebend.was} `
+          + `mit ${tbText(n.massgebend.eta * 100, 0)} %`
+          + (n.etaFg >= n.massgebend.eta - 1e-9
+            ? ` (${tbText(n.fg, 1)} mm von zulässig ${tbText(n.fZulG, 1)} mm)` : ""));
+      }
+      setStatus("Mit der hinterlegten Profilserie ist der Nachweis nicht zu führen. "
+        + gruende.join(". ") + ". Feldbreite oder Geschosshöhe verringern, ein tieferes System "
+        + "wählen, einen leichteren Glasaufbau nehmen – oder, wenn der Randverbund es zulässt, "
+        + "die Grenze der Riegeldurchbiegung mit dem Systemgeber abstimmen.", "error");
+      return;
+    }
+    document.getElementById("fasPfostenProfil").value = gefundenP;
+    document.getElementById("fasRiegelProfil").value = gefundenR;
+    const e = fassadeRechnen(true);
+    const pf = e.pfosten.reduce((s, x) => Math.max(s, x.nachweis ? x.nachweis.eta : 0), 0);
+    const pfF = e.pfosten.reduce((s, x) => Math.max(s, x.nachweis ? x.nachweis.etaF : 0), 0);
+    setStatus(`Kleinstes ausreichendes Profil: Pfosten ${gefundenP} `
+      + `(σ ${tbText(pf * 100, 0)} %, f ${tbText(pfF * 100, 0)} % der zulässigen Durchbiegung), `
+      + `Riegel ${gefundenR}. Die Serie ist ein Richtwert – maßgebend ist die `
+      + "Systemunterlage des Herstellers.", "ok");
+  });
+
+  /**
+   * Leichtesten Glasaufbau suchen, der den Nachweis hält.
+   *
+   * Die Aufbauten werden nach Gewicht geordnet durchgegangen; genommen
+   * wird der erste, mit dem alle Felder den Nachweis halten.
+   */
+  document.getElementById("btnFassadeGlasSuchen").addEventListener("click", () => {
+    const p = fassadeParameter();
+    if (!p.felder.length || !p.geschosse.length) {
+      setStatus("Zuerst Feldbreiten und Geschosshöhen eintragen.", "error"); return;
+    }
+    const v = fassadeVorgaben();
+    const gewicht = (k) => GLASAUFBAUTEN[k].scheiben
+      .reduce((s, sc) => s + sc.lagen.reduce((t, d) => t + d, 0), 0);
+    const kandidaten = Object.keys(GLASAUFBAUTEN).sort((a, b) => gewicht(a) - gewicht(b));
+    let gefunden = null, bester = null;
+    kandidaten.forEach((k) => {
+      if (gefunden) return;
+      const e = fassadeAuswerten(Object.assign({}, p, { glas: k }), v);
+      const schlimm = e.felder.reduce((s2, f) => (f.nachweis
+        && (!s2 || Math.max(f.nachweis.eta, f.nachweis.etaW)
+          > Math.max(s2.f.nachweis.eta, s2.f.nachweis.etaW)))
+        ? { f, k } : s2, null);
+      if (schlimm && (!bester || Math.max(schlimm.f.nachweis.eta, schlimm.f.nachweis.etaW)
+        < Math.max(bester.f.nachweis.eta, bester.f.nachweis.etaW))) bester = schlimm;
+      if (e.felder.every((f) => f.erfuellt)) gefunden = k;
+    });
+    if (!gefunden) {
+      // Auch hier gilt: sagen, woran es liegt, nicht nur dass es nicht geht
+      let grund = "";
+      if (bester) {
+        const n = bester.f.nachweis;
+        grund = ` Am weitesten kommt ${GLASAUFBAUTEN[bester.k].name}: Feld ${bester.f.name} `
+          + `(${tbText(bester.f.breite)} × ${tbText(bester.f.hoehe)} m) erreicht `
+          + (n.etaW > n.eta
+            ? `${tbText(n.etaW * 100, 0)} % der zulässigen Durchbiegung `
+              + `(${tbText(n.massgebendW.ergebnis.durchbiegung, 0)} von `
+              + `${tbText(n.massgebendW.ergebnis.wZul, 0)} mm)`
+            : `${tbText(n.eta * 100, 0)} % der Spannung in der Scheibe `
+              + `${n.massgebend.nr} (${n.massgebend.kurz} ${n.massgebend.lagen.join("+")} mm)`)
+          + ".";
+      }
+      setStatus("Kein hinterlegter Aufbau hält den Nachweis." + grund
+        + " Feldgröße verringern, durchgehend vorgespanntes Glas oder größere Dicken wählen "
+        + "und den Aufbau mit dem Glaslieferanten festlegen.", "error");
+      return;
+    }
+    document.getElementById("fasGlas").value = gefunden;
+    const e = fassadeRechnen(true);
+    setStatus(`Leichtester ausreichender Aufbau: ${GLASAUFBAUTEN[gefunden].name} `
+      + `mit ${tbText(e.glasGewicht, 1)} kg/m², größte Ausnutzung `
+      + `${tbText(Math.max(...e.felder.map((f) => (f.nachweis ? f.nachweis.eta : 0))) * 100, 0)} %, `
+      + `U_g = ${tbText(GLASAUFBAUTEN[gefunden].ug, 2)} W/(m²K). `
+      + "Der Aufbau ist mit dem Glaslieferanten abzustimmen; die Zulassung des Randverbunds "
+      + "und die Sicherheitsanforderungen entscheiden mit.", "ok");
+  });
+
+  document.getElementById("btnFassadeBlatt").addEventListener("click", () => {
+    const e = fassadeErgebnis || fassadeRechnen();
+    if (!e || e.wind.qp === null) return;
+    sheetArt = "fassade";
+    document.getElementById("sheetBody").innerHTML = fassadenblattSVG({
+      auswertung: e, projekt: projektKopf(),
+    });
+    document.getElementById("sheetTitle").textContent = `Fassade – ${e.art.name}`;
+    document.getElementById("sheetCounter").textContent =
+      `${tbText(e.mengen.breite)} × ${tbText(e.mengen.hoehe)} m · ${e.mengen.felder} Felder · `
+      + `${e.erfuellt ? "Nachweise erfüllt" : `${e.nichtErfuellt} Nachweise offen`}`;
+    document.getElementById("sheetOverlay").hidden = false;
+  });
+
+  // Änderungen an den Eingaben wirken sofort, wenn schon gerechnet wurde
+  ["fasArt", "fasFelder", "fasGeschosse", "fasBruestung", "fasSturz", "fasBruestungPaneel",
+    "fasGlas", "fasPaneel", "fasPfostenProfil", "fasRiegelProfil", "fasLegierung", "fasGammaM1",
+    "fasWindzone", "fasGelaende", "fasHoehe", "fasBereich", "fasCpiPlus", "fasCpiMinus",
+    "fasKc", "fasGlasDurchbiegung", "fasKlimaSommer", "fasKlimaWinter", "fasKlimaC",
+    "fasPfostenGrenze", "fasRiegelGlasTeiler", "fasRiegelGlasGrenze",
+    "fasPsiGlas", "fasPsiPaneel", "fasAluPreis", "fasGlasPreis",
+    "fasPaneelPreis", "fasMontagePreis", "fasTransportPreis", "fasLagerPreis",
+    "fasBearbeitungPreis"].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener("change", () => { if (fassadeErgebnis) fassadeRechnen(true); });
+  });
+
+  document.getElementById("btnFassadeCsv").addEventListener("click", () => {
+    const e = fassadeErgebnis || fassadeRechnen();
+    if (!e) return;
+    const k = fassadeKostenErgebnis;
+    const v = e.vorgaben;
+    const rows = [["Fassade – " + (document.getElementById("projectName").value || "Projekt")]];
+    rows.push([e.art.name, `${e.mengen.breite.toFixed(2)} x ${e.mengen.hoehe.toFixed(2)} m`,
+      `${e.mengen.flaeche.toFixed(2)} m2`, `${e.mengen.felder} Felder`,
+      `${e.mengen.achsen} Achsen`, `${e.raster.geschosse.length} Geschosse`]);
+    rows.push([]);
+    rows.push(["Windlast nach DIN EN 1991-1-4 mit deutschem NA"]);
+    if (e.wind.qp !== null) {
+      rows.push(["Geschwindigkeitsdruck q_p [kN/m2]", e.wind.qp.toFixed(2), e.wind.herkunft]);
+      rows.push(["Aussendruckbeiwert c_pe", e.wind.cpe.toFixed(3), e.wind.bereich,
+        "c_pe,1 bis 1 m2, c_pe,10 ab 10 m2, dazwischen logarithmisch"]);
+      rows.push(["Innendruckbeiwert c_pi", e.wind.cpi.toFixed(2)]);
+      rows.push(["Windlast w_k [kN/m2]", e.wind.wk.toFixed(3),
+        `Bemessungswert ${(Math.abs(e.wind.wk) * v.gammaQ).toFixed(3)} kN/m2`]);
+    } else {
+      rows.push(["nicht bestimmt", e.meldungen[0] ? e.meldungen[0].text : ""]);
+    }
+    rows.push([]);
+    rows.push(["Verglasung nach DIN 18008", e.aufbau.name,
+      `Ug ${e.aufbau.ug} W/(m2K)`, `g ${e.aufbau.g}`, `${e.glasGewicht.toFixed(1)} kg/m2`]);
+    rows.push(["k_c", v.kc, "k_mod staendig/mittel/kurz", `${K_MOD.staendig}/${K_MOD.mittel}/${K_MOD.kurz}`,
+      "je Einwirkung nach eigener Dauer, Ausnutzungen summiert (DIN EN 16612)"]);
+    rows.push(["Klima Sommer", `dT ${v.klimaSommer.dT} K`, `dp ${v.klimaSommer.dPmet} kN/m2`,
+      `dH ${v.klimaSommer.dH} m`]);
+    rows.push(["Klima Winter", `dT ${v.klimaWinter.dT} K`, `dp ${v.klimaWinter.dPmet} kN/m2`,
+      `dH ${v.klimaWinter.dH} m`]);
+    rows.push([]);
+    rows.push(["Felder"]);
+    rows.push(["Feld", "Lage", "Breite [m]", "Hoehe [m]", "Flaeche [m2]", "Fuellung",
+      "w_k [kN/m2]", "phi", "a* [mm]", "Scheibe", "Lastanteil", "massgebender Fall",
+      "sigma [N/mm2]", "R_d [N/mm2]", "eta", "f [mm]", "zul f [mm]", "Beurteilung"]);
+    e.felder.forEach((f) => {
+      if (!f.nachweis) {
+        rows.push([f.name, f.lage, f.breite.toFixed(2), f.hoehe.toFixed(2), f.flaeche.toFixed(2),
+          f.aufbau, f.wind.qp !== null ? f.wind.wk.toFixed(3) : "", "", "", "Paneel", "", "", "", "", "", "", "",
+          `${f.gewicht.toFixed(1)} kg/m2`]);
+        return;
+      }
+      const n = f.nachweis;
+      n.scheiben.forEach((sc) => {
+        const r = sc.ergebnis;
+        rows.push([f.name, f.lage, f.breite.toFixed(2), f.hoehe.toFixed(2), f.flaeche.toFixed(2),
+          f.aufbau, f.wind.wk.toFixed(3), n.phi.toFixed(4),
+          n.kopplung.aStern ? n.kopplung.aStern.toFixed(0) : "",
+          `${sc.nr} ${sc.lage} ${sc.kurz} ${sc.lagen.join("+")} mm`,
+          sc.anteilWind.toFixed(4), r ? r.fall : "",
+          r ? r.sigma.toFixed(1) : "", r ? r.rd.toFixed(1) : "",
+          r ? (r.eta * 100).toFixed(0) + " %" : "",
+          r ? r.durchbiegung.toFixed(1) : "", r ? r.wZul.toFixed(1) : "",
+          sc.erfuellt ? "erfuellt" : "NICHT erfuellt"]);
+      });
+    });
+    rows.push([]);
+    rows.push(["Pfosten"]);
+    rows.push(["Pfosten", "Geschoss", "Profil", "Laenge [m]", "Einflussbreite [m]", "q_k [kN/m]",
+      "M_Ed [kNm]", "sigma [N/mm2]", "f_Rd [N/mm2]", "eta", "f [mm]", "zul f [mm]",
+      "Auflager H [kN]", "Auflager V [kN]", "Beurteilung"]);
+    e.pfosten.forEach((x) => {
+      const n = x.nachweis; if (!n) return;
+      rows.push([x.achse, x.geschoss, n.profil, n.laenge.toFixed(2), n.einflussbreite.toFixed(3),
+        n.qk.toFixed(4), n.M.toFixed(3), n.sigma.toFixed(1), n.fRd.toFixed(1),
+        (n.eta * 100).toFixed(0) + " %", n.f.toFixed(2), n.fZul.toFixed(1),
+        n.horizontal.toFixed(3), n.vertikal.toFixed(3), x.erfuellt ? "erfuellt" : "NICHT erfuellt"]);
+    });
+    rows.push([]);
+    rows.push(["Riegel"]);
+    rows.push(["Riegel", "Profil", "Laenge [m]", "Einflusshoehe [m]", "q Wind [kN/m]", "g [kN/m]",
+      "sigma_y", "sigma_z", "sigma", "f_Rd", "eta", "f Wind [mm]", "zul", "f Eigen [mm]", "zul",
+      "Beurteilung"]);
+    e.riegel.forEach((x) => {
+      const n = x.nachweis; if (!n) return;
+      rows.push([x.name, n.profil, n.laenge.toFixed(2), n.einflusshoehe.toFixed(3),
+        n.qwK.toFixed(4), n.gK.toFixed(4), n.sigmaY.toFixed(1), n.sigmaZ.toFixed(1),
+        n.sigma.toFixed(1), n.fRd.toFixed(1), (n.eta * 100).toFixed(0) + " %",
+        n.fw.toFixed(2), n.fZulW.toFixed(1), n.fg.toFixed(2), n.fZulG.toFixed(1),
+        x.erfuellt ? "erfuellt" : "NICHT erfuellt"]);
+    });
+    rows.push([]);
+    rows.push(["Waermeschutz nach DIN EN ISO 12631"]);
+    if (e.uWert) {
+      const u = e.uWert;
+      rows.push(["U_cw [W/(m2K)]", u.ucw.toFixed(3)]);
+      rows.push(["Anteil Verglasung", u.anteilGlas.toFixed(4), `${u.glasFlaeche.toFixed(2)} m2`,
+        `Ug ${e.aufbau.ug}`]);
+      rows.push(["Anteil Paneele", u.anteilPaneel.toFixed(4), `${u.paneelFlaeche.toFixed(2)} m2`,
+        e.paneelU ? `U ${e.paneelU.toFixed(2)}` : ""]);
+      rows.push(["Anteil Rahmen", u.anteilRahmen.toFixed(4), `${u.rahmenFlaeche.toFixed(2)} m2`]);
+      rows.push(["Anteil Randverbund", u.anteilRand.toFixed(4), `${u.glasrand.toFixed(1)} m Glasrand`,
+        `psi ${u.psiGlasrand}`, `${u.paneelrand.toFixed(1)} m Paneelrand`, `psi ${u.psiPaneelrand}`]);
+      rows.push(["Rahmenanteil der Flaeche", (u.rahmenanteil * 100).toFixed(1) + " %"]);
+      rows.push(["Hinweis", "Ob der Wert genuegt, entscheidet die Gesamtbilanz nach GEG "
+        + "(Referenzgebaeudeverfahren), nicht der Einzelwert."]);
+    }
+    rows.push([]);
+    rows.push(["Mengen"]);
+    rows.push(["Pfostenlaenge [m]", e.mengen.pfostenLaenge.toFixed(1),
+      "Stueck", e.mengen.pfostenStueck]);
+    rows.push(["Riegellaenge [m]", e.mengen.riegelLaenge.toFixed(1),
+      "Stueck", e.mengen.riegelStueck]);
+    rows.push(["Verglasung [m2]", e.mengen.glasFlaeche.toFixed(2),
+      "Paneele [m2]", e.mengen.paneelFlaeche.toFixed(2)]);
+    rows.push(["Dichtungen [m]", e.mengen.dichtung.toFixed(0), "Anker [St]", e.mengen.anker]);
+    rows.push(["Aluminium [kg]", e.mengen.aluMasse.toFixed(0), "Glas [kg]", e.mengen.glasMasse.toFixed(0),
+      "Paneele [kg]", e.mengen.paneelMasse.toFixed(0)]);
+    rows.push(["Gesamtgewicht [kg]", e.mengen.gesamtMasse.toFixed(0),
+      "je m2", e.mengen.masseJeQm.toFixed(1)]);
+    rows.push(["Ankerkraft waagerecht [kN]", e.ankerHorizontal.toFixed(2),
+      "senkrecht [kN]", e.ankerVertikal.toFixed(2)]);
+    rows.push([]);
+    rows.push(["Kostenschaetzung"]);
+    rows.push(["Pos", "Kurztext", "Menge", "Einheit", "EP [EUR]", "GP [EUR]", "Hinweis"]);
+    k.zeilen.forEach((z) => {
+      rows.push([z.nr, z.kurz, z.menge.toFixed(2), z.einheit, z.ep.toFixed(2), z.gp.toFixed(2), z.hinweis]);
+    });
+    rows.push(["", "Summe (ohne Umsatzsteuer)", "", "", "", k.summe.toFixed(2),
+      `${k.jeQm.toFixed(2)} EUR/m2`]);
+    rows.push([]);
+    rows.push(["Nicht gefuehrt: absturzsichernde Verglasung nach DIN 18008-4, begehbare und "
+      + "Ueberkopfverglasung, Verankerung im Rohbau nach DIN EN 1992-4, Beschlaege und "
+      + "Oeffnungsfluegel, Brandschutz, Schallschutz, Einbruchhemmung, Tauwasser, "
+      + "Montagezustaende, Toleranzen nach DIN 18202 und die Pruefungen nach DIN EN 13830. "
+      + "Profilkennwerte sind Richtwerte - massgebend ist die Systemunterlage des Herstellers."]);
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Fassade_${name}.csv`, "﻿" + zuCsv(rows), "text/csv;charset=utf-8;");
+    setStatus("Felder, Nachweise, Pfosten, Riegel, Wärmeschutz, Mengen und Kosten als CSV ausgegeben.", "ok");
+  });
+
   /* ============================== Geländemodell (DGM) */
 
   function dgmZahlFeld(id, ersatz) {
@@ -6441,6 +7073,33 @@
         },
         beginn: field("bauStart"),
       },
+      // Fassade: die Parameter gehören zum Projekt, gerechnet wird neu
+      fassade: {
+        art: field("fasArt"), felder: field("fasFelder"), geschosse: field("fasGeschosse"),
+        bruestung: field("fasBruestung"), sturz: field("fasSturz"),
+        bruestungPaneel: field("fasBruestungPaneel"),
+        glas: field("fasGlas"), paneel: field("fasPaneel"),
+        pfostenProfil: field("fasPfostenProfil"), riegelProfil: field("fasRiegelProfil"),
+        legierung: field("fasLegierung"), gammaM1: field("fasGammaM1"),
+        wind: {
+          zone: field("fasWindzone"), gelaende: field("fasGelaende"),
+          hoehe: field("fasHoehe"), bereich: field("fasBereich"),
+          cpiPlus: field("fasCpiPlus"), cpiMinus: field("fasCpiMinus"),
+        },
+        glasnachweis: {
+          kc: field("fasKc"), durchbiegung: field("fasGlasDurchbiegung"),
+          klimaSommer: field("fasKlimaSommer"), klimaWinter: field("fasKlimaWinter"),
+          klimaC: field("fasKlimaC"), pfostenGrenze: field("fasPfostenGrenze"),
+          riegelGlasTeiler: field("fasRiegelGlasTeiler"),
+          riegelGlasGrenze: field("fasRiegelGlasGrenze"),
+        },
+        preise: {
+          psiGlas: field("fasPsiGlas"), psiPaneel: field("fasPsiPaneel"),
+          alu: field("fasAluPreis"), glas: field("fasGlasPreis"), paneelPreis: field("fasPaneelPreis"),
+          montage: field("fasMontagePreis"), transport: field("fasTransportPreis"),
+          lager: field("fasLagerPreis"), bearbeitung: field("fasBearbeitungPreis"),
+        },
+      },
       // Tiefbau: Achse, Gradiente und Gelände gehören zum Projekt.
       // Die Punktwolke des Bestands nicht – sie wäre zu groß.
       tiefbau: {
@@ -6521,6 +7180,7 @@
     bauVorgaenge = (lg.vorgaenge || []).map((v) => Object.assign({}, v,
       { vorgaenger: (v.vorgaenger || []).map((x) => Object.assign({}, x)) }));
     kranErgebnis = null; beErgebnis = null; bauErgebnis = null;
+    fassadeErgebnis = null; fassadeKostenErgebnis = null;
     Object.keys(materialPreise).forEach((k) => delete materialPreise[k]);
     Object.assign(materialPreise, data.baustoffpreise || {});
 
@@ -6594,6 +7254,43 @@
         set("bePersonenWaschplatz", lgd.einrichtung.personenJeWaschplatz, "5");
       }
       set("bauStart", lgd.beginn, "");
+    }
+    if (data.fassade) {
+      const fa = data.fassade;
+      set("fasArt", fa.art, "pfostenriegel");
+      set("fasFelder", fa.felder, "6× 1,35");
+      set("fasGeschosse", fa.geschosse, "5× 3,60");
+      set("fasBruestung", fa.bruestung, "0.90"); set("fasSturz", fa.sturz, "0");
+      set("fasBruestungPaneel", fa.bruestungPaneel, "paneel");
+      set("fasGlas", fa.glas, "iso3vsg"); set("fasPaneel", fa.paneel, "sandwich");
+      set("fasPfostenProfil", fa.pfostenProfil, "PR 50/165");
+      set("fasRiegelProfil", fa.riegelProfil, "RI 50/85");
+      set("fasLegierung", fa.legierung, "6060 T66"); set("fasGammaM1", fa.gammaM1, "1.10");
+      if (fa.wind) {
+        set("fasWindzone", fa.wind.zone, "2"); set("fasGelaende", fa.wind.gelaende, "binnenland");
+        set("fasHoehe", fa.wind.hoehe, "18"); set("fasBereich", fa.wind.bereich, "A");
+        set("fasCpiPlus", fa.wind.cpiPlus, "0.2"); set("fasCpiMinus", fa.wind.cpiMinus, "-0.3");
+      }
+      if (fa.glasnachweis) {
+        set("fasKc", fa.glasnachweis.kc, "1.0");
+        set("fasGlasDurchbiegung", fa.glasnachweis.durchbiegung, "100");
+        set("fasKlimaSommer", fa.glasnachweis.klimaSommer, "20 / -2 / 600");
+        set("fasKlimaWinter", fa.glasnachweis.klimaWinter, "-25 / 4 / -300");
+        set("fasKlimaC", fa.glasnachweis.klimaC, "0,34 / -1,0 / 0,012");
+        set("fasPfostenGrenze", fa.glasnachweis.pfostenGrenze, "15");
+        set("fasRiegelGlasTeiler", fa.glasnachweis.riegelGlasTeiler, "500");
+        set("fasRiegelGlasGrenze", fa.glasnachweis.riegelGlasGrenze, "3");
+      }
+      if (fa.preise) {
+        set("fasPsiGlas", fa.preise.psiGlas, "0.08");
+        set("fasPsiPaneel", fa.preise.psiPaneel, "0.08");
+        set("fasAluPreis", fa.preise.alu, "14.5"); set("fasGlasPreis", fa.preise.glas, "145");
+        set("fasPaneelPreis", fa.preise.paneelPreis, "120");
+        set("fasMontagePreis", fa.preise.montage, "95");
+        set("fasTransportPreis", fa.preise.transport, "18");
+        set("fasLagerPreis", fa.preise.lager, "4.5");
+        set("fasBearbeitungPreis", fa.preise.bearbeitung, "22");
+      }
     }
     if (data.betonbau) {
       set("arbeitsraum", data.betonbau.arbeitsraum, "0.50");

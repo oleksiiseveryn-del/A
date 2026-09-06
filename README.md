@@ -48,6 +48,7 @@ schieben; Bedienelemente sind mindestens 44 pt hoch und Eingabefelder mindestens
 | Geländemodell | Geländeplan mit Höhenlinien als SVG; Höhenpunkte, Kennwerte und Aushub als CSV |
 | Fertigteile | Fertigteilblatt mit Ansicht, Querschnitt und Transportdaten als SVG; Elementliste, Fahrten, Montage und Kosten als CSV |
 | Baustellenlogistik | Baustelleneinrichtungsplan und Balkenplan als SVG; Kranprüfung, Flächenbedarf und Bauzeitenplan als CSV |
+| Fassade | Fassadenblatt mit Ansicht und Regeldetails als SVG; Felder, Nachweise, Wärmeschutz, Mengen und Kosten als CSV |
 | Papier und PDF | über *Drucken*; aus dem Blattfenster kommt das Blatt allein auf das Papier |
 
 **↗ Weitergeben** übergibt die zuletzt erzeugte Datei an das Systemmenü des Geräts
@@ -98,6 +99,8 @@ js/
   precastplan.js          Fertigteilblatt mit Ansicht, Querschnitt und Daten
   site.js                 Baustellenlogistik: Kran, Einrichtung, Bauzeitenplan
   siteplan.js             Baustelleneinrichtungsplan und Balkenplan
+  facade.js               Fassade: Raster, Wind, Glas nach DIN 18008, Profile, U-Wert
+  facadeplan.js           Fassadenblatt: Ansicht, Horizontal- und Vertikalschnitt
 python/                   Bewehrung und Herstellungsunterlagen (46 Prüfungen)
 desktop/                  Windows-Anwendung (Electron) – siehe desktop/README.md
 tools/
@@ -178,6 +181,40 @@ Bewehrung im Anschlagbereich, Fugen und Verbindungen, Zwischenlagerung und
 Stapelung, Toleranzen nach DIN 18203-1, Ladungssicherung nach VDI 2700.
 Die zulässigen Lasten der Ankersysteme sind Herstellerangaben aus der
 allgemeinen bauaufsichtlichen Zulassung.
+
+## Fassade
+
+Das Register **Fassade** führt die Vorhangfassade als *parametrisches* Bauteil:
+Aus Feldbreiten, Geschosshöhen und der Brüstungshöhe entsteht das ganze Raster
+mit Pfosten, Riegeln und Feldern; wird ein Maß geändert, folgen Nachweise,
+Mengen und Kosten mit.
+
+| Schritt | Rechenweg |
+|---|---|
+| Raster | Feldbreiten und Geschosshöhen als Liste oder kurz (`6× 1,35`), Brüstungs- und Sturzriegel; Brüstungsfelder wahlweise als Paneel |
+| Wind | w<sub>e</sub> = q<sub>p</sub> · c<sub>pe</sub> nach **DIN EN 1991-1-4** mit deutschem NA. q<sub>p</sub> vereinfacht nach Windzone, Geländeart und Höhe – **über 25 m wird gemeldet und nicht weitergerechnet**. Für Bauteile der Außenhaut c<sub>pe,1</sub> bis 1 m², c<sub>pe,10</sub> ab 10 m², dazwischen logarithmisch; maßgebend ist der Sog im Eckbereich, nicht der Druck in der Feldmitte |
+| Glas | allseitig linienförmig gelagerte Rechteckplatte, **Kirchhoff mit Navier-Reihe** (gegen die Tafelwerte von Timoshenko auf ≤ 0,5 % geprüft). Linear gerechnet, also ohne die günstige Membranwirkung – das liegt auf der sicheren Seite |
+| Widerstand | **DIN 18008-1**: R<sub>d</sub> = k<sub>mod</sub>·k<sub>c</sub>·f<sub>k</sub>/γ<sub>M</sub>, bei vorgespanntem Glas ohne k<sub>mod</sub>. Wirken Wind und Klimalast zusammen, bekommt **jede Einwirkung den k<sub>mod</sub> ihrer eigenen Dauer** und die Ausnutzungen werden summiert (DIN EN 16612) |
+| Verbundglas | ohne Ansatz des Schubverbunds: t<sub>ef,w</sub> = ∛(Σt<sub>i</sub>³), t<sub>ef,σ,i</sub> = √(t<sub>ef,w</sub>³/t<sub>i</sub>) |
+| Isolierglas | Die Kopplung über das Gaspolster wird **aus derselben Reihe hergeleitet**, mit der auch die Spannungen gerechnet werden – kein angepasster Zahlenwert nötig. Bei drei und mehr Scheiben wird das Gleichungssystem der Zwischenraumdrücke gelöst. Ausgegeben wird die gleichwertige Kennlänge a\*, damit sie gegen DIN 18008-1 Anhang A geprüft werden kann |
+| Pfosten | Einfeldträger über die Geschosshöhe, Wind aus der halben Breite der Nachbarfelder; σ = M/W ≤ f<sub>o</sub>/γ<sub>M1</sub>, Durchbiegung L/200 ≤ 15 mm (über 3 m L/300 + 5 mm) |
+| Riegel | Wind quer zur Fassade um die starke, Gewicht der Füllung in der Fassadenebene um die **schwache** Achse; beide Anteile werden addiert. In der Fassadenebene entscheidet meist nicht die Spannung, sondern der **Randverbund der aufstehenden Scheibe** – Richtwert L/500 ≤ 3 mm, als Eingabe |
+| Wärmeschutz | U<sub>cw</sub> nach **DIN EN ISO 12631**: flächengewichtet über Verglasung, Paneele und Rahmen zuzüglich Ψ·l des Randverbunds |
+| Bemessung | „Profil suchen" nimmt das kleinste ausreichende Profil der Serie, „Aufbau suchen" den leichtesten ausreichenden Glasaufbau. Geht es nicht auf, wird **gesagt, woran es liegt** – mit Profil, Kriterium und Zahlenwert |
+| Mengen | Profile nach Länge und Masse, Verglasung, Paneele, Dichtungen, Anker, Gewicht je m², Auflagerkräfte an der Decke |
+| Kosten | Material getrennt von Bearbeitung, Transport, Lagerung und Montage |
+
+**Nicht geführt**: absturzsichernde Verglasung nach DIN 18008-4 (der Nachweis
+führt über den Pendelschlagversuch und ist rechnerisch nicht zu ersetzen),
+begehbare und Überkopfverglasung mit Resttragfähigkeit, Verankerung im Rohbau
+nach DIN EN 1992-4, Beschläge und Öffnungsflügel, Brandschutz und Brandsperren,
+Schallschutz, Einbruchhemmung nach DIN EN 1627, Tauwasser nach DIN 4108-3,
+Erdbeben und Anprall, Montagezustände, Toleranzen nach DIN 18202 sowie die
+Prüfungen nach DIN EN 13830 (Luftdurchlässigkeit, Schlagregendichtheit,
+Windwiderstand). Die **Profilkennwerte sind Richtwerte einer Regelserie**,
+damit gerechnet werden kann, bevor das System feststeht – maßgebend ist die
+Systemunterlage des Herstellers. Ob der U-Wert genügt, entscheidet die
+Gesamtbilanz nach **GEG** (Referenzgebäudeverfahren), nicht der Einzelwert.
 
 ## Baustellenlogistik
 
