@@ -29,6 +29,13 @@
   };
   let tiefbauErgebnis = null;
 
+  // Geländemodell: Höhenpunkte gehören zum Projekt, das Netz wird daraus
+  // jedes Mal neu gebildet – es ist Ergebnis, nicht Eingabe.
+  let dgmPunkte = [];
+  let dgm = null;
+  let dgmLinien = [];
+  let dgmVolumenErgebnis = null;
+
   const model = {
     nodes: [],            // [{ x, y, z }]
     members: new Map(),   // id -> { id, a, b, type, loadType, force, moment, beta, family, steelGrade }
@@ -242,6 +249,10 @@
     tiefbau.gradiente = [];
     tiefbau.gelaende = [];
     tiefbauErgebnis = null;
+    dgmPunkte = [];
+    dgm = null;
+    dgmLinien = [];
+    dgmVolumenErgebnis = null;
     punktwolke = null;
     scanSchnitt = null;
     scanWaende = null;
@@ -524,6 +535,12 @@
         buildProfileSolid(a, b, design.family, profile, utilizationColor(design.utilization, design.status), exaggeration)
       );
     });
+
+    // Geländemodell unter allem
+    if (dgm && dgm.dreiecke.length && document.getElementById("dgmNetzZeigen").checked) {
+      result.contentGroup.add(buildDgmNetz(dgm, document.getElementById("dgmDraht").checked));
+      if (dgmLinien.length) result.contentGroup.add(buildHoehenlinien(dgmLinien));
+    }
 
     // Punktwolke des Bestands unter dem Modell
     if (punktwolke && punktwolke.anzeige.anzahl && document.getElementById("scanZeigen").checked) {
@@ -1152,6 +1169,7 @@
       const an = model.anschluesse.get(anschlussBlattId);
       return blatt(`Anschluss_${name}_${(an && an.bezeichnung ? an.bezeichnung : "Anschluss").replace(/[^\w.-]+/g, "_")}.svg`);
     }
+    if (sheetArt === "gelaendeplan") return blatt(`Gelaendeplan_${name}.svg`);
     if (sheetArt === "lageplan") return blatt(`Lageplan_${name}.svg`);
     if (sheetArt === "hoehenplan") return blatt(`Hoehenplan_${name}.svg`);
     if (sheetArt === "querprofile") return blatt(`Querprofile_${name}_Blatt${querprofilBlatt + 1}.svg`);
@@ -2877,6 +2895,7 @@
     baustelle: { button: document.getElementById("tabBaustelle"), view: document.getElementById("viewBaustelle") },
     anschluss: { button: document.getElementById("tabAnschluss"), view: document.getElementById("viewAnschluss") },
     bestand: { button: document.getElementById("tabBestand"), view: document.getElementById("viewBestand") },
+    gelaende: { button: document.getElementById("tabGelaende"), view: document.getElementById("viewGelaende") },
     tiefbau: { button: document.getElementById("tabTiefbau"), view: document.getElementById("viewTiefbau") },
     koordination: { button: document.getElementById("tabKoordination"), view: document.getElementById("viewKoordination") },
     cutlist: { button: document.getElementById("tabCutList"), view: document.getElementById("viewCutList") },
@@ -2894,6 +2913,7 @@
     if (which === "baustelle") renderBaustelle();
     if (which === "anschluss") renderAnschluesse();
     if (which === "bestand") renderBestand();
+    if (which === "gelaende") renderGelaende();
     if (which === "tiefbau") renderTiefbau();
     if (which === "koordination") renderKoordination();
     if (which === "cutlist") renderCutList();
@@ -2958,6 +2978,7 @@
     if (!TABS.baustelle.view.hidden) renderBaustelle();
     if (!TABS.anschluss.view.hidden) renderAnschluesse();
     if (!TABS.bestand.view.hidden) renderBestand();
+    if (!TABS.gelaende.view.hidden) renderGelaende();
     if (!TABS.tiefbau.view.hidden) renderTiefbau();
     if (!TABS.koordination.view.hidden) renderKoordination();
     if (!TABS.cutlist.view.hidden) renderCutList();
@@ -4229,6 +4250,283 @@
     setStatus(`${liste.length} Anschlüsse mit allen Einzelnachweisen als CSV ausgegeben.`, "ok");
   });
 
+  /* ============================== Geländemodell (DGM) */
+
+  function dgmZahlFeld(id, ersatz) {
+    const w = parseFloat(document.getElementById(id).value);
+    return Number.isFinite(w) ? w : ersatz;
+  }
+
+  /** Netz und Höhenlinien aus den Höhenpunkten bilden. */
+  function dgmBilden(still) {
+    if (dgmPunkte.length < 3) {
+      if (!still) setStatus("Für ein Geländemodell sind mindestens drei Höhenpunkte nötig.", "error");
+      dgm = null; dgmLinien = []; dgmVolumenErgebnis = null;
+      renderGelaende();
+      return null;
+    }
+    const beginn = Date.now();
+    dgm = dgmVermaschen(dgmPunkte);
+    const e = dgmZahlFeld("dgmAequidistanzAnsicht", 0.5);
+    dgmLinien = dgmHoehenlinien(dgm, e);
+    dgmVolumenErgebnis = null;
+    dgm.ms = Date.now() - beginn;
+    renderGelaende();
+    refreshAll();
+    if (!TABS.model.view.hidden) renderModel();
+    if (!still) {
+      const kw = dgmKennwerte(dgm);
+      setStatus(`Geländemodell gebildet: ${kw.punkte} Punkte, ${kw.dreiecke} Dreiecke, `
+        + `${dgmLinien.length} Höhenlinien mit ${tbText(e, 2)} m Äquidistanz (${dgm.ms} ms). `
+        + `Höhen ${tbText(kw.hoeheMin)} bis ${tbText(kw.hoeheMax)} m, Neigung im Mittel `
+        + `${tbText(kw.neigungMittel, 1)} %.`
+        + (dgm.doppelte ? ` ${dgm.doppelte} lagegleiche Punkte übergangen.` : ""), "ok");
+    }
+    return dgm;
+  }
+
+  /** Kamera auf das Geländemodell stellen. */
+  function dgmKameraSetzen() {
+    if (!dgm) return;
+    const g = dgm.grenzen;
+    const ecken = [];
+    [g.minX, g.maxX].forEach((x) => [g.minZ, g.maxZ].forEach((h) =>
+      [g.minY, g.maxY].forEach((y) => ecken.push({ x, y: h, z: y }))));
+    sketch.frameContent(ecken);
+    result.frameContent(ecken);
+  }
+
+  function renderGelaende() {
+    const kennzahl = (label, wert, warnung) =>
+      `<div class="stat"><span class="label">${label}</span>`
+      + `<span class="value${warnung ? " warnwert" : ""}">${wert}</span></div>`;
+
+    document.getElementById("dgmEmpty").hidden = dgmPunkte.length > 0;
+    const kennzahlen = document.getElementById("dgmKennzahlen");
+    const stand = document.getElementById("dgmStand");
+
+    if (!dgm) {
+      kennzahlen.innerHTML = dgmPunkte.length
+        ? kennzahl("Höhenpunkte", dgmPunkte.length) + kennzahl("Netz", "noch nicht gebildet", true)
+        : "";
+      stand.textContent = dgmPunkte.length
+        ? "Höhenpunkte geladen – „Netz und Höhenlinien“ bildet das Modell."
+        : "";
+    } else {
+      const kw = dgmKennwerte(dgm);
+      kennzahlen.innerHTML =
+        kennzahl("Höhenpunkte", kw.punkte)
+        + kennzahl("Dreiecke", kw.dreiecke)
+        + kennzahl("Höhenlinien", dgmLinien.length)
+        + kennzahl("Höhen", `${tbText(kw.hoeheMin)} … ${tbText(kw.hoeheMax)} m`)
+        + kennzahl("Ausdehnung", `${tbText(kw.breite, 0)} × ${tbText(kw.tiefe, 0)} m`)
+        + kennzahl("Fläche Grundriss", `${tbText(kw.flaecheGrundriss, 0)} m²`)
+        + kennzahl("Geländefläche", `${tbText(kw.flaecheGelaende, 0)} m²`)
+        + kennzahl("Neigung mittel", `${tbText(kw.neigungMittel, 1)} %`)
+        + kennzahl("Neigung größte", `${tbText(kw.neigungMax, 1)} %`);
+      stand.innerHTML = `Vermascht in ${dgm.ms} ms · Äquidistanz `
+        + `${tbText(dgmZahlFeld("dgmAequidistanzAnsicht", 0.5), 2)} m, jede fünfte Linie verstärkt.`
+        + (dgm.doppelte ? ` ${dgm.doppelte} lagegleiche Punkte wurden übergangen.` : "")
+        + (kw.schlankeDreiecke ? ` ${kw.schlankeDreiecke} schlanke Dreiecke am Rand – beim Größtwert `
+          + "der Neigung außen vor gelassen, weil ihre Neigung ohne Aussage ist." : "")
+        + " Die mittlere Neigung ist mit der Fläche gewichtet.";
+    }
+
+    // ---- Aushub
+    const v = document.getElementById("dgmVolumen");
+    if (!dgmVolumenErgebnis) {
+      v.innerHTML = "";
+    } else {
+      const r = dgmVolumenErgebnis;
+      v.innerHTML =
+        kennzahl("Planum", `${tbText(r.planum)} m`)
+        + kennzahl("Abtrag", `${tbText(r.abtrag, 1)} m³`)
+        + kennzahl("Auftrag", `${tbText(r.auftrag, 1)} m³`)
+        + kennzahl("netto", `${tbText(r.netto, 1)} m³`, r.netto < 0)
+        + kennzahl("Fläche Abtrag", `${tbText(r.flaecheAbtrag, 0)} m²`)
+        + kennzahl("Fläche Auftrag", `${tbText(r.flaecheAuftrag, 0)} m²`)
+        + kennzahl("Oberboden", `${tbText(r.oberboden, 1)} m³`);
+    }
+
+    // ---- Punktliste (nur die ersten Punkte, sonst wird die Seite unbedienbar)
+    const body = document.getElementById("dgmBody");
+    body.innerHTML = "";
+    const grenze = 200;
+    dgmPunkte.slice(0, grenze).forEach((p, i) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td>${p.nummer || i + 1}</td>
+        <td>${tbText(p.x, 3)}</td>
+        <td>${tbText(p.y, 3)}</td>
+        <td><strong>${tbText(p.z, 3)}</strong></td>
+        <td>${p.art || ""}</td>
+        <td><button class="row-remove" data-dgm-weg="${i}" title="Punkt entfernen">✕</button></td>`;
+      body.appendChild(tr);
+    });
+    document.getElementById("dgmPunktHinweis").textContent = dgmPunkte.length > grenze
+      ? `Es werden die ersten ${grenze} von ${dgmPunkte.length} Punkten gezeigt; gerechnet wird mit allen.`
+      : "";
+  }
+
+  /* ---- Bedienung Gelände */
+
+  document.getElementById("viewGelaende").addEventListener("click", (e) => {
+    const weg = e.target.closest("[data-dgm-weg]");
+    if (!weg) return;
+    dgmPunkte.splice(parseInt(weg.dataset.dgmWeg, 10), 1);
+    if (dgm) dgmBilden(true); else renderGelaende();
+  });
+
+  document.getElementById("btnDgmDatei").addEventListener("click", () => {
+    const eingabe = document.getElementById("dgmDatei");
+    const datei = eingabe.files && eingabe.files[0];
+    if (!datei) { setStatus("Zuerst eine Punktliste wählen.", "error"); return; }
+    const leser = new FileReader();
+    leser.onload = () => {
+      const erg = dgmPunkteAusText(String(leser.result));
+      if (!erg.punkte.length) {
+        setStatus(`In „${datei.name}“ wurde kein Punkt gefunden. Erwartet wird je Zeile `
+          + "Punktnummer, Rechtswert, Hochwert und Höhe – oder drei Zahlen ohne Nummer.", "error");
+        return;
+      }
+      dgmPunkte = erg.punkte;
+      dgmBilden();
+      dgmKameraSetzen();
+      setStatus(`${erg.punkte.length} Höhenpunkte aus „${datei.name}“ gelesen`
+        + (erg.uebergangen ? `, ${erg.uebergangen} Zeilen übergangen` : "")
+        + `. ${dgm ? `${dgm.dreiecke.length} Dreiecke gebildet.` : ""}`, "ok");
+      eingabe.value = "";
+    };
+    leser.readAsText(datei);
+  });
+
+  document.getElementById("btnDgmAusWolke").addEventListener("click", () => {
+    if (!punktwolke) { setStatus("Zuerst im Register Bestand einen Scan laden.", "error"); return; }
+    const weite = dgmZahlFeld("dgmRasterWolke", 2);
+    const punkte = dgmBodenpunkte(punktwolke.voll, weite);
+    if (punkte.length < 3) { setStatus("Zu wenige Bodenpunkte – Rasterweite verkleinern.", "error"); return; }
+    dgmPunkte = punkte;
+    dgmBilden();
+    dgmKameraSetzen();
+    setStatus(`${punkte.length} Bodenpunkte aus der Punktwolke gewonnen (je Zelle von `
+      + `${tbText(weite, 1)} m der tiefste Punkt). Der Filter versagt unter Bewuchs und an Bauwerken; `
+      + "für eine Abrechnung ist eine geprüfte Bodenpunktwolke zu verwenden.", "info");
+  });
+
+  document.getElementById("btnDgmBeispiel").addEventListener("click", () => {
+    // Zwei Kuppen und eine Mulde, aufgenommen im Raster mit Streuung
+    const hoehe = (x, y) => 12 + 0.010 * x + 0.004 * y
+      + 4.0 * Math.exp(-(((x - 80) ** 2 + (y - 60) ** 2) / 2500))
+      + 2.5 * Math.exp(-(((x - 210) ** 2 + (y - 140) ** 2) / 3000))
+      - 3.0 * Math.exp(-(((x - 150) ** 2 + (y - 40) ** 2) / 2000));
+    let saat = 777;
+    const zufall = () => (saat = (saat * 1103515245 + 12345) % 2147483648) / 2147483648;
+    const punkte = [];
+    let nummer = 1000;
+    for (let x = 0; x <= 300; x += 10) {
+      for (let y = 0; y <= 200; y += 10) {
+        const px = Math.min(300, Math.max(0, x + (zufall() - 0.5) * 4));
+        const py = Math.min(200, Math.max(0, y + (zufall() - 0.5) * 4));
+        punkte.push({ nummer: String(nummer++), x: px, y: py, z: hoehe(px, py), art: "GEL" });
+      }
+    }
+    dgmPunkte = punkte;
+    dgmBilden();
+    dgmKameraSetzen();
+    setStatus(`Beispielgelände eingesetzt: ${punkte.length} Höhenpunkte im 10-m-Raster über 300 × 200 m `
+      + "mit zwei Kuppen und einer Mulde. Zum Ausprobieren und Überschreiben gedacht.", "ok");
+  });
+
+  document.getElementById("btnDgmLeeren").addEventListener("click", () => {
+    dgmPunkte = []; dgm = null; dgmLinien = []; dgmVolumenErgebnis = null;
+    renderGelaende();
+    refreshAll();
+    if (!TABS.model.view.hidden) renderModel();
+    setStatus("Geländemodell verworfen.", "ok");
+  });
+
+  document.getElementById("btnDgmVermaschen").addEventListener("click", () => dgmBilden());
+  ["dgmNetzZeigen", "dgmDraht"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", () => {
+      if (!TABS.model.view.hidden) renderModel();
+    });
+  });
+
+  document.getElementById("btnDgmVolumen").addEventListener("click", () => {
+    if (!dgm) { if (!dgmBilden()) return; }
+    const planum = dgmZahlFeld("dgmPlanumAnsicht", 0);
+    const dOberboden = dgmZahlFeld("dgmOberboden", 0.25);
+    const r = dgmVolumenGegenEbene(dgm, planum);
+    dgmVolumenErgebnis = Object.assign({ planum }, r, {
+      // Der Oberboden wird über der Fläche abgetragen, auf der überhaupt
+      // gearbeitet wird – hier über der Abtragsfläche
+      oberboden: r.flaecheAbtrag * dOberboden,
+    });
+    renderGelaende();
+    setStatus(`Aushub gegen die Ebene ${tbText(planum)} m: Abtrag ${tbText(r.abtrag, 1)} m³ auf `
+      + `${tbText(r.flaecheAbtrag, 0)} m², Auftrag ${tbText(r.auftrag, 1)} m³ auf `
+      + `${tbText(r.flaecheAuftrag, 0)} m². Netto ${tbText(r.netto, 1)} m³ `
+      + `${r.netto >= 0 ? "Überschuss" : "Bedarf"}. Für eine Ebene ist das Ergebnis genau, `
+      + "keine Rasternäherung.", "ok");
+  });
+
+  document.getElementById("btnGelaendeplan").addEventListener("click", () => {
+    if (!dgm) { if (!dgmBilden()) return; }
+    const stand = tiefbau.achse.length ? tiefbauStand() : null;
+    sheetArt = "gelaendeplan";
+    document.getElementById("sheetBody").innerHTML = gelaendeplanSVG({
+      dgm, linien: dgmLinien, projekt: projektKopf(),
+      aequidistanz: dgmZahlFeld("dgmAequidistanzAnsicht", 0.5),
+      netz: document.getElementById("dgmDraht").checked,
+      punkteZeigen: document.getElementById("dgmPunkteImPlan").checked,
+      trasse: stand ? stand.trasse : null,
+      stationen: stand ? stand.stationen : [],
+    });
+    const kw = dgmKennwerte(dgm);
+    document.getElementById("sheetTitle").textContent = "Geländeplan";
+    document.getElementById("sheetCounter").textContent =
+      `${kw.punkte} Punkte · ${dgmLinien.length} Höhenlinien · `
+      + `${tbText(kw.hoeheMin)} bis ${tbText(kw.hoeheMax)} m`;
+    document.getElementById("sheetOverlay").hidden = false;
+  });
+
+  document.getElementById("btnDgmCsv").addEventListener("click", () => {
+    if (!dgmPunkte.length) { setStatus("Keine Höhenpunkte vorhanden.", "error"); return; }
+    const rows = [["Geländemodell – " + (document.getElementById("projectName").value || "Projekt")]];
+    if (dgm) {
+      const kw = dgmKennwerte(dgm);
+      rows.push(["Punkte", kw.punkte, "Dreiecke", kw.dreiecke,
+        "Hoehe min [m]", kw.hoeheMin.toFixed(3), "Hoehe max [m]", kw.hoeheMax.toFixed(3)]);
+      rows.push(["Flaeche Grundriss [m2]", kw.flaecheGrundriss.toFixed(2),
+        "Gelaendeflaeche [m2]", kw.flaecheGelaende.toFixed(2),
+        "Neigung Mittel [%]", kw.neigungMittel.toFixed(2),
+        "Neigung groesste [%]", kw.neigungMax.toFixed(2)]);
+    }
+    if (dgmVolumenErgebnis) {
+      const r = dgmVolumenErgebnis;
+      rows.push([]);
+      rows.push(["Aushub gegen die Ebene [m]", r.planum.toFixed(3)]);
+      rows.push(["Abtrag [m3]", r.abtrag.toFixed(2), "Flaeche [m2]", r.flaecheAbtrag.toFixed(2)]);
+      rows.push(["Auftrag [m3]", r.auftrag.toFixed(2), "Flaeche [m2]", r.flaecheAuftrag.toFixed(2)]);
+      rows.push(["netto [m3]", r.netto.toFixed(2), "Oberboden [m3]", r.oberboden.toFixed(2)]);
+    }
+    rows.push([]);
+    rows.push(["Nr", "Rechts [m]", "Hoch [m]", "Hoehe [m]", "Code"]);
+    dgmPunkte.forEach((p, i) => {
+      rows.push([p.nummer || i + 1, p.x.toFixed(3), p.y.toFixed(3), p.z.toFixed(3), p.art || ""]);
+    });
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Gelaendemodell_${name}.csv`, "\ufeff" + zuCsv(rows), "text/csv;charset=utf-8;");
+    setStatus(`${dgmPunkte.length} Höhenpunkte mit Kennwerten als CSV ausgegeben.`, "ok");
+  });
+
+  // Äquidistanz in Band und Ansicht gleich halten
+  [["dgmAequidistanz", "dgmAequidistanzAnsicht"], ["dgmPlanum", "dgmPlanumAnsicht"]].forEach(([band, ansicht]) => {
+    const a = document.getElementById(band), b = document.getElementById(ansicht);
+    a.addEventListener("change", () => { b.value = a.value; });
+    b.addEventListener("change", () => { a.value = b.value; });
+  });
+
   /* ================================================== Tiefbau: Trassierung */
 
   let querprofilBlatt = 0;
@@ -4269,10 +4567,30 @@
     return { trasse, gradiente, stationen };
   }
 
-  /** Querprofil an einer Station aus dem aktuellen Zustand. */
-  function tiefbauProfilBei(gradiente, qs) {
-    return (station) => querprofil(qs, gradienteHoehe(gradiente, station).hoehe,
-      gelaendeBei(tiefbau.gelaende, station));
+  /**
+   * Querprofil an einer Station.
+   *
+   * Liegt ein Geländemodell vor und ist es eingeschaltet, wird das Gelände
+   * je Profil quer zur Achse aus dem Netz abgegriffen – mit allen
+   * Knickpunkten. Sonst gilt die Beschreibung über Höhe und Querneigung
+   * je Station.
+   */
+  function tiefbauProfilBei(gradiente, qs, trasse) {
+    const ausDgm = dgm && dgm.dreiecke.length
+      && document.getElementById("tiefbauAusDgm").checked && trasse;
+    const halbeBreite = dgmZahlFeld("tiefbauProfilbreite", 40);
+    const schritt = dgmZahlFeld("tiefbauProfilschritt", 1);
+    return (station) => {
+      const achshoehe = gradienteHoehe(gradiente, station).hoehe;
+      if (ausDgm) {
+        const p = trassePunkt(trasse, station);
+        // Querrichtung: senkrecht zur Achsrichtung, positiv nach rechts
+        const quer = { x: Math.sin(p.richtung), y: -Math.cos(p.richtung) };
+        const linie = dgmSchnitt(dgm, { x: p.x, y: p.y }, quer, -halbeBreite, halbeBreite, schritt);
+        if (linie.length > 1) return querprofil(qs, achshoehe, { linie });
+      }
+      return querprofil(qs, achshoehe, gelaendeBei(tiefbau.gelaende, station));
+    };
   }
 
   function tiefbauRechnen() {
@@ -4282,7 +4600,7 @@
 
     const { trasse, gradiente, stationen } = tiefbauStand();
     const qs = tiefbauQuerschnitt();
-    const profilBei = tiefbauProfilBei(gradiente, qs);
+    const profilBei = tiefbauProfilBei(gradiente, qs, trasse);
     const massen = massenBerechnung(stationen, profilBei);
 
     const boden = {
@@ -4305,7 +4623,10 @@
     tiefbauErgebnis = { trasse, gradiente, stationen, qs, massen, ausgleich, kosten, profilBei };
     renderTiefbau();
     const offen = massen.profile.filter((p) => p.profil.hinweise.length).length;
-    setStatus(`${stationen.length} Querprofile gerechnet: Abtrag ${tbText(massen.summe.abtrag, 1)} m³, `
+    const ausDgm = dgm && dgm.dreiecke.length && document.getElementById("tiefbauAusDgm").checked;
+    setStatus(`${stationen.length} Querprofile gerechnet `
+      + `(Gelände ${ausDgm ? "aus dem Geländemodell, quer zur Achse abgegriffen"
+        : "aus Höhe und Querneigung je Station"}): Abtrag ${tbText(massen.summe.abtrag, 1)} m³, `
       + `Auftrag ${tbText(massen.summe.auftrag, 1)} m³, Oberboden ${tbText(massen.summe.oberboden, 1)} m³ `
       + `(Mittelwertverfahren). Kostenschätzung ${tbText(kosten.summe, 2)} €.`
       + (offen ? ` ${offen} Profile: die Böschung erreicht das Gelände nicht – Grenzweite oder Gelände prüfen.` : ""),
@@ -4566,9 +4887,20 @@
     const e = tiefbauErgebnis || tiefbauRechnen();
     if (!e) return;
     sheetArt = "hoehenplan";
+    // Die Geländelinie des Höhenplans folgt derselben Quelle wie die
+    // Querprofile: Geländemodell, wenn es eingeschaltet ist
+    const ausDgm = dgm && dgm.dreiecke.length && document.getElementById("tiefbauAusDgm").checked;
+    const gelaendeHoehe = ausDgm
+      ? (station) => {
+        const p = trassePunkt(e.trasse, station);
+        const h = dgmHoehe(dgm, p.x, p.y);
+        return h === null ? gelaendeBei(tiefbau.gelaende, station).hoehe : h;
+      }
+      : null;
     document.getElementById("sheetBody").innerHTML = laengsschnittSVG({
       trasse: e.trasse, gradiente: e.gradiente, gelaende: tiefbau.gelaende,
       stationen: e.stationen, projekt: projektKopf(), massen: e.massen,
+      gelaendeHoehe,
     });
     document.getElementById("sheetTitle").textContent = "Höhenplan mit Massenlinie";
     document.getElementById("sheetCounter").textContent =
@@ -5086,6 +5418,8 @@
       naechsteBetonId: model.nextBetonId,
       naechsteAussparungId: model.nextAussparungId,
       achsraster: rasterVorgabe(),
+      // Höhenpunkte des Geländemodells; das Netz wird beim Öffnen neu gebildet
+      hoehenpunkte: dgmPunkte,
       // Tiefbau: Achse, Gradiente und Gelände gehören zum Projekt.
       // Die Punktwolke des Bestands nicht – sie wäre zu groß.
       tiefbau: {
@@ -5154,6 +5488,8 @@
     tiefbau.gradiente = (data.tiefbau && data.tiefbau.gradiente) || [];
     tiefbau.gelaende = (data.tiefbau && data.tiefbau.gelaende) || [];
     tiefbauErgebnis = null;
+    dgmPunkte = (data.hoehenpunkte || []).slice();
+    dgm = null; dgmLinien = []; dgmVolumenErgebnis = null;
     Object.keys(materialPreise).forEach((k) => delete materialPreise[k]);
     Object.assign(materialPreise, data.baustoffpreise || {});
 

@@ -86,6 +86,7 @@
     <button class="ribbon-tab" data-band="baustelle" role="tab">Baustelle</button>
     <button class="ribbon-tab" data-band="anschluesse" role="tab">Anschlüsse</button>
     <button class="ribbon-tab" data-band="bestand" role="tab">Bestand</button>
+    <button class="ribbon-tab" data-band="gelaende" role="tab">Gelände</button>
     <button class="ribbon-tab" data-band="tiefbau" role="tab">Tiefbau</button>
     <button class="ribbon-tab" data-band="koordination" role="tab">Koordination</button>
     <button class="ribbon-tab" data-band="auswertung" role="tab">Auswertung</button>
@@ -455,6 +456,53 @@
     </div>
   </div>
 
+  <!-- ================================================ Gelaendemodell -->
+  <div class="ribbon-band" data-band="gelaende" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnDgmDatei" data-reiter="gelaende" title="Höhenpunkte aus einer Punktliste laden (Nr, Rechts, Hoch, Höhe)">
+          <span class="ribbon-icon">📐</span><span class="ribbon-label">Punkte<br>laden</span></button>
+        <button class="ribbon-btn" data-befehl="btnDgmAusWolke" data-reiter="gelaende" title="Bodenpunkte aus der geladenen Punktwolke gewinnen">
+          <span class="ribbon-icon">☁</span><span class="ribbon-label">aus dem<br>Scan</span></button>
+        <button class="ribbon-btn" data-befehl="btnDgmBeispiel" data-reiter="gelaende" title="Beispielgelände zum Ausprobieren">
+          <span class="ribbon-icon">⛰</span><span class="ribbon-label">Beispiel</span></button>
+      </div>
+      <div class="ribbon-caption">Höhenpunkte</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnDgmVermaschen" data-reiter="gelaende" title="Dreiecksnetz nach Delaunay bilden und Höhenlinien ziehen">
+          <span class="ribbon-icon">🕸</span><span class="ribbon-label">Netz und<br>Höhenlinien</span></button>
+        <label class="ribbon-feld"><span>Äquidistanz [m]</span>
+          <input type="number" id="dgmAequidistanz" step="0.25" min="0.05" value="0.50"></label>
+      </div>
+      <div class="ribbon-caption">Geländemodell</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnDgmVolumen" data-reiter="gelaende" title="Aushub gegen eine waagerechte Ebene">
+          <span class="ribbon-icon">Σ</span><span class="ribbon-label">Aushub<br>rechnen</span></button>
+        <label class="ribbon-feld"><span>Planum [m]</span>
+          <input type="number" id="dgmPlanum" step="0.1" value="13.00"></label>
+      </div>
+      <div class="ribbon-caption">Massen</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnGelaendeplan" data-reiter="gelaende" title="Geländeplan mit Höhenlinien als Blatt A4 quer">
+          <span class="ribbon-icon">🗺</span><span class="ribbon-label">Gelände-<br>plan</span></button>
+        <button class="ribbon-btn" data-befehl="btnDgmCsv" data-reiter="gelaende" title="Höhenpunkte und Kennwerte als CSV">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Punkte<br>(CSV)</span></button>
+        <button class="ribbon-btn" data-befehl="tabGelaende" title="Geländemodell zeigen">
+          <span class="ribbon-icon">📋</span><span class="ribbon-label">Gelände-<br>liste</span></button>
+      </div>
+      <div class="ribbon-caption">Ausgabe</div>
+    </div>
+  </div>
+
   <!-- ================================================ Tiefbau -->
   <div class="ribbon-band" data-band="tiefbau" hidden>
     <div class="ribbon-group">
@@ -602,6 +650,7 @@
         <button class="tab-btn" id="tabBaustelle">Baustelle</button>
         <button class="tab-btn" id="tabAnschluss">Anschlüsse</button>
         <button class="tab-btn" id="tabBestand">Bestand</button>
+        <button class="tab-btn" id="tabGelaende">Gelände</button>
         <button class="tab-btn" id="tabTiefbau">Tiefbau</button>
         <button class="tab-btn" id="tabKoordination">Koordination</button>
         <button class="tab-btn" id="tabCutList">Stückliste</button>
@@ -1568,6 +1617,94 @@
       <div class="layer-note" id="dxfStand"></div>
     </div>
 
+    <div class="result-panel-body" id="viewGelaende" hidden>
+      <h3 class="section-title">Digitales Geländemodell (DGM)</h3>
+      <p class="view-note">Aus Höhenpunkten entsteht ein <strong>Dreiecksnetz nach Delaunay</strong>: Kein Punkt
+        liegt im Umkreis eines fremden Dreiecks – das gibt die gleichmäßigsten Dreiecke, die aus den gegebenen
+        Punkten zu bilden sind. Auf dem Netz werden Höhen zwischengerechnet (baryzentrisch, über einer Ebene
+        exakt), Höhenlinien gezogen (Verfahren der marschierenden Dreiecke), Neigungen bestimmt und Massen gegen
+        eine geplante Fläche ermittelt.
+        <strong>Nicht enthalten</strong>: Bruchkanten – Böschungsoberkanten, Mauern und Gräben werden nicht als
+        Zwangslinien geführt, sondern nur über die Dichte der Punkte abgebildet; ebenso keine Löcher im Netz,
+        keine Ausdünnung nach Genauigkeitsvorgabe. Die Genauigkeit des Modells ist die der Aufnahme
+        (DIN 18710-1); ein DGM aus wenigen Punkten ersetzt kein Aufmaß.</p>
+
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="dgmDatei">Punktliste (Nr, Rechts, Hoch, Höhe)</label>
+          <input type="file" id="dgmDatei" accept=".txt,.csv,.asc,.xyz,.pun">
+        </div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnDgmDatei">📐 Punkte laden</button></div>
+        <div class="field">
+          <label for="dgmRasterWolke">Rasterweite Scan [m]</label>
+          <input type="number" id="dgmRasterWolke" step="0.5" min="0.2" value="2.0"
+                 title="Je Rasterzelle wird der tiefste Punkt der Wolke als Bodenpunkt genommen">
+        </div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnDgmAusWolke" title="Bodenpunkte aus der geladenen Punktwolke">☁ aus dem Scan</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnDgmBeispiel" title="Beispielgelände einsetzen">⛰ Beispiel</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnDgmLeeren" title="Höhenpunkte verwerfen">🗑 leeren</button></div>
+      </div>
+
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="dgmAequidistanzAnsicht">Äquidistanz [m]</label>
+          <input type="number" id="dgmAequidistanzAnsicht" step="0.25" min="0.05" value="0.50"></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnDgmVermaschen">🕸 Netz und Höhenlinien</button></div>
+        <div class="field">
+          <label for="dgmNetzZeigen">Darstellung</label>
+          <label class="ribbon-schalter"><input type="checkbox" id="dgmNetzZeigen" checked>
+            <span>Gelände im Modell zeigen</span></label></div>
+        <div class="field">
+          <label for="dgmDraht">Netz</label>
+          <label class="ribbon-schalter"><input type="checkbox" id="dgmDraht">
+            <span>Dreiecke zeichnen</span></label></div>
+        <div class="field">
+          <label for="dgmPunkteImPlan">Plan</label>
+          <label class="ribbon-schalter"><input type="checkbox" id="dgmPunkteImPlan" checked>
+            <span>Höhenpunkte beschriften</span></label></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnGelaendeplan" title="Geländeplan als Blatt">🗺 Geländeplan</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnDgmCsv" title="Punkte und Kennwerte als CSV">⬇ Punkte (CSV)</button></div>
+      </div>
+
+      <div class="summary-bar" id="dgmKennzahlen"></div>
+      <div class="layer-note" id="dgmStand"></div>
+      <div class="empty-state" id="dgmEmpty">Noch kein Geländemodell – Punkte laden, aus dem Scan gewinnen oder
+        das Beispiel einsetzen.</div>
+
+      <h3 class="section-title">Aushub gegen eine Ebene</h3>
+      <p class="view-note">Über jedem Dreieck steht ein Prisma: Grundfläche mal mittlere Höhendifferenz. Wechselt
+        die Differenz innerhalb eines Dreiecks das Vorzeichen, wird es an der Nulllinie geteilt, damit Abtrag und
+        Auftrag getrennt bleiben. Für eine waagerechte Ebene ist das Ergebnis <strong>genau</strong> – es ist
+        keine Rasternäherung. Für die Massen einer Trasse ist der Weg über die Querprofile im Register
+        <em>Tiefbau</em> vorgesehen; dort liefert das Geländemodell die Geländelinie je Profil.</p>
+      <div class="cutlist-controls">
+        <div class="field">
+          <label for="dgmPlanumAnsicht">Planumshöhe [m NHN]</label>
+          <input type="number" id="dgmPlanumAnsicht" step="0.1" value="13.00"></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnDgmVolumen">Σ Aushub rechnen</button></div>
+        <div class="field">
+          <label for="dgmOberboden">Oberboden [m]</label>
+          <input type="number" id="dgmOberboden" step="0.05" min="0" value="0.25"
+                 title="Wird über der Fläche des Abtrags gesondert ausgewiesen"></div>
+      </div>
+      <div class="summary-bar" id="dgmVolumen"></div>
+
+      <h3 class="section-title">Höhenpunkte</h3>
+      <table class="members-table" id="dgmTable">
+        <thead><tr><th>Nr</th><th>Rechts [m]</th><th>Hoch [m]</th><th>Höhe [m]</th><th>Code</th><th></th></tr></thead>
+        <tbody id="dgmBody"></tbody>
+      </table>
+      <div class="layer-note" id="dgmPunktHinweis"></div>
+    </div>
+
     <div class="result-panel-body" id="viewTiefbau" hidden>
       <h3 class="section-title">Achse (Trassierung)</h3>
       <p class="view-note">Die Achse besteht aus <strong>Geraden</strong>, <strong>Kreisbögen</strong> und
@@ -1695,6 +1832,18 @@
           <input type="number" id="transportKm" step="1" min="0" value="12"></div>
         <div class="field"><label for="transportPreis">Transport [€/m³·km]</label>
           <input type="number" id="transportPreis" step="0.05" min="0" value="0.35"></div>
+        <div class="field">
+          <label for="tiefbauAusDgm">Gelände</label>
+          <label class="ribbon-schalter"><input type="checkbox" id="tiefbauAusDgm" checked>
+            <span>aus dem Geländemodell</span></label></div>
+        <div class="field">
+          <label for="tiefbauProfilbreite">Profilbreite ± [m]</label>
+          <input type="number" id="tiefbauProfilbreite" step="5" min="5" value="40"
+                 title="Halbe Breite des Geländeschnitts quer zur Achse"></div>
+        <div class="field">
+          <label for="tiefbauProfilschritt">Schrittweite [m]</label>
+          <input type="number" id="tiefbauProfilschritt" step="0.25" min="0.1" value="1.0"
+                 title="Abstand der Stützstellen im Geländeschnitt"></div>
         <div class="field"><label>&nbsp;</label>
           <button class="tool-btn primary" id="btnMassen">Σ Massen rechnen</button></div>
         <div class="field"><label>&nbsp;</label>
@@ -2279,6 +2428,7 @@
   <script src="js/civilplan.js"></script>
   <script src="js/connections.js"></script>
   <script src="js/connectionplan.js"></script>
+  <script src="js/terrain.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

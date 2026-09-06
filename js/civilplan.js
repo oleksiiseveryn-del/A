@@ -99,10 +99,12 @@ function laengsschnittSVG(daten) {
   const von = stationen[0], bis = stationen[stationen.length - 1];
   const laenge = Math.max(1, bis - von);
 
-  // Höhen sammeln
+  // Höhen sammeln. Liegt ein Geländemodell vor, wird seine Höhe in der
+  // Achse übergeben; sonst gilt die Beschreibung je Station.
+  const hoeheVon = daten.gelaendeHoehe || ((s) => gelaendeBei(gelaende, s).hoehe);
   const werte = stationen.map((s) => ({
     station: s,
-    gelaende: gelaendeBei(gelaende, s).hoehe,
+    gelaende: hoeheVon(s),
     gradiente: gradienteHoehe(gradiente, s),
   }));
   const alleHoehen = werte.map((w) => w.gelaende).concat(werte.map((w) => w.gradiente.hoehe));
@@ -450,6 +452,157 @@ function lageplanSVG(daten) {
 
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${BLATT.breite} ${BLATT.hoehe}" width="100%" style="background:#fff">
 <style>${TIEF_STIL}</style>
+${svg}
+</svg>`;
+}
+
+/**
+ * Geländeplan: Höhenlinien mit Beschriftung über dem Dreiecksnetz.
+ *
+ * Jede fünfte Höhenlinie wird als Zähllinie stärker gezogen und mit ihrer
+ * Höhe beschriftet – so, wie es die Kartenpraxis vorsieht. Dazu kommen
+ * wahlweise das Dreiecksnetz, die Höhenpunkte und die Achse des Tiefbaus.
+ *
+ * @param {Object} daten - { dgm, linien, projekt, aequidistanz, netz,
+ *        punkteZeigen, trasse, stationen }
+ */
+function gelaendeplanSVG(daten) {
+  const { dgm, linien, projekt } = daten;
+  const e = daten.aequidistanz || 1;
+
+  const feldX = BLATT.randLinks;
+  const feldY = BLATT.randOben + 4;
+  const feldB = BLATT.breite - BLATT.randLinks - BLATT.randRechts - 58;
+  const feldH = BLATT.hoehe - feldY - BLATT.randUnten - 6;
+
+  const g = dgm.grenzen;
+  const nenner = Math.max(
+    Math.ceil(((g.maxX - g.minX) * 1000) / (feldB - 8) / 50) * 50,
+    Math.ceil(((g.maxY - g.minY) * 1000) / (feldH - 8) / 50) * 50, 50);
+  const mittelX = (g.minX + g.maxX) / 2, mittelY = (g.minY + g.maxY) / 2;
+  const px = (x) => feldX + feldB / 2 + ((x - mittelX) * 1000) / nenner;
+  const py = (y) => feldY + feldH / 2 - ((y - mittelY) * 1000) / nenner;
+
+  let svg = tiefBlattKopf("Geländeplan", projekt);
+  // Alles, was über das Kartenfeld hinausragt, wird abgeschnitten – sonst
+  // laufen Achse und Beschriftung über den Blattrand
+  svg += `<clipPath id="kartenfeld"><rect x="${feldX}" y="${feldY}" `
+    + `width="${feldB.toFixed(2)}" height="${feldH.toFixed(2)}"/></clipPath>`;
+  svg += `<g clip-path="url(#kartenfeld)">`;
+
+  // ---- Dreiecksnetz
+  if (daten.netz) {
+    dgm.dreiecke.forEach((t) => {
+      const p = t.map((i) => dgm.punkte[i]);
+      svg += `<polygon points="${p.map((q) => `${px(q.x).toFixed(2)},${py(q.y).toFixed(2)}`).join(" ")}" class="netz"/>`;
+    });
+  }
+
+  // ---- Höhenlinien
+  linien.forEach((l) => {
+    const zaehl = Math.abs(l.hoehe / (5 * e) - Math.round(l.hoehe / (5 * e))) < 1e-6;
+    l.zuege.forEach((zug) => {
+      if (zug.length < 2) return;
+      svg += `<polyline points="${zug.map((q) => `${px(q.x).toFixed(2)},${py(q.y).toFixed(2)}`).join(" ")}" `
+        + `class="${zaehl ? "hoehenlinie-zaehl" : "hoehenlinie"}"/>`;
+      // Zähllinien beschriften: in der Mitte des längsten Zuges, in
+      // Linienrichtung gedreht, mit weißem Grund unter der Schrift
+      if (!zaehl || zug.length < 6) return;
+      const k = Math.floor(zug.length / 2);
+      const a = zug[k - 1], b = zug[k + 1] || zug[k];
+      let winkel = (Math.atan2(-(py(b.y) - py(a.y)), px(b.x) - px(a.x)) * 180) / Math.PI;
+      if (winkel > 90) winkel -= 180;
+      if (winkel < -90) winkel += 180;
+      svg += `<text x="${px(zug[k].x).toFixed(2)}" y="${py(zug[k].y).toFixed(2)}" class="t-hoehe" `
+        + `transform="rotate(${(-winkel).toFixed(1)} ${px(zug[k].x).toFixed(2)} ${py(zug[k].y).toFixed(2)})">`
+        + `${tiefZahl(l.hoehe, l.hoehe % 1 === 0 ? 0 : 2)}</text>`;
+    });
+  });
+
+  // ---- Höhenpunkte
+  if (daten.punkteZeigen) {
+    const abstand = 6;   // mm auf dem Blatt, damit sich die Schrift nicht deckt
+    const belegt = [];
+    dgm.punkte.forEach((p) => {
+      const x = px(p.x), y = py(p.y);
+      if (belegt.some((q) => Math.abs(q.x - x) < abstand && Math.abs(q.y - y) < abstand)) return;
+      belegt.push({ x, y });
+      svg += `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="0.4" class="hoehenpunkt"/>`;
+      svg += `<text x="${(x + 1).toFixed(2)}" y="${(y - 0.8).toFixed(2)}" class="t-punkt">${tiefZahl(p.z, 2)}</text>`;
+    });
+  }
+
+  // ---- Achse des Tiefbaus
+  if (daten.trasse && daten.trasse.elemente.length) {
+    const punkte = [];
+    const schritt = Math.max(0.5, daten.trasse.laenge / 400);
+    for (let s = daten.trasse.start.station; s <= daten.trasse.stationEnde + 1e-9; s += schritt) {
+      const p = trassePunkt(daten.trasse, s);
+      punkte.push(`${px(p.x).toFixed(2)},${py(p.y).toFixed(2)}`);
+    }
+    svg += `<polyline points="${punkte.join(" ")}" class="achse"/>`;
+    (daten.stationen || []).forEach((s, i) => {
+      if (i % 5) return;
+      const p = trassePunkt(daten.trasse, s);
+      svg += `<circle cx="${px(p.x).toFixed(2)}" cy="${py(p.y).toFixed(2)}" r="0.6" class="achskreis"/>`;
+      svg += `<text x="${(px(p.x) + 2).toFixed(2)}" y="${(py(p.y) - 1.5).toFixed(2)}" class="t-station">${stationText(s)}</text>`;
+    });
+  }
+
+  svg += `</g>`;
+
+  // ---- Nordpfeil und Maßstabsleiste
+  const nx = BLATT.breite - BLATT.randRechts - 50, ny = feldY + 12;
+  svg += `<line x1="${nx}" y1="${ny + 8}" x2="${nx}" y2="${ny - 6}" class="nord"/>`;
+  svg += `<polygon points="${nx},${ny - 8} ${nx - 2},${ny - 3} ${nx + 2},${ny - 3}" class="nordspitze"/>`;
+  svg += `<text x="${nx}" y="${ny + 12}" class="t-mass">N</text>`;
+  // Länge der Leiste so wählen, dass sie in die Spalte passt (höchstens 40 mm)
+  const stufen = [1, 2, 5, 10, 20, 25, 50, 100, 200, 500];
+  const leisteM = stufen.filter((w) => (2 * w * 1000) / nenner <= 40).pop() || 1;
+  const leisteMM = (leisteM * 1000) / nenner;
+  const lx = nx - 6, ly = ny + 24;
+  for (let i = 0; i < 4; i++) {
+    svg += `<rect x="${(lx + (i * leisteMM) / 2).toFixed(2)}" y="${ly}" width="${(leisteMM / 2).toFixed(2)}" `
+      + `height="1.6" fill="${i % 2 ? "#ffffff" : "#1b2733"}" stroke="#1b2733" stroke-width="0.15"/>`;
+  }
+  svg += `<text x="${lx}" y="${(ly + 5).toFixed(2)}" class="t-mini">0</text>`;
+  svg += `<text x="${(lx + 2 * leisteMM).toFixed(2)}" y="${(ly + 5).toFixed(2)}" class="t-mini">${2 * leisteM} m</text>`;
+
+  // ---- Legende
+  const kw = dgmKennwerte(dgm);
+  let ty = ny + 36;
+  const tx = nx - 6;
+  svg += `<text x="${tx}" y="${ty}" class="t-bandkopf">Geländemodell</text>`;
+  ty += 4;
+  [
+    `${kw.punkte} Höhenpunkte, ${kw.dreiecke} Dreiecke`,
+    `Höhen ${tiefZahl(kw.hoeheMin)} bis ${tiefZahl(kw.hoeheMax)} m`,
+    `Äquidistanz ${tiefZahl(e, e % 1 === 0 ? 0 : 2)} m, jede 5. Linie verstärkt`,
+    `Fläche im Grundriss ${tiefZahl(kw.flaecheGrundriss, 0)} m²`,
+    `Geländefläche ${tiefZahl(kw.flaecheGelaende, 0)} m²`,
+    `Neigung im Mittel ${tiefZahl(kw.neigungMittel, 1)} %, größte ${tiefZahl(kw.neigungMax, 1)} %`,
+    kw.schlankeDreiecke ? `${kw.schlankeDreiecke} schlanke Dreiecke am Rand (beim Größtwert außen vor)` : "",
+  ].forEach((t) => { if (!t) return; svg += `<text x="${tx}" y="${ty}" class="t-mini">${t}</text>`; ty += 3.4; });
+
+  svg += tiefSchriftfeld(projekt,
+    `Geländeplan · ${kw.punkte} Punkte · Äquidistanz ${tiefZahl(e, e % 1 === 0 ? 0 : 2)} m`,
+    "Geländeplan", `M 1:${nenner}`);
+  svg += `<text x="${BLATT.randLinks}" y="${BLATT.hoehe - 4}" class="t-hinweis">`
+    + "Dreiecksvermaschung nach Delaunay ohne Bruchkanten: Böschungsoberkanten, Mauern und Gräben sind nur "
+    + "über die Dichte der Punkte abgebildet. Die Genauigkeit des Modells ist die der Aufnahme (DIN 18710-1).</text>";
+
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${BLATT.breite} ${BLATT.hoehe}" width="100%" style="background:#fff">
+<style>${TIEF_STIL}
+  .netz { fill: none; stroke: #c9d2d8; stroke-width: 0.1; }
+  .hoehenlinie { fill: none; stroke: #8a6a45; stroke-width: 0.18; }
+  .hoehenlinie-zaehl { fill: none; stroke: #6b4a2f; stroke-width: 0.42; }
+  .hoehenpunkt { fill: #1b2733; }
+  .nord { stroke: #1b2733; stroke-width: 0.5; }
+  .nordspitze { fill: #1b2733; }
+  .t-hoehe { font-size: 2.3px; text-anchor: middle; fill: #6b4a2f; font-weight: 600;
+             paint-order: stroke; stroke: #ffffff; stroke-width: 1.1; stroke-linejoin: round; }
+  .t-punkt { font-size: 1.9px; fill: #1b2733; }
+</style>
 ${svg}
 </svg>`;
 }

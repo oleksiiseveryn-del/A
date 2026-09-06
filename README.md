@@ -45,6 +45,7 @@ schieben; Bedienelemente sind mindestens 44 pt hoch und Eingabefelder mindestens
 | Bestandsaufnahme | Wände aus der Punktwolke als CSV mit Modell- und Scankoordinaten |
 | Tiefbau | Lageplan, Höhenplan mit Massenlinie und Querprofilblätter als SVG; Massen und Kostenschätzung als CSV |
 | Anschlüsse | Anschlussblatt mit Skizze und Nachweisprotokoll als SVG; Einzelnachweise als CSV |
+| Geländemodell | Geländeplan mit Höhenlinien als SVG; Höhenpunkte, Kennwerte und Aushub als CSV |
 | Papier und PDF | über *Drucken*; aus dem Blattfenster kommt das Blatt allein auf das Papier |
 
 **↗ Weitergeben** übergibt die zuletzt erzeugte Datei an das Systemmenü des Geräts
@@ -90,6 +91,7 @@ js/
   civilplan.js            Lageplan, Hoehenplan mit Massenlinie, Querprofilblaetter
   connections.js          Anschluesse nach DIN EN 1993-1-8 (Schrauben, Naehte, T-Stummel)
   connectionplan.js       Anschlussblatt mit Skizze und Nachweisprotokoll
+  terrain.js              Geländemodell: Vermaschung, Hoehenlinien, Volumen
 python/                   Bewehrung und Herstellungsunterlagen (46 Prüfungen)
 desktop/                  Windows-Anwendung (Electron) – siehe desktop/README.md
 tools/
@@ -148,6 +150,27 @@ oder PLY aus. **Nicht erkannt**: Rundungen, im Aufriss schräge Wände, Stützen
 Wände hinter Einbauten. Die Punktwolke wird **nicht** in der Projektdatei
 gespeichert; sie ist nach dem Öffnen neu zu laden. Das Ergebnis der Erkennung ist
 ein Vorschlag für die Bestandsaufnahme und **ersetzt das Aufmaß vor Ort nicht**.
+
+## Geländemodell
+
+Das Register **Gelände** bildet aus Höhenpunkten ein digitales Geländemodell:
+
+| Schritt | Rechenweg |
+|---|---|
+| Punkte | aus einer Punktliste (Nr, Rechts, Hoch, Höhe), als **Bodenpunkte aus der Punktwolke** (je Rasterzelle der tiefste Punkt) oder als Beispiel |
+| Netz | **Delaunay** nach Bowyer und Watson: kein Punkt liegt im Umkreis eines fremden Dreiecks |
+| Höhen | baryzentrisch im Dreieck – über einer Ebene exakt |
+| Höhenlinien | marschierende Dreiecke, jede fünfte Linie als Zähllinie beschriftet |
+| Kennwerte | Grundriss- und Geländefläche, mittlere (flächengewichtete) und größte Neigung |
+| Aushub | Prisma je Dreieck, an der Nulllinie geteilt – gegen eine Ebene **genau**, keine Rasternäherung |
+| Tiefbau | liefert die **Geländelinie je Querprofil**: quer zur Achse aus dem Netz abgegriffen, mit allen Knickpunkten |
+
+**Nicht enthalten**: Bruchkanten (Böschungsoberkanten, Mauern, Gräben werden
+nur über die Dichte der Punkte abgebildet), Löcher im Netz, Ausdünnung nach
+Genauigkeitsvorgabe. Der Bodenfilter der Punktwolke ist der einfachste
+(tiefster Punkt je Zelle) und versagt unter Bewuchs und an Bauwerken – für
+eine Abrechnung ist eine geprüfte Bodenpunktwolke zu verwenden. Die
+Genauigkeit des Modells ist die der Aufnahme (DIN 18710-1).
 
 ## Tiefbau
 

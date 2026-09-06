@@ -13,7 +13,7 @@
  * alles in der Datei enthalten.
  */
 
-const VERSION = "hsd-konverter-v9";
+const VERSION = "hsd-konverter-v10";
 
 const DATEIEN = [
   "./",
@@ -44,6 +44,7 @@ const DATEIEN = [
   "./js/civilplan.js",
   "./js/connections.js",
   "./js/connectionplan.js",
+  "./js/terrain.js",
   "./js/profile-geometry.js",
   "./js/calculator.js",
   "./js/truss-solver.js",

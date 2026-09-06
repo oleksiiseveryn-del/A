@@ -768,3 +768,67 @@ function buildSchnittPunkte(punkte, kote, farbe, groesse) {
     size: groesse || 0.04, sizeAttenuation: true, color: farbe === undefined ? 0xffc46b : farbe,
   }));
 }
+
+/**
+ * Geländemodell als Dreiecksnetz.
+ *
+ * Die Flächen werden nach der Höhe eingefärbt (Schichtenfarben von
+ * dunkelgrün über gelb nach braun), damit die Form auch ohne Licht
+ * ablesbar ist. Der Bezugspunkt der Punktwolke gilt auch hier: Die
+ * Koordinaten sind Lagekoordinaten (x = Rechts, y = Hoch, z = Höhe) und
+ * werden auf das Modellsystem (x, Höhe y, Nord z) gedreht.
+ */
+function buildDgmNetz(dgm, drahtgitter) {
+  const ecken = new Float32Array(dgm.dreiecke.length * 9);
+  const farben = new Float32Array(dgm.dreiecke.length * 9);
+  const zMin = dgm.grenzen.minZ, zSpanne = (dgm.grenzen.maxZ - zMin) || 1;
+
+  const farbe = (h) => {
+    const t = Math.max(0, Math.min(1, (h - zMin) / zSpanne));
+    // dunkelgrün -> hellgrün -> gelb -> braun
+    if (t < 0.4) return [0.20 + t * 0.5, 0.42 + t * 0.7, 0.24];
+    if (t < 0.7) return [0.55 + (t - 0.4) * 1.0, 0.68, 0.30];
+    return [0.72, 0.60 - (t - 0.7) * 0.5, 0.38];
+  };
+
+  dgm.dreiecke.forEach((t, i) => {
+    t.forEach((nummer, k) => {
+      const p = dgm.punkte[nummer];
+      ecken[i * 9 + k * 3] = p.x;
+      ecken[i * 9 + k * 3 + 1] = p.z;     // Höhe
+      ecken[i * 9 + k * 3 + 2] = p.y;     // Nord
+      const c = farbe(p.z);
+      farben[i * 9 + k * 3] = c[0];
+      farben[i * 9 + k * 3 + 1] = c[1];
+      farben[i * 9 + k * 3 + 2] = c[2];
+    });
+  });
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(ecken, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(farben, 3));
+  geo.computeVertexNormals();
+  const gruppe = new THREE.Group();
+  gruppe.add(new THREE.Mesh(geo, new THREE.MeshLambertMaterial({
+    vertexColors: true, side: THREE.DoubleSide, flatShading: true,
+  })));
+  if (drahtgitter) {
+    gruppe.add(new THREE.LineSegments(new THREE.WireframeGeometry(geo),
+      new THREE.LineBasicMaterial({ color: 0x5b6a75, transparent: true, opacity: 0.5 })));
+  }
+  return gruppe;
+}
+
+/** Höhenlinien des Geländemodells als Linienzüge im Raum. */
+function buildHoehenlinien(linien, farbe) {
+  const gruppe = new THREE.Group();
+  linien.forEach((l) => {
+    l.zuege.forEach((zug) => {
+      if (zug.length < 2) return;
+      const punkte = zug.map((p) => new THREE.Vector3(p.x, l.hoehe + 0.02, p.y));
+      gruppe.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(punkte),
+        new THREE.LineBasicMaterial({ color: farbe === undefined ? 0x6b4a2f : farbe })));
+    });
+  });
+  return gruppe;
+}

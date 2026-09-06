@@ -28,7 +28,9 @@
  * Fahrbahn- und Bankettoberfläche. An der Planumskante beginnt die
  * Böschung mit 1:n und läuft bis zum Schnitt mit dem Gelände. Gerechnet
  * wird gegen das Gelände **nach Abtrag des Oberbodens**; der Oberboden
- * ist eine eigene Leistung (Abtragen und Lagern nach DIN 18915).
+ * ist eine eigene Leistung (Abtragen und Lagern nach DIN 18915). Das
+ * Gelände kommt entweder aus Höhe und Querneigung je Station oder als
+ * aufgemessener Streckenzug aus dem Geländemodell (js/terrain.js).
  * Die Flächen zwischen Gelände und Planum werden abschnittsweise über
  * Trapeze bestimmt – bei zwei Streckenzügen ist das Ergebnis genau.
  *
@@ -458,9 +460,14 @@ function querprofil(qs, achshoehe, gelaende) {
   // ---- Planum: lotrecht um die Oberbaudicke tiefer
   const planum = oberflaeche.map((p) => ({ x: p.x, z: p.z - q.oberbau }));
 
-  // ---- Gelände als Gerade, danach der Oberboden abgezogen
+  // ---- Gelände: entweder als Gerade aus Höhe und Querneigung oder als
+  // aufgemessener Streckenzug aus dem Geländemodell. Danach wird der
+  // Oberboden abgezogen; darauf wird gerechnet.
   const gq = (gelaende.querneigung || 0) / 100;
-  const gelaendeLinie = (x) => gelaende.hoehe - x * gq;
+  const ausDgm = !!(gelaende.linie && gelaende.linie.length > 1);
+  const gelaendeLinie = ausDgm
+    ? (x) => linieHoehe(gelaende.linie, x)
+    : (x) => gelaende.hoehe - x * gq;
   const stripLinie = (x) => gelaendeLinie(x) - q.oberboden;
 
   /**
@@ -518,8 +525,13 @@ function querprofil(qs, achshoehe, gelaende) {
   const entwurf = [links.punkt].concat(planum, [rechts.punkt])
     .slice().sort((a, b) => a.x - b.x);
   const xl = entwurf[0].x, xr = entwurf[entwurf.length - 1].x;
-  const strip = [{ x: xl, z: stripLinie(xl) }, { x: xr, z: stripLinie(xr) }];
-  const gelaendeZug = [{ x: xl, z: gelaendeLinie(xl) }, { x: xr, z: gelaendeLinie(xr) }];
+  // Aus dem Geländemodell wird der Streckenzug mit allen Knickpunkten
+  // übernommen; sonst genügen zwei Punkte für die Gerade.
+  const stellen = ausDgm
+    ? [xl].concat(gelaende.linie.filter((p) => p.x > xl && p.x < xr).map((p) => p.x), [xr])
+    : [xl, xr];
+  const gelaendeZug = stellen.map((x) => ({ x, z: gelaendeLinie(x) }));
+  const strip = stellen.map((x) => ({ x, z: stripLinie(x) }));
 
   const f = flaechenZwischen(strip, entwurf, xl, xr);
   const breite = xr - xl;
@@ -527,7 +539,14 @@ function querprofil(qs, achshoehe, gelaende) {
   return {
     querschnitt: q,
     achshoehe,
-    gelaende,
+    // Das Gelände wird mit der Höhe in der Achse zurückgegeben – auch wenn
+    // es als Streckenzug aus dem Geländemodell kam. Sonst stünde in jeder
+    // Beschriftung des Querprofils nichts.
+    gelaende: Object.assign({}, gelaende, {
+      hoehe: Number.isFinite(gelaende.hoehe) ? gelaende.hoehe : gelaendeLinie(0),
+      querneigung: gelaende.querneigung || 0,
+      ausDgm,
+    }),
     oberflaeche, planum, entwurf,
     gelaendeZug, stripZug: strip,
     links, rechts,
