@@ -86,6 +86,7 @@
     <button class="ribbon-tab" data-band="baustelle" role="tab">Baustelle</button>
     <button class="ribbon-tab" data-band="anschluesse" role="tab">Anschlüsse</button>
     <button class="ribbon-tab" data-band="fertigteile" role="tab">Fertigteile</button>
+    <button class="ribbon-tab" data-band="logistik" role="tab">Logistik</button>
     <button class="ribbon-tab" data-band="bestand" role="tab">Bestand</button>
     <button class="ribbon-tab" data-band="gelaende" role="tab">Gelände</button>
     <button class="ribbon-tab" data-band="tiefbau" role="tab">Tiefbau</button>
@@ -449,6 +450,45 @@
     </div>
   </div>
 
+  <!-- ================================================ Baustellenlogistik -->
+  <div class="ribbon-band" data-band="logistik" hidden>
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnKranPruefen" data-reiter="logistik" title="Jeden Hub gegen die Traglastkurve prüfen">
+          <span class="ribbon-icon">🏗</span><span class="ribbon-label">Kran<br>prüfen</span></button>
+        <button class="ribbon-btn" data-befehl="btnKranStandort" data-reiter="logistik" title="Standort mit der kleinsten größten Ausladung finden">
+          <span class="ribbon-icon">🎯</span><span class="ribbon-label">Standort<br>finden</span></button>
+        <button class="ribbon-btn" data-befehl="btnHuebeAusFertigteilen" data-reiter="logistik" title="Hübe aus der Fertigteilliste übernehmen">
+          <span class="ribbon-icon">⬅</span><span class="ribbon-label">Hübe aus<br>Fertigteilen</span></button>
+      </div>
+      <div class="ribbon-caption">Kran</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn" data-befehl="btnBeFlaeche" data-reiter="logistik" title="Einrichtungsfläche anlegen">
+          <span class="ribbon-icon">▭</span><span class="ribbon-label">Fläche<br>anlegen</span></button>
+        <button class="ribbon-btn" data-befehl="btnBePlan" data-reiter="logistik" title="Baustelleneinrichtungsplan als Blatt">
+          <span class="ribbon-icon">🗺</span><span class="ribbon-label">BE-Plan</span></button>
+      </div>
+      <div class="ribbon-caption">Einrichtung</div>
+    </div>
+
+    <div class="ribbon-group">
+      <div class="ribbon-items">
+        <button class="ribbon-btn primary gross" data-befehl="btnBauzeit" data-reiter="logistik" title="Netzplan rechnen: Termine, Puffer, kritischer Weg">
+          <span class="ribbon-icon">📅</span><span class="ribbon-label">Bauzeit<br>rechnen</span></button>
+        <button class="ribbon-btn" data-befehl="btnBalkenplan" data-reiter="logistik" title="Balkenplan als Blatt">
+          <span class="ribbon-icon">📊</span><span class="ribbon-label">Balken-<br>plan</span></button>
+        <button class="ribbon-btn" data-befehl="btnLogistikCsv" data-reiter="logistik" title="Kran, Flächen und Bauzeit als CSV">
+          <span class="ribbon-icon">⬇</span><span class="ribbon-label">Logistik<br>(CSV)</span></button>
+        <button class="ribbon-btn" data-befehl="tabLogistik" title="Logistikliste zeigen">
+          <span class="ribbon-icon">📋</span><span class="ribbon-label">Logistik-<br>liste</span></button>
+      </div>
+      <div class="ribbon-caption">Bauzeit und Ausgabe</div>
+    </div>
+  </div>
+
   <!-- ================================================ Bestand (Punktwolke) -->
   <div class="ribbon-band" data-band="bestand" hidden>
     <div class="ribbon-group">
@@ -688,6 +728,7 @@
         <button class="tab-btn" id="tabBaustelle">Baustelle</button>
         <button class="tab-btn" id="tabAnschluss">Anschlüsse</button>
         <button class="tab-btn" id="tabFertigteile">Fertigteile</button>
+        <button class="tab-btn" id="tabLogistik">Logistik</button>
         <button class="tab-btn" id="tabBestand">Bestand</button>
         <button class="tab-btn" id="tabGelaende">Gelände</button>
         <button class="tab-btn" id="tabTiefbau">Tiefbau</button>
@@ -2090,6 +2131,125 @@
         Kalkulation und die Angebote der Fertigteilwerke zu ersetzen.</p>
     </div>
 
+    <div class="result-panel-body" id="viewLogistik" hidden>
+      <h3 class="section-title">Kran</h3>
+      <p class="view-note">Die <strong>Traglastkurve</strong> ist Herstellerangabe und wird als Wertepaare
+        (Ausladung, Traglast) eingetragen; dazwischen wird linear gerechnet. Erforderlich ist die Masse des
+        Bauteils zuzüglich der Anschlagmittel mal einem Zuschlag. Der günstigste Standort ist der Mittelpunkt
+        des <strong>kleinsten Kreises, der alle Hubpunkte umschließt</strong> (Verfahren von Welzl) – er hält
+        die größte nötige Ausladung so klein wie möglich; ob er baubar ist, entscheidet die Einrichtung.
+        <strong>Nicht geführt</strong>: Standsicherheit und Gründung des Krans, Fundamentlasten, Windlasten im
+        Betriebs- und Außerbetriebszustand, Montage und Abbau. Maßgebend bleiben Traglasttabelle und
+        Betriebsanleitung des Herstellers.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="kranX">Standort x [m]</label>
+          <input type="number" id="kranX" step="1" value="30"></div>
+        <div class="field"><label for="kranY">Standort y [m]</label>
+          <input type="number" id="kranY" step="1" value="19"></div>
+        <div class="field"><label for="kranHakenhoehe">Hakenhöhe [m]</label>
+          <input type="number" id="kranHakenhoehe" step="1" value="32"></div>
+        <div class="field"><label for="kranAnschlagmittel">Anschlagmittel [kg]</label>
+          <input type="number" id="kranAnschlagmittel" step="10" value="200"></div>
+        <div class="field"><label for="kranZuschlag">Zuschlag</label>
+          <input type="number" id="kranZuschlag" step="0.05" min="1" value="1.05"></div>
+        <div class="field"><label for="kranKurve">Traglastkurve (Ausladung:Traglast)</label>
+          <input type="text" id="kranKurve" value="2.5:8 20:8 30:5.2 40:3.7 50:2.8"
+                 title="Wertepaare aus der Traglasttabelle, durch Leerzeichen getrennt"></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnKranPruefen">🏗 Kran prüfen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnKranStandort" title="Standort mit der kleinsten größten Ausladung">🎯 Standort finden</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnHuebeAusFertigteilen" title="Hübe aus der Fertigteilliste übernehmen">⬅ Hübe aus Fertigteilen</button></div>
+      </div>
+      <div class="summary-bar" id="kranKennzahlen"></div>
+      <table class="members-table" id="kranTable">
+        <thead><tr><th>Hub</th><th>x [m]</th><th>y [m]</th><th>Masse [kg]</th><th>Höhe [m]</th>
+          <th>Ausladung [m]</th><th>Traglast [t]</th><th>erforderlich [t]</th><th>Ausnutzung</th>
+          <th>Hakenhöhe [m]</th><th></th></tr></thead>
+        <tbody id="kranBody"></tbody>
+      </table>
+      <div class="empty-state" id="kranEmpty">Noch keine Hübe – aus den Fertigteilen übernehmen oder eintragen.</div>
+      <div class="layer-note" id="kranMeldungen"></div>
+
+      <h3 class="section-title">Baustelleneinrichtung</h3>
+      <p class="view-note">Flächenbedarf nach den Technischen Regeln für Arbeitsstätten: <strong>ASR A4.2</strong>
+        für Pausenräume (mindestens 6 m², 1 m² je gleichzeitig anwesendem Beschäftigten) und
+        <strong>ASR A4.1</strong> für Sanitärräume. Die Verhältniszahlen für Toiletten und Waschplätze sind
+        sichtbare Eingaben – Dauer der Baustelle, Geschlechterverhältnis und örtliche Verhältnisse entscheiden
+        im Einzelfall. <strong>Nicht enthalten</strong>: Sicherheits- und Gesundheitsschutzplan nach BaustellV,
+        Verkehrszeichenplan, Ver- und Entsorgung, Brandschutz.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="beBeschaeftigte">Beschäftigte</label>
+          <input type="number" id="beBeschaeftigte" step="1" min="0" value="24"></div>
+        <div class="field"><label for="beBauleitung">Bauleitung</label>
+          <input type="number" id="beBauleitung" step="1" min="0" value="2"></div>
+        <div class="field"><label for="beLagerflaeche">Grundfläche Lagergut [m²]</label>
+          <input type="number" id="beLagerflaeche" step="10" min="0" value="120"></div>
+        <div class="field"><label for="bePersonenToilette">Personen je Toilette</label>
+          <input type="number" id="bePersonenToilette" step="1" min="1" value="10"></div>
+        <div class="field"><label for="bePersonenWaschplatz">je Waschplatz</label>
+          <input type="number" id="bePersonenWaschplatz" step="1" min="1" value="5"></div>
+        <div class="field"><label for="beFlaecheArt">Fläche</label>
+          <select id="beFlaecheArt">
+            <option value="bauwerk">Bauwerk</option>
+            <option value="lager" selected>Lagerfläche</option>
+            <option value="container">Container</option>
+            <option value="zufahrt">Zufahrt</option>
+            <option value="mischanlage">Misch- und Bewehrungsplatz</option>
+            <option value="entsorgung">Entsorgung</option>
+          </select></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnBeFlaeche">▭ Fläche anlegen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnBeBeispiel" title="Beispiel-Baustelleneinrichtung">🏗 Beispiel</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnBePlan">🗺 BE-Plan</button></div>
+      </div>
+      <div class="summary-bar" id="beKennzahlen"></div>
+      <table class="members-table" id="beTable">
+        <thead><tr><th>Fläche</th><th>Art</th><th>x [m]</th><th>y [m]</th><th>Breite [m]</th>
+          <th>Tiefe [m]</th><th>Fläche [m²]</th><th></th></tr></thead>
+        <tbody id="beBody"></tbody>
+      </table>
+      <div class="empty-state" id="beEmpty">Noch keine Flächen – „▭ Fläche anlegen“ oder Beispiel einsetzen.</div>
+
+      <h3 class="section-title">Bauzeitenplan</h3>
+      <p class="view-note">Netzplantechnik nach <strong>DIN 69900</strong>: Vorwärtsrechnung liefert die
+        frühesten Lagen (FAZ, FEZ), Rückwärtsrechnung die spätesten (SAZ, SEZ); die Differenz ist der
+        <strong>Gesamtpuffer</strong>. Vorgänge ohne Puffer bilden den <strong>kritischen Weg</strong>.
+        Vorgänger werden als Kennbuchstaben eingetragen, ein Abstand in Tagen nach einem Pluszeichen
+        (z. B. <code>C+2</code>). <strong>Nicht enthalten</strong>: Anfang-Anfang- und Ende-Ende-Beziehungen,
+        Kalender mit Feiertagen und Betriebsferien, Ressourcen- und Kapazitätsplanung.</p>
+      <div class="cutlist-controls">
+        <div class="field"><label for="bauStart">Beginn</label>
+          <input type="date" id="bauStart" value="2026-09-07"></div>
+        <div class="field"><label for="bauVorgangName">Vorgang</label>
+          <input type="text" id="bauVorgangName" value="Neuer Vorgang"></div>
+        <div class="field"><label for="bauVorgangDauer">Dauer [AT]</label>
+          <input type="number" id="bauVorgangDauer" step="1" min="0" value="5"></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnBauVorgang">＋ Vorgang</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnBauBeispiel" title="Beispiel-Bauzeitenplan">📅 Beispiel</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn primary" id="btnBauzeit">📅 Bauzeit rechnen</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnBalkenplan">📊 Balkenplan</button></div>
+        <div class="field"><label>&nbsp;</label>
+          <button class="tool-btn" id="btnLogistikCsv">⬇ Logistik (CSV)</button></div>
+      </div>
+      <div class="summary-bar" id="bauKennzahlen"></div>
+      <table class="members-table" id="bauTable">
+        <thead><tr><th>Kennung</th><th>Vorgang</th><th>Dauer [AT]</th><th>Vorgänger</th>
+          <th>FAZ</th><th>FEZ</th><th>SAZ</th><th>SEZ</th><th>GP</th><th>FP</th>
+          <th>Beginn</th><th>Ende</th><th>kritisch</th><th></th></tr></thead>
+        <tbody id="bauBody"></tbody>
+      </table>
+      <div class="empty-state" id="bauEmpty">Noch keine Vorgänge – „＋ Vorgang“ oder Beispiel einsetzen.</div>
+      <div class="layer-note" id="bauMeldungen"></div>
+    </div>
+
     <div class="result-panel-body" id="viewBestand" hidden>
       <h3 class="section-title">Bauen im Bestand: Punktwolke aus dem 3D-Laserscan</h3>
       <p class="view-note">Gelesen werden <strong>LAS</strong> (1.0 bis 1.4, Punktformate 0 bis 8),
@@ -2579,6 +2739,8 @@
   <script src="js/terrain.js"></script>
   <script src="js/precast.js"></script>
   <script src="js/precastplan.js"></script>
+  <script src="js/site.js"></script>
+  <script src="js/siteplan.js"></script>
 <script src="js/profile-geometry.js"></script>
 <script src="js/calculator.js"></script>
 <script src="js/truss-solver.js"></script>

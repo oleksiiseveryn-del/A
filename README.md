@@ -47,6 +47,7 @@ schieben; Bedienelemente sind mindestens 44 pt hoch und Eingabefelder mindestens
 | Anschlüsse | Anschlussblatt mit Skizze und Nachweisprotokoll als SVG; Einzelnachweise als CSV |
 | Geländemodell | Geländeplan mit Höhenlinien als SVG; Höhenpunkte, Kennwerte und Aushub als CSV |
 | Fertigteile | Fertigteilblatt mit Ansicht, Querschnitt und Transportdaten als SVG; Elementliste, Fahrten, Montage und Kosten als CSV |
+| Baustellenlogistik | Baustelleneinrichtungsplan und Balkenplan als SVG; Kranprüfung, Flächenbedarf und Bauzeitenplan als CSV |
 | Papier und PDF | über *Drucken*; aus dem Blattfenster kommt das Blatt allein auf das Papier |
 
 **↗ Weitergeben** übergibt die zuletzt erzeugte Datei an das Systemmenü des Geräts
@@ -95,6 +96,8 @@ js/
   terrain.js              Geländemodell: Vermaschung, Hoehenlinien, Volumen
   precast.js              Fertigteile: Geometrie, Gewichte, Transport, Montage
   precastplan.js          Fertigteilblatt mit Ansicht, Querschnitt und Daten
+  site.js                 Baustellenlogistik: Kran, Einrichtung, Bauzeitenplan
+  siteplan.js             Baustelleneinrichtungsplan und Balkenplan
 python/                   Bewehrung und Herstellungsunterlagen (46 Prüfungen)
 desktop/                  Windows-Anwendung (Electron) – siehe desktop/README.md
 tools/
@@ -175,6 +178,30 @@ Bewehrung im Anschlagbereich, Fugen und Verbindungen, Zwischenlagerung und
 Stapelung, Toleranzen nach DIN 18203-1, Ladungssicherung nach VDI 2700.
 Die zulässigen Lasten der Ankersysteme sind Herstellerangaben aus der
 allgemeinen bauaufsichtlichen Zulassung.
+
+## Baustellenlogistik
+
+Das Register **Logistik** beantwortet die drei Fragen, die vor dem ersten Hub
+geklärt sein müssen – trägt der Kran, ist Platz da, wie lange dauert es:
+
+| Schritt | Rechenweg |
+|---|---|
+| Traglast | Traglastkurve des Herstellers als Wertepaare (Ausladung : Traglast), dazwischen linear. Erforderlich ist die Bauteilmasse zuzüglich Anschlagmittel mal Zuschlag; geprüft werden Ausladung, Ausnutzung und Hakenhöhe |
+| Hübe | aus der **Fertigteilliste** übernehmbar – die Massen stimmen, die Lage ist ein Vorschlag im Raster und in der Tabelle zu berichtigen |
+| Standort | Mittelpunkt des **kleinsten Kreises, der alle Hubpunkte umschließt** (Verfahren von Welzl). Er hält die größte nötige Ausladung so klein wie möglich – das ist das Ergebnis, keine Näherung |
+| Sozialräume | Pausenraum mindestens 6 m² und 1 m² je gleichzeitig Anwesendem (**ASR A4.2**), Toiletten und Waschplätze nach der Beschäftigtenzahl (**ASR A4.1**); die Verhältniszahlen sind sichtbare Eingaben |
+| Flächen | Lager, Container, Zufahrt, Misch- und Bewehrungsplatz, Entsorgung – maßstäblich im BE-Plan mit dem Arbeitsbereich des Krans |
+| Bauzeit | Netzplan nach **DIN 69900**: Vorwärtsrechnung FAZ/FEZ, Rückwärtsrechnung SAZ/SEZ, Gesamtpuffer GP = SAZ − FAZ, freier Puffer, kritischer Weg. Kreise in den Beziehungen werden gemeldet |
+| Kalender | Arbeitstage ohne Wochenenden, Kalenderwoche nach ISO 8601 |
+
+**Nicht geführt**: Standsicherheit und Gründung des Krans, Fundamentlasten,
+Windlasten im Betriebs- und Außerbetriebszustand, Montage und Abbau,
+Sicherheits- und Gesundheitsschutzplan nach BaustellV, Verkehrszeichenplan,
+Ver- und Entsorgung, Brandschutz auf der Baustelle. Der Bauzeitenplan kennt
+nur die Beziehung Ende-Anfang mit Abstand; Anfang-Anfang- und
+Ende-Ende-Beziehungen, Feiertage, Betriebsferien sowie Ressourcen- und
+Kapazitätsplanung fehlen. Maßgebend bleiben Traglasttabelle und
+Betriebsanleitung des Kranherstellers.
 
 ## Geländemodell
 

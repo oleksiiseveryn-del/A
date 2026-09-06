@@ -36,6 +36,12 @@
   let dgmLinien = [];
   let dgmVolumenErgebnis = null;
 
+  // Baustellenlogistik: Hübe, Einrichtungsflächen und Vorgänge gehören zum
+  // Projekt; Kranprüfung, Flächenbedarf und Netzplan sind Ergebnis daraus.
+  let logistikHuebe = [];      // [{ bezeichnung, x, y, masse (kg), hoehe }]
+  let logistikFlaechen = [];   // [{ art, name, x, y, breite, tiefe }]
+  let bauVorgaenge = [];       // [{ id, name, dauer, vorgaenger: [{ id, abstand }] }]
+
   const model = {
     nodes: [],            // [{ x, y, z }]
     members: new Map(),   // id -> { id, a, b, type, loadType, force, moment, beta, family, steelGrade }
@@ -258,6 +264,12 @@
     dgm = null;
     dgmLinien = [];
     dgmVolumenErgebnis = null;
+    logistikHuebe = [];
+    logistikFlaechen = [];
+    bauVorgaenge = [];
+    kranErgebnis = null;
+    beErgebnis = null;
+    bauErgebnis = null;
     punktwolke = null;
     scanSchnitt = null;
     scanWaende = null;
@@ -1178,6 +1190,8 @@
       const ft = model.fertigteile.get(ftBlattId);
       return blatt(`Fertigteil_${name}_${(ft && ft.bezeichnung ? ft.bezeichnung : "Element").replace(/[^\w.-]+/g, "_")}.svg`);
     }
+    if (sheetArt === "beplan") return blatt(`Baustelleneinrichtungsplan_${name}.svg`);
+    if (sheetArt === "balkenplan") return blatt(`Bauzeitenplan_${name}.svg`);
     if (sheetArt === "gelaendeplan") return blatt(`Gelaendeplan_${name}.svg`);
     if (sheetArt === "lageplan") return blatt(`Lageplan_${name}.svg`);
     if (sheetArt === "hoehenplan") return blatt(`Hoehenplan_${name}.svg`);
@@ -2904,6 +2918,7 @@
     baustelle: { button: document.getElementById("tabBaustelle"), view: document.getElementById("viewBaustelle") },
     anschluss: { button: document.getElementById("tabAnschluss"), view: document.getElementById("viewAnschluss") },
     fertigteile: { button: document.getElementById("tabFertigteile"), view: document.getElementById("viewFertigteile") },
+    logistik: { button: document.getElementById("tabLogistik"), view: document.getElementById("viewLogistik") },
     bestand: { button: document.getElementById("tabBestand"), view: document.getElementById("viewBestand") },
     gelaende: { button: document.getElementById("tabGelaende"), view: document.getElementById("viewGelaende") },
     tiefbau: { button: document.getElementById("tabTiefbau"), view: document.getElementById("viewTiefbau") },
@@ -2923,6 +2938,7 @@
     if (which === "baustelle") renderBaustelle();
     if (which === "anschluss") renderAnschluesse();
     if (which === "fertigteile") renderFertigteile();
+    if (which === "logistik") renderLogistik();
     if (which === "bestand") renderBestand();
     if (which === "gelaende") renderGelaende();
     if (which === "tiefbau") renderTiefbau();
@@ -2989,6 +3005,7 @@
     if (!TABS.baustelle.view.hidden) renderBaustelle();
     if (!TABS.anschluss.view.hidden) renderAnschluesse();
     if (!TABS.fertigteile.view.hidden) renderFertigteile();
+    if (!TABS.logistik.view.hidden) renderLogistik();
     if (!TABS.bestand.view.hidden) renderBestand();
     if (!TABS.gelaende.view.hidden) renderGelaende();
     if (!TABS.tiefbau.view.hidden) renderTiefbau();
@@ -4632,6 +4649,611 @@
     setStatus(`Elementliste, Fahrten, Montagereihenfolge und Kosten als CSV ausgegeben.`, "ok");
   });
 
+  /* ============================== Baustellenlogistik */
+
+  let kranErgebnis = null;
+  let beErgebnis = null;
+  let bauErgebnis = null;
+
+  /** Vorgaben aus den Eingabefeldern des Registers. */
+  function beVorgaben() {
+    const w = (id, ersatz) => {
+      const el = document.getElementById(id);
+      const z = el ? parseFloat(el.value) : NaN;
+      return Number.isFinite(z) ? z : ersatz;
+    };
+    return Object.assign({}, BE_VORGABEN, {
+      anschlagmittel: w("kranAnschlagmittel", 200),
+      kranZuschlag: w("kranZuschlag", 1.05),
+      personenJeToilette: Math.max(1, w("bePersonenToilette", 10)),
+      personenJeWaschplatz: Math.max(1, w("bePersonenWaschplatz", 5)),
+    });
+  }
+
+  /**
+   * Traglastkurve aus der Eingabezeile lesen.
+   *
+   * Geschrieben wird sie so, wie sie in der Traglasttabelle steht:
+   * Ausladung:Traglast, durch Leerzeichen oder Komma getrennt.
+   */
+  function kranKurveLesen(text) {
+    return String(text || "").split(/[\s,;]+/).map((teil) => {
+      const stueck = teil.split(":");
+      if (stueck.length !== 2) return null;
+      const a = parseFloat(stueck[0].replace(",", "."));
+      const l = parseFloat(stueck[1].replace(",", "."));
+      return Number.isFinite(a) && Number.isFinite(l) ? { ausladung: a, last: l } : null;
+    }).filter(Boolean).sort((a, b) => a.ausladung - b.ausladung);
+  }
+
+  function kranKurveText(kurve) {
+    return kurve.map((k) => `${k.ausladung}:${k.last}`).join(" ");
+  }
+
+  /** Der Kran, so wie er gerade eingestellt ist. */
+  function kranDaten() {
+    const w = (id, ersatz) => {
+      const z = parseFloat(document.getElementById(id).value);
+      return Number.isFinite(z) ? z : ersatz;
+    };
+    return {
+      name: "Kran 1",
+      x: w("kranX", 0), y: w("kranY", 0),
+      hakenhoehe: w("kranHakenhoehe", 0),
+      kurve: kranKurveLesen(document.getElementById("kranKurve").value),
+    };
+  }
+
+  function kranRechnen(still) {
+    if (!logistikHuebe.length) {
+      kranErgebnis = null;
+      renderLogistik();
+      if (!still) setStatus("Keine Hübe eingetragen – aus den Fertigteilen übernehmen oder von Hand anlegen.", "error");
+      return null;
+    }
+    const kran = kranDaten();
+    if (!kran.kurve.length) {
+      kranErgebnis = null;
+      renderLogistik();
+      if (!still) setStatus("Die Traglastkurve ist leer. Wertepaare als Ausladung:Traglast eintragen, z. B. 20:8 30:5.2.", "error");
+      return null;
+    }
+    kranErgebnis = kranPruefung(kran, logistikHuebe, beVorgaben());
+    renderLogistik();
+    if (!still) {
+      const e = kranErgebnis;
+      setStatus(`${e.zeilen.length} Hübe geprüft: größte Ausladung ${tbText(e.groessteAusladung, 2)} m, `
+        + `schwerster Hub ${tbText(e.schwersterHub, 2)} t, größte Ausnutzung `
+        + `${Number.isFinite(e.groessteAusnutzung) ? tbText(e.groessteAusnutzung * 100, 0) : "∞"} %. `
+        + (e.erfuellt ? "Alle Hübe sind mit diesem Kran möglich."
+          : `${e.nichtErfuellt} Hübe sind so nicht möglich.`),
+      e.erfuellt ? "ok" : "error");
+    }
+    return kranErgebnis;
+  }
+
+  function beRechnen(still) {
+    const w = (id, ersatz) => {
+      const z = parseFloat(document.getElementById(id).value);
+      return Number.isFinite(z) ? z : ersatz;
+    };
+    beErgebnis = beFlaechen({
+      beschaeftigte: Math.max(0, Math.round(w("beBeschaeftigte", 0))),
+      bauleitung: Math.max(0, Math.round(w("beBauleitung", 0))),
+      lagerGrundflaeche: Math.max(0, w("beLagerflaeche", 0)),
+    }, beVorgaben());
+    renderLogistik();
+    if (!still) {
+      const e = beErgebnis;
+      setStatus(`Flächenbedarf: ${tbText(e.gesamt, 1)} m² insgesamt für ${e.beschaeftigte} Beschäftigte `
+        + `und ${e.bauleitung} Arbeitsplätze der Bauleitung – ${e.container} Container, `
+        + `${e.toiletten} Toiletten, ${e.waschplaetze} Waschplätze. `
+        + `Angelegte Flächen: ${tbText(logistikFlaechen.reduce((s, f) => s + f.breite * f.tiefe, 0), 1)} m².`, "ok");
+    }
+    return beErgebnis;
+  }
+
+  /** Vorgängerangabe „C+2, A“ in Beziehungen zerlegen. */
+  function vorgaengerLesen(text) {
+    return String(text || "").split(/[,;]+/).map((teil) => {
+      const t = teil.trim();
+      if (!t) return null;
+      const treffer = t.match(/^([^+\-\s]+)\s*([+-]\s*\d+(?:[.,]\d+)?)?$/);
+      if (!treffer) return null;
+      return {
+        id: treffer[1].toUpperCase(),
+        abstand: treffer[2] ? parseFloat(treffer[2].replace(/\s+/g, "").replace(",", ".")) : 0,
+      };
+    }).filter(Boolean);
+  }
+
+  function vorgaengerText(liste) {
+    return (liste || []).map((p) => `${p.id}${p.abstand ? (p.abstand > 0 ? "+" : "") + p.abstand : ""}`).join(", ");
+  }
+
+  function bauStartDatum() {
+    const wert = document.getElementById("bauStart").value;
+    const d = wert ? new Date(`${wert}T00:00:00`) : new Date();
+    return Number.isFinite(d.getTime()) ? d : new Date();
+  }
+
+  function bauzeitRechnen(still) {
+    if (!bauVorgaenge.length) {
+      bauErgebnis = null;
+      renderLogistik();
+      if (!still) setStatus("Keine Vorgänge eingetragen.", "error");
+      return null;
+    }
+    bauErgebnis = bauzeitenplan(bauVorgaenge);
+    renderLogistik();
+    if (!still) {
+      const e = bauErgebnis;
+      if (e.kreis) {
+        setStatus("Die Anordnungsbeziehungen enthalten einen Kreis – ein Vorgang hängt mittelbar "
+          + "von sich selbst ab. Die Rechnung ist damit nicht belastbar.", "error");
+      } else {
+        const start = bauStartDatum();
+        setStatus(`Bauzeit: ${e.dauer} Arbeitstage, ${bauDatum(bauTag(start, 0))} bis `
+          + `${bauDatum(bauTag(start, e.dauer))}. Kritischer Weg: ${e.kritischerWeg.join(" → ")}.`, "ok");
+      }
+    }
+    return bauErgebnis;
+  }
+
+  function renderLogistik() {
+    const kennzahl = (label, wert, warnung) =>
+      `<div class="stat"><span class="label">${label}</span>`
+      + `<span class="value${warnung ? " warnwert" : ""}">${wert}</span></div>`;
+
+    /* ---- Kran */
+    document.getElementById("kranEmpty").hidden = logistikHuebe.length > 0;
+    const kBody = document.getElementById("kranBody");
+    kBody.innerHTML = "";
+    const zeilen = kranErgebnis ? kranErgebnis.zeilen : null;
+    logistikHuebe.forEach((h, i) => {
+      const z = zeilen ? zeilen[i] : null;
+      const tr = document.createElement("tr");
+      if (z && !z.erfuellt) tr.className = "durchdringung";
+      tr.innerHTML = `
+        <td><input type="text" data-hub="${i}" data-feld="bezeichnung" value="${h.bezeichnung}"></td>
+        <td><input type="number" step="0.5" data-hub="${i}" data-feld="x" value="${h.x}"></td>
+        <td><input type="number" step="0.5" data-hub="${i}" data-feld="y" value="${h.y}"></td>
+        <td><input type="number" step="10" data-hub="${i}" data-feld="masse" value="${Math.round(h.masse)}"></td>
+        <td><input type="number" step="0.5" data-hub="${i}" data-feld="hoehe" value="${h.hoehe}"></td>
+        <td>${z ? tbText(z.ausladung, 2) : ""}</td>
+        <td>${z ? (z.ausserhalb ? '<span class="cut-warning">außerhalb</span>' : tbText(z.traglast, 2)) : ""}</td>
+        <td>${z ? tbText(z.erforderlich, 2) : ""}</td>
+        <td>${z ? (Number.isFinite(z.ausnutzung)
+          ? `<strong class="${z.ausnutzung > 1 ? "warnwert" : ""}">${tbText(z.ausnutzung * 100, 0)} %</strong>`
+          : '<span class="cut-warning">–</span>') : ""}</td>
+        <td>${z ? `<span class="${z.zuHoch ? "warnwert" : ""}">${tbText(z.hakenhoehe, 2)}</span>` : ""}</td>
+        <td><button class="row-remove" data-hub-weg="${i}" title="Hub löschen">✕</button></td>`;
+      kBody.appendChild(tr);
+    });
+
+    document.getElementById("kranKennzahlen").innerHTML = kranErgebnis
+      ? kennzahl("Hübe", kranErgebnis.zeilen.length)
+        + kennzahl("Standort", `${tbText(kranErgebnis.kran.x, 2)} / ${tbText(kranErgebnis.kran.y, 2)} m`)
+        + kennzahl("größte Ausladung", `${tbText(kranErgebnis.groessteAusladung, 2)} m`,
+          kranErgebnis.groessteAusladung > kranErgebnis.maxAusladung)
+        + kennzahl("schwerster Hub", `${tbText(kranErgebnis.schwersterHub, 2)} t`)
+        + kennzahl("größte Ausnutzung", Number.isFinite(kranErgebnis.groessteAusnutzung)
+          ? `${tbText(kranErgebnis.groessteAusnutzung * 100, 0)} %` : "über der Kurve",
+        kranErgebnis.groessteAusnutzung > 1)
+        + kennzahl("nicht möglich", kranErgebnis.nichtErfuellt, kranErgebnis.nichtErfuellt > 0)
+      : (logistikHuebe.length
+        ? kennzahl("Hübe", logistikHuebe.length) + kennzahl("Prüfung", "noch nicht gerechnet", true)
+        : "");
+
+    document.getElementById("kranMeldungen").innerHTML = kranErgebnis
+      ? (kranErgebnis.meldungen.length
+        ? kranErgebnis.meldungen.slice(0, 12).map((m) =>
+          `<div class="${m.art === "fehler" ? "warnwert" : ""}">${m.art === "fehler" ? "!" : "ℹ"} ${m.text}</div>`).join("")
+          + (kranErgebnis.meldungen.length > 12 ? `<div>… und ${kranErgebnis.meldungen.length - 12} weitere.</div>` : "")
+        : "Alle Hübe liegen innerhalb der Traglastkurve. Maßgebend bleiben Traglasttabelle "
+          + "und Betriebsanleitung des Herstellers.")
+      : "";
+
+    /* ---- Baustelleneinrichtung */
+    document.getElementById("beEmpty").hidden = logistikFlaechen.length > 0;
+    const fBody = document.getElementById("beBody");
+    fBody.innerHTML = "";
+    logistikFlaechen.forEach((f, i) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `
+        <td><input type="text" data-bef="${i}" data-feld="name" value="${f.name}"></td>
+        <td><select data-bef="${i}" data-feld="art">
+          ${Object.keys(BE_ARTEN).map((k) => `<option value="${k}"${k === f.art ? " selected" : ""}>${BE_ARTEN[k].name}</option>`).join("")}
+        </select></td>
+        <td><input type="number" step="0.5" data-bef="${i}" data-feld="x" value="${f.x}"></td>
+        <td><input type="number" step="0.5" data-bef="${i}" data-feld="y" value="${f.y}"></td>
+        <td><input type="number" step="0.5" min="0.1" data-bef="${i}" data-feld="breite" value="${f.breite}"></td>
+        <td><input type="number" step="0.5" min="0.1" data-bef="${i}" data-feld="tiefe" value="${f.tiefe}"></td>
+        <td><strong>${tbText(f.breite * f.tiefe, 1)}</strong></td>
+        <td><button class="row-remove" data-be-weg="${i}" title="Fläche löschen">✕</button></td>`;
+      fBody.appendChild(tr);
+    });
+
+    const angelegt = logistikFlaechen.reduce((s, f) => s + f.breite * f.tiefe, 0);
+    document.getElementById("beKennzahlen").innerHTML = beErgebnis
+      ? kennzahl("Beschäftigte", beErgebnis.beschaeftigte)
+        + kennzahl("Pausenraum", `${tbText(beErgebnis.zeilen[0].flaeche, 1)} m²`)
+        + kennzahl("Umkleide", `${tbText(beErgebnis.zeilen[1].flaeche, 1)} m²`)
+        + kennzahl("Büro", `${tbText(beErgebnis.zeilen[2].flaeche, 1)} m²`)
+        + kennzahl("Lagerfläche", `${tbText(beErgebnis.zeilen[3].flaeche, 1)} m²`)
+        + kennzahl("Bedarf gesamt", `${tbText(beErgebnis.gesamt, 1)} m²`)
+        + kennzahl("Container", beErgebnis.container)
+        + kennzahl("Toiletten", beErgebnis.toiletten)
+        + kennzahl("Waschplätze", beErgebnis.waschplaetze)
+        + kennzahl("angelegte Flächen", `${tbText(angelegt, 1)} m²`, angelegt < beErgebnis.gesamt)
+      : (logistikFlaechen.length
+        ? kennzahl("Flächen", logistikFlaechen.length) + kennzahl("angelegt", `${tbText(angelegt, 1)} m²`)
+          + kennzahl("Bedarf", "noch nicht gerechnet", true)
+        : "");
+
+    /* ---- Bauzeitenplan */
+    document.getElementById("bauEmpty").hidden = bauVorgaenge.length > 0;
+    const bBody = document.getElementById("bauBody");
+    bBody.innerHTML = "";
+    const start = bauStartDatum();
+    const gerechnet = new Map();
+    if (bauErgebnis) bauErgebnis.vorgaenge.forEach((v) => gerechnet.set(v.id, v));
+    bauVorgaenge.forEach((v, i) => {
+      const g = gerechnet.get(v.id);
+      const tr = document.createElement("tr");
+      if (g && g.kritisch) tr.className = "durchdringung";
+      tr.innerHTML = `
+        <td><input type="text" data-bv="${i}" data-feld="id" value="${v.id}" size="3"></td>
+        <td><input type="text" data-bv="${i}" data-feld="name" value="${v.name}"></td>
+        <td><input type="number" step="1" min="0" data-bv="${i}" data-feld="dauer" value="${v.dauer}"></td>
+        <td><input type="text" data-bv="${i}" data-feld="vorgaenger" value="${vorgaengerText(v.vorgaenger)}"
+             title="Kennbuchstaben der Vorgänger, Abstand in Tagen nach einem Pluszeichen (C+2)"></td>
+        <td>${g ? g.faz : ""}</td>
+        <td>${g ? g.fez : ""}</td>
+        <td>${g ? g.saz : ""}</td>
+        <td>${g ? g.sez : ""}</td>
+        <td>${g ? `<strong>${g.gp}</strong>` : ""}</td>
+        <td>${g ? (Number.isFinite(g.fp) ? g.fp : "–") : ""}</td>
+        <td>${g ? bauDatum(bauTag(start, g.faz)) : ""}</td>
+        <td>${g ? bauDatum(bauTag(start, g.fez)) : ""}</td>
+        <td>${g ? (g.kritisch ? '<span class="cut-warning">kritisch</span>' : "") : ""}</td>
+        <td><button class="row-remove" data-bv-weg="${i}" title="Vorgang löschen">✕</button></td>`;
+      bBody.appendChild(tr);
+    });
+
+    document.getElementById("bauKennzahlen").innerHTML = bauErgebnis
+      ? kennzahl("Vorgänge", bauErgebnis.vorgaenge.length)
+        + kennzahl("Bauzeit", `${bauErgebnis.dauer} Arbeitstage`)
+        + kennzahl("Beginn", bauDatum(bauTag(start, 0)))
+        + kennzahl("Ende", bauDatum(bauTag(start, bauErgebnis.dauer)))
+        + kennzahl("kritischer Weg", bauErgebnis.kritischerWeg.join(" → ") || "–")
+        + kennzahl("Vorgänge mit Puffer",
+          bauErgebnis.vorgaenge.filter((v) => v.gp > 0).length)
+      : (bauVorgaenge.length
+        ? kennzahl("Vorgänge", bauVorgaenge.length) + kennzahl("Bauzeit", "noch nicht gerechnet", true)
+        : "");
+
+    const fehlende = [];
+    const bekannt = new Set(bauVorgaenge.map((v) => v.id));
+    bauVorgaenge.forEach((v) => (v.vorgaenger || []).forEach((p) => {
+      if (!bekannt.has(p.id) && fehlende.indexOf(p.id) < 0) fehlende.push(p.id);
+    }));
+    const bauMeldungen = [];
+    if (bauErgebnis) bauErgebnis.meldungen.forEach((m) => bauMeldungen.push(m));
+    if (fehlende.length) {
+      bauMeldungen.push({ art: "warnung", text: `Unbekannte Vorgänger: ${fehlende.join(", ")} – `
+        + "diese Beziehungen bleiben in der Rechnung unbeachtet." });
+    }
+    document.getElementById("bauMeldungen").innerHTML = bauMeldungen.length
+      ? bauMeldungen.map((m) => `<div class="${m.art === "fehler" ? "warnwert" : ""}">`
+        + `${m.art === "fehler" ? "!" : "ℹ"} ${m.text}</div>`).join("")
+      : (bauErgebnis ? "Vorwärts- und Rückwärtsrechnung nach DIN 69900 durchgerechnet; "
+        + "Wochenenden sind übersprungen, Feiertage und Betriebsferien nicht berücksichtigt." : "");
+  }
+
+  /* ---- Bedienung Baustellenlogistik */
+
+  document.getElementById("viewLogistik").addEventListener("change", (e) => {
+    const ziel = e.target;
+    const feld = ziel.dataset.feld;
+    if (ziel.dataset.hub !== undefined) {
+      const h = logistikHuebe[parseInt(ziel.dataset.hub, 10)];
+      if (!h) return;
+      if (feld === "bezeichnung") h.bezeichnung = ziel.value;
+      else h[feld] = parseFloat(ziel.value) || 0;
+      if (kranErgebnis) kranRechnen(true); else renderLogistik();
+      return;
+    }
+    if (ziel.dataset.bef !== undefined) {
+      const f = logistikFlaechen[parseInt(ziel.dataset.bef, 10)];
+      if (!f) return;
+      if (feld === "name" || feld === "art") f[feld] = ziel.value;
+      else f[feld] = parseFloat(ziel.value) || 0;
+      renderLogistik();
+      return;
+    }
+    if (ziel.dataset.bv !== undefined) {
+      const v = bauVorgaenge[parseInt(ziel.dataset.bv, 10)];
+      if (!v) return;
+      if (feld === "id") v.id = (ziel.value || v.id).trim().toUpperCase();
+      else if (feld === "name") v.name = ziel.value;
+      else if (feld === "dauer") v.dauer = Math.max(0, parseInt(ziel.value, 10) || 0);
+      else if (feld === "vorgaenger") v.vorgaenger = vorgaengerLesen(ziel.value);
+      if (bauErgebnis) bauzeitRechnen(true); else renderLogistik();
+    }
+  });
+
+  document.getElementById("viewLogistik").addEventListener("click", (e) => {
+    const hubWeg = e.target.closest("[data-hub-weg]");
+    if (hubWeg) {
+      logistikHuebe.splice(parseInt(hubWeg.dataset.hubWeg, 10), 1);
+      if (kranErgebnis) kranRechnen(true); else renderLogistik();
+      return;
+    }
+    const beWeg = e.target.closest("[data-be-weg]");
+    if (beWeg) {
+      logistikFlaechen.splice(parseInt(beWeg.dataset.beWeg, 10), 1);
+      renderLogistik();
+      return;
+    }
+    const bvWeg = e.target.closest("[data-bv-weg]");
+    if (bvWeg) {
+      bauVorgaenge.splice(parseInt(bvWeg.dataset.bvWeg, 10), 1);
+      if (bauErgebnis) bauzeitRechnen(true); else renderLogistik();
+    }
+  });
+
+  document.getElementById("btnKranPruefen").addEventListener("click", () => kranRechnen());
+
+  document.getElementById("btnKranStandort").addEventListener("click", () => {
+    if (!logistikHuebe.length) { setStatus("Zuerst Hübe eintragen.", "error"); return; }
+    const s = kranStandort(logistikHuebe);
+    document.getElementById("kranX").value = s.x.toFixed(2);
+    document.getElementById("kranY").value = s.y.toFixed(2);
+    kranRechnen(true);
+    setStatus(`Günstigster Standort ${tbText(s.x, 2)} / ${tbText(s.y, 2)} m: Damit ist die größte `
+      + `nötige Ausladung ${tbText(s.ausladung, 2)} m – kleiner geht es an keiner anderen Stelle. `
+      + `Maßgebend sind ${s.massgebend.map((h) => h.bezeichnung).join(", ")}. `
+      + "Ob der Standort baubar ist – Gründung, Zufahrt, Leitungen, Nachbargrundstück – "
+      + "entscheidet die Baustelleneinrichtung, nicht die Rechnung.", "ok");
+  });
+
+  /**
+   * Hübe aus der Fertigteilliste übernehmen.
+   *
+   * Jede Position wird ein Hub mit ihrer Transportmasse; die Lage wird
+   * reihenweise über der Baustelle verteilt, weil die Fertigteilliste
+   * keine Einbaukoordinaten führt. Die Lage ist danach in der Tabelle
+   * zu berichtigen – die Massen stimmen, die Punkte sind ein Vorschlag.
+   */
+  document.getElementById("btnHuebeAusFertigteilen").addEventListener("click", () => {
+    const teile = ftListe();
+    if (!teile.length) { setStatus("Die Fertigteilliste ist leer.", "error"); return; }
+    logistikHuebe = [];
+    let i = 0;
+    teile.forEach((t) => {
+      const m = ftGeometrie(t);
+      logistikHuebe.push({
+        bezeichnung: t.bezeichnung,
+        x: 6 + (i % 6) * 8, y: 4 + Math.floor(i / 6) * 8,
+        masse: Math.round(m.masseTransport),
+        // Erste Annahme fuer die Einbauhoehe: die Oberkante eines am
+        // Boden stehenden Teils liegt in seiner eigenen Hoehe
+        hoehe: Math.round((m.hoehe || 0) * 10) / 10,
+      });
+      i += 1;
+    });
+    kranRechnen(true);
+    setStatus(`${logistikHuebe.length} Hübe aus der Fertigteilliste übernommen; schwerstes Teil `
+      + `${tbText(Math.max(...logistikHuebe.map((h) => h.masse)) / 1000, 2)} t. `
+      + "Die Lage ist ein Vorschlag im Raster und in der Tabelle zu berichtigen – "
+      + "die Fertigteilliste führt keine Einbaukoordinaten.", "ok");
+  });
+
+  document.getElementById("btnBeFlaeche").addEventListener("click", () => {
+    const art = document.getElementById("beFlaecheArt").value;
+    const nr = logistikFlaechen.filter((f) => f.art === art).length + 1;
+    logistikFlaechen.push({
+      art, name: `${BE_ARTEN[art] ? BE_ARTEN[art].name : "Fläche"} ${nr}`,
+      x: 0, y: 0, breite: 10, tiefe: 6,
+    });
+    renderLogistik();
+    setStatus(`${BE_ARTEN[art] ? BE_ARTEN[art].name : "Fläche"} angelegt: 10,00 × 6,00 m bei 0 / 0. `
+      + "Lage und Maße in der Zeile eintragen.", "ok");
+  });
+
+  document.getElementById("btnBeBeispiel").addEventListener("click", () => {
+    // Beispiel: Hallenbaustelle 40 × 24 m mit Kran, Lager, Containern und Zufahrt
+    logistikFlaechen = [
+      { art: "bauwerk", name: "Halle", x: 10, y: 6, breite: 40, tiefe: 24 },
+      { art: "lager", name: "Lager Fertigteile", x: 10, y: 32, breite: 24, tiefe: 8 },
+      { art: "lager", name: "Lager Bewehrung", x: 36, y: 32, breite: 14, tiefe: 8 },
+      { art: "container", name: "Container Sozialräume", x: 54, y: 22, breite: 12, tiefe: 6 },
+      { art: "container", name: "Container Bauleitung", x: 54, y: 30, breite: 6, tiefe: 3 },
+      { art: "zufahrt", name: "Zufahrt und Wendeplatz", x: 54, y: 4, breite: 12, tiefe: 16 },
+      { art: "mischanlage", name: "Bewehrungs- und Mischplatz", x: 10, y: 42, breite: 16, tiefe: 6 },
+      { art: "entsorgung", name: "Entsorgung", x: 30, y: 42, breite: 8, tiefe: 6 },
+    ];
+    beRechnen(true);
+    renderLogistik();
+    setStatus("Beispiel-Baustelleneinrichtung eingesetzt: Halle 40 × 24 m, Lagerflächen, Container, "
+      + "Zufahrt mit Wendeplatz, Bewehrungs- und Mischplatz sowie Entsorgung. "
+      + "Zum Prüfen und Überschreiben gedacht.", "ok");
+  });
+
+  document.getElementById("btnBePlan").addEventListener("click", () => {
+    if (!logistikFlaechen.length) { setStatus("Zuerst Einrichtungsflächen anlegen.", "error"); return; }
+    const e = beErgebnis || beRechnen(true);
+    const kran = kranDaten();
+    const kurve = kran.kurve;
+    const krane = kurve.length
+      ? [{ name: kran.name, x: kran.x, y: kran.y, hakenhoehe: kran.hakenhoehe,
+        ausladung: kurve[kurve.length - 1].ausladung }]
+      : [];
+    sheetArt = "beplan";
+    document.getElementById("sheetBody").innerHTML = bePlanSVG({
+      flaechen: logistikFlaechen, krane, projekt: projektKopf(),
+      kranPruefung: kranErgebnis, flaechenbedarf: e,
+    });
+    document.getElementById("sheetTitle").textContent = "Baustelleneinrichtungsplan";
+    document.getElementById("sheetCounter").textContent =
+      `${logistikFlaechen.length} Fläche${logistikFlaechen.length === 1 ? "" : "n"} · `
+      + `${tbText(logistikFlaechen.reduce((s, f) => s + f.breite * f.tiefe, 0), 0)} m²`
+      + (krane.length ? ` · Kran mit ${tbText(krane[0].ausladung, 1)} m Ausladung` : " · ohne Kran");
+    document.getElementById("sheetOverlay").hidden = false;
+  });
+
+  /** Kennung des nächsten Vorgangs: A, B, … Z, AA, AB, … */
+  function naechsteVorgangsKennung() {
+    const belegt = new Set(bauVorgaenge.map((v) => v.id));
+    for (let i = 0; i < 700; i++) {
+      const kennung = i < 26
+        ? String.fromCharCode(65 + i)
+        : String.fromCharCode(65 + Math.floor(i / 26) - 1) + String.fromCharCode(65 + (i % 26));
+      if (!belegt.has(kennung)) return kennung;
+    }
+    return `V${bauVorgaenge.length + 1}`;
+  }
+
+  document.getElementById("btnBauVorgang").addEventListener("click", () => {
+    const name = document.getElementById("bauVorgangName").value || "Vorgang";
+    const dauer = Math.max(0, parseInt(document.getElementById("bauVorgangDauer").value, 10) || 0);
+    const vorher = bauVorgaenge.length ? [{ id: bauVorgaenge[bauVorgaenge.length - 1].id, abstand: 0 }] : [];
+    const v = { id: naechsteVorgangsKennung(), name, dauer, vorgaenger: vorher };
+    bauVorgaenge.push(v);
+    if (bauErgebnis) bauzeitRechnen(true); else renderLogistik();
+    setStatus(`Vorgang ${v.id} „${v.name}“ mit ${v.dauer} Arbeitstagen angelegt`
+      + (vorher.length ? ` im Anschluss an ${vorher[0].id}.` : ".")
+      + " Vorgänger und Abstände in der Zeile eintragen.", "ok");
+  });
+
+  document.getElementById("btnBauBeispiel").addEventListener("click", () => {
+    // Beispiel: Hallenbau in Fertigteilen von der Einrichtung bis zur Abnahme
+    bauVorgaenge = [
+      { id: "A", name: "Baustelle einrichten", dauer: 5, vorgaenger: [] },
+      { id: "B", name: "Baugrube und Aushub", dauer: 8, vorgaenger: [{ id: "A", abstand: 0 }] },
+      { id: "C", name: "Köcherfundamente", dauer: 10, vorgaenger: [{ id: "B", abstand: 0 }] },
+      { id: "D", name: "Ver- und Entsorgungsleitungen", dauer: 6, vorgaenger: [{ id: "B", abstand: 0 }] },
+      { id: "E", name: "Fertigteile Stützen und Binder", dauer: 12, vorgaenger: [{ id: "C", abstand: 3 }] },
+      { id: "F", name: "Dachplatten und Dachabdichtung", dauer: 10, vorgaenger: [{ id: "E", abstand: 0 }] },
+      { id: "G", name: "Sandwichwände montieren", dauer: 8, vorgaenger: [{ id: "E", abstand: 0 }] },
+      { id: "H", name: "Bodenplatte", dauer: 7, vorgaenger: [{ id: "D", abstand: 0 }, { id: "G", abstand: 0 }] },
+      { id: "J", name: "Tore, Fenster, Ausbau", dauer: 12, vorgaenger: [{ id: "F", abstand: 0 }, { id: "H", abstand: 0 }] },
+      { id: "K", name: "Außenanlagen", dauer: 8, vorgaenger: [{ id: "H", abstand: 0 }] },
+      { id: "L", name: "Abnahme und Räumung", dauer: 3, vorgaenger: [{ id: "J", abstand: 0 }, { id: "K", abstand: 0 }] },
+    ];
+    bauzeitRechnen();
+  });
+
+  document.getElementById("btnBauzeit").addEventListener("click", () => bauzeitRechnen());
+
+  document.getElementById("btnBalkenplan").addEventListener("click", () => {
+    const e = bauErgebnis || bauzeitRechnen();
+    if (!e) return;
+    sheetArt = "balkenplan";
+    document.getElementById("sheetBody").innerHTML = balkenplanSVG({
+      plan: e, start: bauStartDatum(), projekt: projektKopf(),
+    });
+    document.getElementById("sheetTitle").textContent = "Bauzeitenplan";
+    document.getElementById("sheetCounter").textContent =
+      `${e.vorgaenge.length} Vorgänge · ${e.dauer} Arbeitstage · kritischer Weg ${e.kritischerWeg.join(" → ")}`;
+    document.getElementById("sheetOverlay").hidden = false;
+  });
+
+  ["kranX", "kranY", "kranHakenhoehe", "kranAnschlagmittel", "kranZuschlag", "kranKurve"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", () => { if (kranErgebnis) kranRechnen(true); });
+  });
+  ["beBeschaeftigte", "beBauleitung", "beLagerflaeche", "bePersonenToilette", "bePersonenWaschplatz"].forEach((id) => {
+    document.getElementById(id).addEventListener("change", () => { if (beErgebnis) beRechnen(true); });
+  });
+  document.getElementById("bauStart").addEventListener("change", () => renderLogistik());
+
+  document.getElementById("btnLogistikCsv").addEventListener("click", () => {
+    if (!logistikHuebe.length && !logistikFlaechen.length && !bauVorgaenge.length) {
+      setStatus("Es ist nichts zu schreiben – Hübe, Flächen oder Vorgänge anlegen.", "error");
+      return;
+    }
+    const rows = [["Baustellenlogistik – " + (document.getElementById("projectName").value || "Projekt")]];
+    const v = beVorgaben();
+
+    if (logistikHuebe.length) {
+      const e = kranErgebnis || kranRechnen(true);
+      const kran = kranDaten();
+      rows.push([]);
+      rows.push(["Kran", `Standort ${kran.x} / ${kran.y} m`, `Hakenhoehe ${kran.hakenhoehe} m`,
+        `Anschlagmittel ${v.anschlagmittel} kg`, `Zuschlag ${v.kranZuschlag}`]);
+      rows.push(["Traglastkurve (Ausladung m : Traglast t)", kranKurveText(kran.kurve),
+        "Herstellerangabe, dazwischen linear"]);
+      rows.push(["Hub", "x [m]", "y [m]", "Masse [kg]", "Hoehe [m]", "Ausladung [m]",
+        "Traglast [t]", "erforderlich [t]", "Ausnutzung [%]", "Hakenhoehe noetig [m]", "Beurteilung"]);
+      if (e) {
+        e.zeilen.forEach((z) => {
+          rows.push([z.hub.bezeichnung, z.hub.x, z.hub.y, Math.round(z.hub.masse), z.hub.hoehe,
+            z.ausladung.toFixed(2), z.ausserhalb ? "ausserhalb" : z.traglast.toFixed(2),
+            z.erforderlich.toFixed(2),
+            Number.isFinite(z.ausnutzung) ? (z.ausnutzung * 100).toFixed(0) : "",
+            z.hakenhoehe.toFixed(2), z.erfuellt ? "moeglich" : "nicht moeglich"]);
+        });
+        rows.push(["Groesste Ausladung", e.groessteAusladung.toFixed(2), "Schwerster Hub",
+          e.schwersterHub.toFixed(2), "Nicht moeglich", e.nichtErfuellt]);
+        e.meldungen.forEach((m) => rows.push(["Hinweis", m.text]));
+      } else {
+        logistikHuebe.forEach((h) => rows.push([h.bezeichnung, h.x, h.y, Math.round(h.masse), h.hoehe]));
+      }
+      const s = kranStandort(logistikHuebe);
+      rows.push(["Guenstigster Standort (kleinster umschliessender Kreis)",
+        s.x.toFixed(2), s.y.toFixed(2), `groesste noetige Ausladung ${s.ausladung.toFixed(2)} m`,
+        `massgebend ${s.massgebend.map((h) => h.bezeichnung).join(", ")}`]);
+    }
+
+    const be = beErgebnis || beRechnen(true);
+    rows.push([]);
+    rows.push(["Baustelleneinrichtung", `${be.beschaeftigte} Beschaeftigte`,
+      `${be.bauleitung} Arbeitsplaetze Bauleitung`]);
+    rows.push(["Bedarf", "Flaeche [m2]", "Grundlage"]);
+    be.zeilen.forEach((z) => rows.push([z.art, z.flaeche.toFixed(1), z.grundlage]));
+    rows.push(["Summe", be.gesamt.toFixed(1)]);
+    rows.push(["Container", be.container, "Toiletten", be.toiletten, "Waschplaetze", be.waschplaetze]);
+    be.hinweise.forEach((h) => rows.push(["Hinweis", h]));
+    if (logistikFlaechen.length) {
+      rows.push([]);
+      rows.push(["Einrichtungsflaechen"]);
+      rows.push(["Flaeche", "Art", "x [m]", "y [m]", "Breite [m]", "Tiefe [m]", "Flaeche [m2]"]);
+      logistikFlaechen.forEach((f) => rows.push([f.name, (BE_ARTEN[f.art] || {}).name || f.art,
+        f.x, f.y, f.breite, f.tiefe, (f.breite * f.tiefe).toFixed(1)]));
+      rows.push(["Summe", "", "", "", "", "",
+        logistikFlaechen.reduce((s2, f) => s2 + f.breite * f.tiefe, 0).toFixed(1)]);
+    }
+
+    if (bauVorgaenge.length) {
+      const p = bauErgebnis || bauzeitRechnen(true);
+      const start = bauStartDatum();
+      rows.push([]);
+      rows.push(["Bauzeitenplan nach DIN 69900", `Beginn ${bauDatum(bauTag(start, 0))}`,
+        p ? `Gesamtdauer ${p.dauer} Arbeitstage` : ""]);
+      rows.push(["Kennung", "Vorgang", "Dauer [AT]", "Vorgaenger", "FAZ", "FEZ", "SAZ", "SEZ",
+        "GP", "FP", "Beginn", "Ende", "kritisch"]);
+      (p ? p.vorgaenge : bauVorgaenge).forEach((x) => {
+        rows.push([x.id, x.name, x.dauer, vorgaengerText(x.vorgaenger),
+          p ? x.faz : "", p ? x.fez : "", p ? x.saz : "", p ? x.sez : "",
+          p ? x.gp : "", p && Number.isFinite(x.fp) ? x.fp : "",
+          p ? bauDatum(bauTag(start, x.faz)) : "", p ? bauDatum(bauTag(start, x.fez)) : "",
+          p && x.kritisch ? "ja" : ""]);
+      });
+      if (p) {
+        rows.push(["Kritischer Weg", p.kritischerWeg.join(" > ")]);
+        p.meldungen.forEach((m) => rows.push(["Hinweis", m.text]));
+      }
+    }
+    rows.push([]);
+    rows.push(["Nicht gefuehrt: Standsicherheit und Gruendung des Krans, Fundamentlasten, Windlasten, "
+      + "Montage und Abbau, SiGe-Plan nach BaustellV, Verkehrszeichenplan, Ver- und Entsorgung, Brandschutz."]);
+
+    const name = (document.getElementById("projectName").value || "Projekt").replace(/\s+/g, "_");
+    saveFile(`Baustellenlogistik_${name}.csv`, "﻿" + zuCsv(rows), "text/csv;charset=utf-8;");
+    setStatus("Kranprüfung, Flächenbedarf, Einrichtungsflächen und Bauzeitenplan als CSV ausgegeben.", "ok");
+  });
+
   /* ============================== Geländemodell (DGM) */
 
   function dgmZahlFeld(id, ersatz) {
@@ -5804,6 +6426,21 @@
       achsraster: rasterVorgabe(),
       // Höhenpunkte des Geländemodells; das Netz wird beim Öffnen neu gebildet
       hoehenpunkte: dgmPunkte,
+      // Baustellenlogistik: Eingaben gehören zum Projekt, gerechnet wird neu
+      logistik: {
+        huebe: logistikHuebe, flaechen: logistikFlaechen, vorgaenge: bauVorgaenge,
+        kran: {
+          x: field("kranX"), y: field("kranY"), hakenhoehe: field("kranHakenhoehe"),
+          anschlagmittel: field("kranAnschlagmittel"), zuschlag: field("kranZuschlag"),
+          kurve: field("kranKurve"),
+        },
+        einrichtung: {
+          beschaeftigte: field("beBeschaeftigte"), bauleitung: field("beBauleitung"),
+          lagerflaeche: field("beLagerflaeche"), personenJeToilette: field("bePersonenToilette"),
+          personenJeWaschplatz: field("bePersonenWaschplatz"),
+        },
+        beginn: field("bauStart"),
+      },
       // Tiefbau: Achse, Gradiente und Gelände gehören zum Projekt.
       // Die Punktwolke des Bestands nicht – sie wäre zu groß.
       tiefbau: {
@@ -5877,6 +6514,13 @@
     tiefbauErgebnis = null;
     dgmPunkte = (data.hoehenpunkte || []).slice();
     dgm = null; dgmLinien = []; dgmVolumenErgebnis = null;
+    // Baustellenlogistik
+    const lg = data.logistik || {};
+    logistikHuebe = (lg.huebe || []).map((h) => Object.assign({}, h));
+    logistikFlaechen = (lg.flaechen || []).map((f) => Object.assign({}, f));
+    bauVorgaenge = (lg.vorgaenge || []).map((v) => Object.assign({}, v,
+      { vorgaenger: (v.vorgaenger || []).map((x) => Object.assign({}, x)) }));
+    kranErgebnis = null; beErgebnis = null; bauErgebnis = null;
     Object.keys(materialPreise).forEach((k) => delete materialPreise[k]);
     Object.assign(materialPreise, data.baustoffpreise || {});
 
@@ -5932,6 +6576,24 @@
         set("transportKm", t.boden.transportKm, "12");
         set("transportPreis", t.boden.transportPreis, "0.35");
       }
+    }
+    if (data.logistik) {
+      const lgd = data.logistik;
+      if (lgd.kran) {
+        set("kranX", lgd.kran.x, "30"); set("kranY", lgd.kran.y, "19");
+        set("kranHakenhoehe", lgd.kran.hakenhoehe, "32");
+        set("kranAnschlagmittel", lgd.kran.anschlagmittel, "200");
+        set("kranZuschlag", lgd.kran.zuschlag, "1.05");
+        set("kranKurve", lgd.kran.kurve, "2.5:8 20:8 30:5.2 40:3.7 50:2.8");
+      }
+      if (lgd.einrichtung) {
+        set("beBeschaeftigte", lgd.einrichtung.beschaeftigte, "24");
+        set("beBauleitung", lgd.einrichtung.bauleitung, "2");
+        set("beLagerflaeche", lgd.einrichtung.lagerflaeche, "120");
+        set("bePersonenToilette", lgd.einrichtung.personenJeToilette, "10");
+        set("bePersonenWaschplatz", lgd.einrichtung.personenJeWaschplatz, "5");
+      }
+      set("bauStart", lgd.beginn, "");
     }
     if (data.betonbau) {
       set("arbeitsraum", data.betonbau.arbeitsraum, "0.50");
