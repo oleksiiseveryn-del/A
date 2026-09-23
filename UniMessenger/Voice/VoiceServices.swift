@@ -145,14 +145,15 @@ final class SpeechReader {
 
     private(set) var isSpeaking = false
     @ObservationIgnored private let synthesizer = AVSpeechSynthesizer()
-    @ObservationIgnored private let delegate = Delegate()
+    @ObservationIgnored private var delegate: Delegate?
     @ObservationIgnored private var pending = 0
 
     init() {
-        synthesizer.delegate = delegate
-        delegate.onUtteranceDone = { [weak self] in
+        let delegate = Delegate { [weak self] in
             Task { @MainActor in self?.utteranceDone() }
         }
+        self.delegate = delegate
+        synthesizer.delegate = delegate
     }
 
     func speak(_ parts: [Part]) {
@@ -197,10 +198,14 @@ final class SpeechReader {
     }
 
     private final class Delegate: NSObject, AVSpeechSynthesizerDelegate {
-        var onUtteranceDone: (() -> Void)?
+        let onUtteranceDone: @Sendable () -> Void
+
+        init(onUtteranceDone: @escaping @Sendable () -> Void) {
+            self.onUtteranceDone = onUtteranceDone
+        }
 
         func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-            onUtteranceDone?()
+            onUtteranceDone()
         }
     }
 }
