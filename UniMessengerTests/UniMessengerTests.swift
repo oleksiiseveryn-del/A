@@ -120,4 +120,30 @@ final class UniMessengerTests: XCTestCase {
         XCTAssertTrue(texts.contains("Hr. Petersen schickt ein Foto."))
         XCTAssertFalse(texts.contains("Alles erledigt"))
     }
+
+    func testMeetingLinksAreDetected() {
+        UserDefaults.standard.set("meet.ffmuc.net", forKey: "callServer")
+        let own = CallSettings.meetingLink(in: "📹 Videoanruf – jetzt beitreten:\nhttps://meet.ffmuc.net/OS-HSD-abc123\nEinfach antippen")
+        XCTAssertEqual(own?.url.absoluteString, "https://meet.ffmuc.net/OS-HSD-abc123")
+        XCTAssertEqual(own?.inApp, true)
+        XCTAssertEqual(CallSettings.meetingLink(in: "Teams: https://teams.microsoft.com/l/meetup-join/xyz")?.inApp, false)
+        XCTAssertNil(CallSettings.meetingLink(in: "Plan unter https://example.com/plan.pdf"))
+        XCTAssertTrue(CallSettings.newRoomURL().absoluteString.hasPrefix("https://meet.ffmuc.net/OS-HSD-"))
+    }
+
+    func testJoinURLCarriesCallConfiguration() {
+        let url = CallSettings.joinURL(room: URL(string: "https://meet.ffmuc.net/OS-HSD-abc")!,
+                                       displayName: "Oleksii Severyn (HSD Hamburg GmbH)", subject: "Größe · Prüfung", audioOnly: true)
+        let fragment = url.fragment(percentEncoded: false) ?? ""
+        XCTAssertEqual(url.path, "/OS-HSD-abc")
+        XCTAssertTrue(fragment.contains("config.prejoinConfig.enabled=false"))
+        XCTAssertTrue(fragment.contains("config.startWithVideoMuted=true"))
+        XCTAssertTrue(fragment.contains("config.p2p.enabled=true"))
+        XCTAssertTrue(fragment.contains("userInfo.displayName=\"Oleksii Severyn (HSD Hamburg GmbH)\""))
+    }
+
+    func testCallProtocolDecodesProtocolKey() throws {
+        let json = #"{"protocol":"Gesprächsnotiz","summary":"s","tasks":[],"appointments":[]}"#
+        XCTAssertEqual(try JSONDecoder().decode(CallProtocol.self, from: Data(json.utf8)).text, "Gesprächsnotiz")
+    }
 }

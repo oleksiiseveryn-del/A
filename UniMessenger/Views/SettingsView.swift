@@ -4,6 +4,9 @@ struct SettingsView: View {
     @Environment(MessageHub.self) private var hub
     @Environment(SpeechReader.self) private var reader
     @AppStorage("speechLang") private var speechLanguage = "de-DE"
+    @AppStorage("callServer") private var callServer = "meet.ffmuc.net"
+    @AppStorage("callServerCustom") private var callServerCustom = ""
+    @AppStorage("callQuality") private var callQuality = 720
     @AppStorage("speechRate") private var speechRate = 1.0
     @State private var apiKey = ""
     @State private var hasKey = KeychainStore.get(KeychainStore.Key.anthropicAPIKey) != nil
@@ -38,6 +41,23 @@ struct SettingsView: View {
                     Text("KI-Assistent (Claude)")
                 } footer: {
                     Text("Den Schlüssel erhalten Sie unter console.anthropic.com. Chat-Inhalte werden nur für Vorschläge an die Claude API gesendet; nichts wird automatisch verschickt.")
+                }
+
+                Section {
+                    Picker("Server", selection: $callServer) {
+                        ForEach(CallSettings.servers, id: \.id) { Text($0.name).tag($0.id) }
+                    }
+                    if callServer == "custom" {
+                        TextField("z. B. video.hsd-hamburg.de", text: $callServerCustom)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                    }
+                    Picker("Qualität", selection: $callQuality) {
+                        ForEach(CallSettings.qualities, id: \.value) { Text($0.name).tag($0.value) }
+                    }
+                } header: {
+                    Text("Videoanrufe")
+                } footer: {
+                    Text("Videoanrufe laufen über Jitsi Meet (WebRTC, verschlüsselt). Bei zwei Personen direkt von Gerät zu Gerät; die Qualität passt sich automatisch an die Verbindung an. Für den Firmeneinsatz empfohlen: eigener Jitsi-Server.")
                 }
 
                 Section {

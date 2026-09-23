@@ -244,3 +244,20 @@ body.in-chat #tabbar { display: none; }
   display: flex; gap: 12px; align-items: center; background: #222e; color: #fff; padding: 8px 8px 8px 16px; border-radius: 99px; font-size: 14px; }
 #speak-bar button { background: var(--accent); color: #fff; border-radius: 99px; padding: 6px 12px; font-weight: 700; }
 body.in-chat #speak-bar { bottom: calc(env(safe-area-inset-bottom) + 70px); }
+
+/* Video calls */
+body.in-chat .header .icon-btn { min-width: 34px; padding: 0 4px; }
+.join-btn { display: block; margin: 6px 0 2px; padding: 8px 14px; border-radius: 99px; background: #2e9e4f; color: #fff; font-weight: 700; font-size: 14px; }
+.bubble.out .join-btn { background: #fff; color: #2e9e4f; }
+.bubble a { color: inherit; text-decoration: underline; word-break: break-all; }
+#call { position: fixed; inset: 0; z-index: 40; background: #000; display: flex; flex-direction: column; }
+.call-bar { display: flex; align-items: center; gap: 8px; padding: calc(env(safe-area-inset-top) + 6px) 10px 6px 16px; background: #111; color: #fff; }
+.call-info { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.call-info b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.call-info span { font-size: 12px; opacity: .75; font-variant-numeric: tabular-nums; }
+.call-btn { width: 40px; height: 40px; border-radius: 50%; background: #333; color: #fff; font-size: 17px; }
+.call-btn.end { background: #e0342b; font-weight: 800; }
+#call-frame { flex: 1; min-height: 0; }
+#call-frame iframe { border: 0; display: block; }
+.call-wait { color: #fff; text-align: center; font-size: 17px; line-height: 2; margin-top: 30vh; }
+.note-input.protocol { min-height: 260px; font-size: 14px; }

@@ -117,6 +117,42 @@ struct ReplyAssistant {
                                            maxTokens: 8000, media: media)
     }
 
+    // MARK: - Call protocol
+
+    func callProtocol(_ conversation: Conversation, notes: String, minutes: Int) async throws -> CallProtocol {
+        let user = """
+        Aktuelles Datum: \(now).
+        \(transcript(conversation, limit: 15))
+
+        \(profile.ownerName) hat gerade ein \(minutes)-minütiges Video-/Telefongespräch mit „\(conversation.title)" geführt. \
+        Stichworte von \(profile.ownerName) zum Gespräch:
+        <notes>
+        \(notes)
+        </notes>
+
+        Erstelle daraus ein professionelles Gesprächsprotokoll auf Deutsch:
+        - protocol: fertiger Text zum Versenden an den Gesprächspartner: Überschrift „Gesprächsnotiz", Datum/Uhrzeit, \
+          Teilnehmer (\(profile.ownerName), \(profile.company) und „\(conversation.title)"), besprochene Punkte, Vereinbarungen, \
+          nächste Schritte mit Zuständigkeit und Termin, Schlusssatz „Bitte melden Sie sich, falls etwas abweicht." und die Signatur. \
+          Kurz und sachlich, Aufzählungen mit „–".
+        - summary: ein Satz.
+        - tasks: Aufgaben für \(profile.ownerName). appointments: vereinbarte Termine (relative Angaben umrechnen).
+        Für conversation_id immer "\(conversation.id)" verwenden. Nur festhalten, was in den Stichworten oder im Chat steht.
+        """
+        let schema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "protocol": ["type": "string"],
+                "summary": ["type": "string"],
+                "tasks": ["type": "array", "items": Self.todoSchema],
+                "appointments": ["type": "array", "items": Self.appointmentSchema],
+            ],
+            "required": ["protocol", "summary", "tasks", "appointments"],
+            "additionalProperties": false,
+        ]
+        return try await client.structured(CallProtocol.self, system: systemPrompt, user: user, schema: schema, maxTokens: 8000)
+    }
+
     // MARK: - Daily briefing
 
     func briefing(_ conversations: [Conversation], openTasks: [TaskItem]) async throws -> Briefing {

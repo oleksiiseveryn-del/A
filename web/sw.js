@@ -1,5 +1,5 @@
 // Offline shell cache. API calls (Matrix, Telegram, Claude) always go to the network.
-const CACHE = "os-v5";
+const CACHE = "os-v6";
 const SHELL = ["./", "index.html", "app.css", "app.js", "manifest.webmanifest",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 

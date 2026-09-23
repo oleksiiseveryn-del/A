@@ -858,6 +858,33 @@ ${this.REWRITES[action][1]} Gib nur den überarbeiteten Entwurf zurück.`;
     return out.text;
   },
 
+  async callProtocol(c, notes, minutes) {
+    const user = `Aktuelles Datum: ${now()}.
+${this.transcript(c, 15)}
+
+${state.profile.ownerName} hat gerade ein ${minutes ? minutes + "-minütiges " : ""}Video-/Telefongespräch mit „${c.title}" geführt. Stichworte von ${state.profile.ownerName} zum Gespräch:
+<notes>
+${notes}
+</notes>
+
+Erstelle daraus ein professionelles Gesprächsprotokoll auf Deutsch:
+- protocol: fertiger Text zum Versenden an den Gesprächspartner: Überschrift „Gesprächsnotiz", Datum/Uhrzeit, Teilnehmer (${state.profile.ownerName}, ${state.profile.company} und „${c.title}"), besprochene Punkte, Vereinbarungen, nächste Schritte mit Zuständigkeit und Termin, Schlusssatz „Bitte melden Sie sich, falls etwas abweicht." und die Signatur. Kurz und sachlich, Aufzählungen mit „–".
+- summary: ein Satz.
+- tasks: Aufgaben für ${state.profile.ownerName}. appointments: vereinbarte Termine (relative Angaben umrechnen).
+Für conversation_id immer "${convID(c)}" verwenden. Nur festhalten, was in den Stichworten oder im Chat steht.`;
+    return claudeJSON({ system: this.system(), user, maxTokens: 8000, schema: {
+      type: "object",
+      properties: {
+        protocol: { type: "string" },
+        summary: { type: "string" },
+        tasks: { type: "array", items: TODO_SCHEMA },
+        appointments: { type: "array", items: APPOINTMENT_SCHEMA },
+      },
+      required: ["protocol", "summary", "tasks", "appointments"],
+      additionalProperties: false,
+    } });
+  },
+
   async triage(list) {
     const blocks = list.map((c) => `<item id="${convID(c)}">\n${this.transcript(c, 8)}\n</item>`).join("\n");
     const user = `${blocks}
@@ -1113,6 +1140,7 @@ function chatMenu() {
     <button class="sheet-btn" data-act="analyze">🔍 Zusammenfassen, Aufgaben & Termine erkennen</button>
     <button class="sheet-btn" data-act="note">📝 ${c.note ? "Notiz bearbeiten" : "Notiz zum Kontakt hinzufügen"}</button>
     <button class="sheet-btn" data-act="pin">📌 ${c.isPinned ? "Nicht mehr anheften" : "Oben anheften"}</button>
+    <button class="sheet-btn" data-act="call">📹 Video- oder Sprachanruf</button>
     <button class="sheet-btn" data-act="read">🔊 Offene Nachrichten vorlesen</button>
     <button class="sheet-btn" data-act="archive">🗄 ${c.isArchived ? "Aus dem Archiv holen" : "Archivieren"}</button>`,
   (e) => {
@@ -1124,6 +1152,7 @@ function chatMenu() {
     if (act === "pin") { c.isPinned = !c.isPinned; sortConversations(); save(); toast(c.isPinned ? "Angeheftet" : "Gelöst"); }
     if (act === "archive") { c.isArchived = !c.isArchived; save(); history.back(); }
     if (act === "read") readChat(c);
+    if (act === "call") callMenu(c);
   });
 }
 
@@ -1239,6 +1268,236 @@ async function recordVoice() {
   recorder.start(250);
   $("#rec-stop", sheet).addEventListener("click", () => { keep = true; closeSheet(); });
   $("#rec-cancel", sheet).addEventListener("click", closeSheet);
+}
+
+// ---------------------------------------------------------------------------
+// Video calls (Jitsi Meet over WebRTC; 1:1 calls run peer-to-peer)
+// ---------------------------------------------------------------------------
+
+const CALL_SERVERS = { "meet.ffmuc.net": "meet.ffmuc.net – Deutschland, ohne Login", "meet.jit.si": "meet.jit.si – Gastgeber-Login nötig", custom: "Eigener Server …" };
+const CALL_QUALITY = { "1080": "Full HD 1080p", "720": "HD 720p (empfohlen)", "360": "Datensparen 360p" };
+const callSettings = () => {
+  const choice = store.get("callServer", "meet.ffmuc.net");
+  const server = choice === "custom" ? (store.get("callServerCustom", "") || "meet.ffmuc.net") : choice;
+  return { choice, server: server.replace(/^https?:\/\//, "").replace(/\/.*$/, ""), quality: Number(store.get("callQuality", "720")) };
+};
+const JITSI_HOSTS = /(^|\.)(jit\.si|ffmuc\.net|8x8\.vc)$/i;
+const MEETING_HOSTS = /(^|\.)(zoom\.us|teams\.microsoft\.com|teams\.live\.com|meet\.google\.com|whereby\.com|webex\.com)$/i;
+
+function newRoomURL() {
+  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+  const id = [...crypto.getRandomValues(new Uint8Array(10))].map((b) => alphabet[b % alphabet.length]).join("");
+  return `https://${callSettings().server}/OS-HSD-${id}`;
+}
+
+// A call link in a message: Jitsi rooms open inside OS, other services in the browser.
+function meetingLink(text) {
+  for (const raw of String(text || "").match(/https:\/\/[^\s<>"]+/g) || []) {
+    try {
+      const url = new URL(raw.replace(/[).,;!?]+$/, ""));
+      const own = url.host === callSettings().server || /^\/OS-HSD-/.test(url.pathname);
+      if (own || JITSI_HOSTS.test(url.hostname)) return { url: url.href, inApp: url.pathname.length > 1 };
+      if (MEETING_HOSTS.test(url.hostname)) return { url: url.href, inApp: false };
+    } catch { /* not a URL */ }
+  }
+  return null;
+}
+
+const jitsiLoaders = {};
+function loadJitsi(host) {
+  jitsiLoaders[host] ??= new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = `https://${host}/external_api.js`;
+    script.onload = () => (window.JitsiMeetExternalAPI ? resolve(window.JitsiMeetExternalAPI) : reject(new Error("Videoserver antwortet nicht")));
+    script.onerror = () => { delete jitsiLoaders[host]; reject(new Error("Videoserver nicht erreichbar")); };
+    document.head.appendChild(script);
+  });
+  return jitsiLoaders[host];
+}
+
+async function joinCall(link, { audioOnly = false, conversationID = null } = {}) {
+  const url = new URL(link);
+  const c = state.conversations.find((x) => convID(x) === conversationID);
+  reader.stop();
+  dictation.stop();
+  $("#call")?.remove();
+  const overlay = document.createElement("div");
+  overlay.id = "call";
+  overlay.innerHTML = `<div class="call-bar">
+      <div class="call-info"><b>${esc(c?.title || "Videoanruf")}</b><span id="call-status">Verbinde …</span></div>
+      <button class="call-btn" id="call-share" title="Link teilen">🔗</button>
+      <button class="call-btn end" id="call-end" title="Auflegen">✕</button>
+    </div>
+    <div id="call-frame"><div class="call-wait">📹<br>Kamera &amp; Mikrofon werden gestartet …</div></div>`;
+  document.body.appendChild(overlay);
+  let api = null, joinedAt = null, ended = false, others = 0;
+  const status = (text) => { const el = $("#call-status", overlay); if (el) el.textContent = text; };
+  const timer = setInterval(() => {
+    if (!joinedAt) return;
+    const sec = Math.floor((Date.now() - joinedAt) / 1000);
+    status(`${others ? "🟢 " : "⏳ Warte auf Teilnehmer · "}${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`);
+  }, 1000);
+  const finish = () => {
+    if (ended) return;
+    ended = true;
+    clearInterval(timer);
+    try { api?.dispose(); } catch { /* already gone */ }
+    overlay.remove();
+    const minutes = joinedAt ? Math.max(1, Math.round((Date.now() - joinedAt) / 60000)) : 0;
+    if (c && joinedAt) afterCall(c, minutes);
+  };
+  $("#call-end", overlay).addEventListener("click", () => { try { api?.executeCommand("hangup"); } catch { /* ignore */ } finish(); });
+  $("#call-share", overlay).addEventListener("click", async () => {
+    if (navigator.share) { try { await navigator.share({ title: "Videoanruf", url: url.href }); } catch { /* cancelled */ } }
+    else { try { await navigator.clipboard.writeText(url.href); toast("Link kopiert"); } catch { toast(url.href); } }
+  });
+  try {
+    const JitsiAPI = await loadJitsi(url.host);
+    if (ended) return;
+    const { quality } = callSettings();
+    $("#call-frame", overlay).innerHTML = "";
+    api = new JitsiAPI(url.host, {
+      roomName: decodeURIComponent(url.pathname.slice(1)),
+      parentNode: $("#call-frame", overlay),
+      width: "100%",
+      height: "100%",
+      lang: "de",
+      userInfo: { displayName: `${state.profile.ownerName} (${state.profile.company})` },
+      configOverwrite: {
+        // Straight into the call: no pre-join page, no app download prompt.
+        prejoinConfig: { enabled: false },
+        prejoinPageEnabled: false,
+        disableDeepLinking: true,
+        startWithAudioMuted: false,
+        startWithVideoMuted: audioOnly,
+        startAudioOnly: audioOnly,
+        subject: c ? `${state.profile.company} · ${c.title}` : state.profile.company,
+        // Quality: target resolution, direct peer-to-peer for 1:1, simulcast and
+        // layer suspension so weak connections degrade gracefully instead of freezing.
+        resolution: quality,
+        constraints: { video: { height: { ideal: quality, max: quality, min: 180 } } },
+        p2p: { enabled: true },
+        disableSimulcast: false,
+        enableLayerSuspension: true,
+        enableNoisyMicDetection: true,
+        disableThirdPartyRequests: true,
+      },
+      interfaceConfigOverwrite: { MOBILE_APP_PROMO: false, SHOW_JITSI_WATERMARK: false, SHOW_BRAND_WATERMARK: false },
+    });
+    api.addListener("videoConferenceJoined", () => { joinedAt = Date.now(); status("⏳ Warte auf Teilnehmer …"); });
+    api.addListener("participantJoined", (p) => { others += 1; toast(`🟢 ${p?.displayName || "Teilnehmer"} ist im Anruf`); });
+    api.addListener("participantLeft", () => { others = Math.max(0, others - 1); });
+    api.addListener("videoConferenceLeft", finish);
+    api.addListener("readyToClose", finish);
+  } catch (error) {
+    finish();
+    toast(`${error.message} – Anruf wird im Browser geöffnet.`);
+    window.open(url.href, "_blank", "noopener");
+  }
+}
+
+// Starts the call immediately and sends the invitation link into the chat in parallel.
+async function startCall(c, { audioOnly = false } = {}) {
+  const url = newRoomURL();
+  joinCall(url, { audioOnly, conversationID: convID(c) });
+  const text = `${audioOnly ? "📞 Anruf" : "📹 Videoanruf"} von ${state.profile.ownerName} (${state.profile.company}) – jetzt beitreten:\n${url}\nEinfach antippen, keine App und kein Konto nötig.`;
+  try {
+    await sendMessage(convID(c), text);
+    if (ui.chatID === convID(c)) fillMessages(true);
+  } catch (error) { toast("Einladung nicht gesendet: " + error.message); }
+}
+
+function callMenu(c) {
+  const context = c.aiSummary || c.note;
+  const sheet = openSheet(audioLabel(c), `
+    ${context ? `<div class="card" style="margin:0 0 12px"><div class="card-title">✨ Worum es geht</div><p>${esc(c.aiSummary || "")}${c.aiSummary && c.note ? "<br>" : ""}${c.note ? "📝 " + esc(c.note) : ""}</p></div>` : ""}
+    <button class="sheet-btn" data-call="video">📹 Videoanruf jetzt starten</button>
+    <button class="sheet-btn" data-call="audio">📞 Sprachanruf jetzt starten</button>
+    <button class="sheet-btn" data-call="plan">🗓 Videotermin planen</button>
+    <div id="plan-box" hidden>
+      <input type="datetime-local" id="plan-when" class="search" style="margin:4px 0 8px">
+      <button class="primary" id="plan-send">Einladung senden &amp; in Kalender</button>
+    </div>
+    <p class="muted">${esc(c.title)} erhält einen Link im Chat – ein Tipp genügt, im Browser, ohne App. Bei zwei Personen läuft das Gespräch direkt von Gerät zu Gerät.</p>`,
+  (e) => {
+    const kind = e.target.closest("[data-call]")?.dataset.call;
+    if (kind === "video" || kind === "audio") { closeSheet(); startCall(c, { audioOnly: kind === "audio" }); }
+    if (kind === "plan") {
+      $("#plan-box", sheet).hidden = false;
+      const next = new Date(Date.now() + 3600e3); next.setMinutes(0, 0, 0);
+      const pad = (n) => String(n).padStart(2, "0");
+      $("#plan-when", sheet).value = `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}T${pad(next.getHours())}:00`;
+    }
+  });
+  $("#plan-send", sheet).addEventListener("click", async () => {
+    const when = $("#plan-when", sheet).value;
+    if (!when) return toast("Bitte Datum und Uhrzeit wählen");
+    const url = newRoomURL();
+    closeSheet();
+    const text = `🗓 Einladung zum Videogespräch mit ${state.profile.ownerName} (${state.profile.company}) am ${formatStart(when)}:\n${url}\nZum Termin einfach den Link antippen – keine App nötig.`;
+    try {
+      await sendMessage(convID(c), text);
+      fillMessages(true);
+      addToCalendar({ title: `Videogespräch ${c.title}`, start: when, duration_minutes: 30, location: url, conversation_id: convID(c) });
+    } catch (error) { toast(error.message); }
+  });
+}
+const audioLabel = (c) => `Anruf · ${c.title}`;
+
+// After the call: dictate key points, the AI writes the protocol.
+function afterCall(c, minutes) {
+  const sheet = openSheet(`Anruf beendet · ${minutes} Min.`, `
+    <p class="muted">Stichworte zum Gespräch tippen oder 🎤 diktieren – die KI erstellt daraus ein Gesprächsprotokoll mit Vereinbarungen, Aufgaben und Terminen.</p>
+    <div class="instr-row"><textarea class="note-input" id="call-notes" placeholder="z. B. Estrich kommt Dienstag 7 Uhr, Pumpe bestellt, Bauherr schickt Fotos vom Keller, Nachtrag für Abdichtung prüfen"></textarea></div>
+    <button class="sheet-btn center" id="call-mic">🎤 Diktieren</button>
+    <button class="primary" id="call-protocol">✨ Protokoll erstellen</button>
+    <div id="call-result"></div>`);
+  const notes = $("#call-notes", sheet);
+  const mic = $("#call-mic", sheet);
+  mic.addEventListener("click", () => {
+    if (dictation.active) return dictation.stop();
+    const base = notes.value.trim();
+    mic.textContent = "■ Diktat beenden";
+    mic.classList.add("rec");
+    dictation.start({
+      onText: (t) => { notes.value = base ? base + " " + t : t; },
+      onEnd: () => { mic.textContent = "🎤 Diktieren"; mic.classList.remove("rec"); },
+    });
+  });
+  sheetCleanup = () => dictation.stop();
+  $("#call-protocol", sheet).addEventListener("click", async (e) => {
+    if (!notes.value.trim()) return toast("Bitte kurz Stichworte eingeben oder diktieren.");
+    if (!store.get("anthropicKey", null)) return toast("Bitte zuerst API-Schlüssel in den Einstellungen hinterlegen.");
+    dictation.stop();
+    e.target.disabled = true;
+    $("#call-result", sheet).innerHTML = `<div class="thinking">⏳ Die KI schreibt das Protokoll …</div>`;
+    try {
+      const out = await assistant.callProtocol(c, notes.value.trim(), minutes);
+      $("#call-result", sheet).innerHTML = `
+        <div class="sheet-sec">Gesprächsnotiz</div>
+        <textarea class="note-input protocol" id="call-text">${esc(out.protocol)}</textarea>
+        <button class="primary" id="call-send">An ${esc(c.title)} senden</button>
+        <button class="sheet-btn center" id="call-share-text">Teilen / Kopieren</button>
+        ${actionListHTML(out)}`;
+      sheet.addEventListener("click", (ev) => handleActionClick(ev, out));
+      $("#call-send", sheet).addEventListener("click", async () => {
+        try {
+          await sendMessage(convID(c), $("#call-text", sheet).value.trim());
+          closeSheet();
+          if (ui.chatID === convID(c)) fillMessages(true);
+          toast("✅ Protokoll gesendet");
+        } catch (error) { toast(error.message); }
+      });
+      $("#call-share-text", sheet).addEventListener("click", async () => {
+        const text = $("#call-text", sheet).value;
+        if (navigator.share) { try { await navigator.share({ title: "Gesprächsnotiz", text }); return; } catch { return; } }
+        try { await navigator.clipboard.writeText(text); toast("Kopiert"); } catch { /* ignore */ }
+      });
+    } catch (error) {
+      e.target.disabled = false;
+      $("#call-result", sheet).innerHTML = `<p class="err">${esc(error.message)}</p>`;
+    }
+  });
 }
 
 // Suggestions are prepared in the background for unread chats, so opening a chat is instant.
@@ -1457,6 +1716,7 @@ function renderChat() {
       <div class="header-row">
         <button class="icon-btn back" id="btn-back" aria-label="Zurück">‹</button>
         <div class="title-block"><h2>${esc(c.title)}</h2><div class="sub" style="color:${p.color}">${esc(p.name)}</div></div>
+        <button class="icon-btn" id="btn-call" title="Video- oder Sprachanruf">📹</button>
         <button class="icon-btn" id="btn-read" title="Vorlesen">🔊</button>
         <button class="icon-btn" id="btn-ai" title="KI-Leiste">✨</button>
         <button class="icon-btn" id="btn-more" title="Mehr">•••</button>
@@ -1564,6 +1824,11 @@ function renderChat() {
     syncButtons();
   });
   $("#messages").addEventListener("click", (e) => {
+    const join = e.target.closest("[data-join]");
+    if (join) {
+      const link = meetingLink(join.dataset.join);
+      return link?.inApp ? joinCall(link.url, { conversationID: ui.chatID }) : window.open(join.dataset.join, "_blank", "noopener");
+    }
     const say = e.target.closest("[data-say]");
     if (say) {
       const m = currentChat()?.messages.find((x) => x.id === say.dataset.say);
@@ -1584,6 +1849,7 @@ function renderChat() {
     draft.focus();
   });
   $("#btn-more").addEventListener("click", chatMenu);
+  $("#btn-call").addEventListener("click", () => callMenu(currentChat()));
   $("#btn-read").addEventListener("click", () => (reader.speaking ? reader.stop() : readChat(currentChat())));
   const mic = $("#btn-mic");
   mic.addEventListener("click", () => {
@@ -1753,6 +2019,11 @@ async function openAttachment(messageID) {
   });
 }
 
+// Escapes the text and turns web addresses into tappable links.
+function linkify(text) {
+  return esc(text).replace(/https?:\/\/[^\s<]+/g, (url) => `<a href="${url}" target="_blank" rel="noopener">${url}</a>`);
+}
+
 function fillMessages(forceBottom = false) {
   const c = currentChat();
   const box = $("#messages");
@@ -1763,7 +2034,8 @@ function fillMessages(forceBottom = false) {
     <div class="bubble ${m.isOutgoing ? "out" : ""}">
       ${m.isOutgoing ? "" : `<div class="who" style="color:${color}">${esc(m.senderName)}</div>`}
       ${m.attachment ? attachmentHTML(m) : ""}
-      ${m.text ? `<div class="txt">${esc(m.text)}</div>` : ""}
+      ${m.text ? `<div class="txt">${linkify(m.text)}</div>` : ""}
+      ${meetingLink(m.text) ? `<button class="join-btn" data-join="${esc(meetingLink(m.text).url)}">📹 Anruf beitreten</button>` : ""}
       <div class="when">${m.isOutgoing ? "" : `<button class="say" data-say="${esc(m.id)}" aria-label="Vorlesen">🔊</button>`}${clock(m.date)}</div>
     </div>`).join("");
   if (forceBottom || atBottom || !box.dataset.scrolled) { box.scrollTop = box.scrollHeight; box.dataset.scrolled = "1"; }
@@ -2057,6 +2329,14 @@ function renderSettings() {
       </div>
       <div class="footer">Schlüssel unter console.anthropic.com erstellen. Er bleibt nur in diesem Browser gespeichert. Chat-Inhalte gehen nur für Vorschläge an die Claude API; gesendet wird nie automatisch.</div>
 
+      <div class="section-title">Videoanrufe</div>
+      <div class="group">
+        <div class="field"><label>Server</label><select id="f-call-server">${opts(CALL_SERVERS, callSettings().choice)}</select></div>
+        <div class="field" id="f-call-custom-row" ${callSettings().choice === "custom" ? "" : "hidden"}><label>Adresse</label><input id="f-call-custom" placeholder="video.hsd-hamburg.de" autocapitalize="off" value="${esc(store.get("callServerCustom", ""))}"></div>
+        <div class="field"><label>Qualität</label><select id="f-call-quality">${opts(CALL_QUALITY, String(callSettings().quality))}</select></div>
+      </div>
+      <div class="footer">Videoanrufe laufen über Jitsi Meet (WebRTC, verschlüsselt). Bei zwei Personen direkt von Gerät zu Gerät; die Qualität passt sich automatisch an die Verbindung an. Für den Firmeneinsatz empfohlen: eigener Jitsi-Server (z. B. auf dem Matrix-Server, siehe README).</div>
+
       <div class="section-title">Sprache &amp; Vorlesen</div>
       <div class="group">
         <div class="field"><label>Sprache</label><select id="f-speech-lang">${opts(SPEECH_LANGS, voiceSettings().lang)}</select></div>
@@ -2107,6 +2387,12 @@ function renderSettings() {
     save();
   });
   $("#f-model").addEventListener("change", (e) => { state.model = e.target.value; store.set("model", state.model); });
+  $("#f-call-server").addEventListener("change", (e) => {
+    store.set("callServer", e.target.value);
+    $("#f-call-custom-row").hidden = e.target.value !== "custom";
+  });
+  $("#f-call-custom").addEventListener("input", (e) => store.set("callServerCustom", e.target.value.trim()));
+  $("#f-call-quality").addEventListener("change", (e) => store.set("callQuality", e.target.value));
   $("#f-speech-lang").addEventListener("change", (e) => store.set("speechLang", e.target.value));
   $("#f-speech-rate").addEventListener("change", (e) => store.set("speechRate", e.target.value));
   $("#btn-voice-test").addEventListener("click", () => reader.speak([{

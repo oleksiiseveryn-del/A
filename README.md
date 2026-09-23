@@ -20,6 +20,8 @@ oder übersetzt Ihre Entwürfe. Gesendet wird immer erst, wenn Sie auf „Senden
 | Spracheingabe | Mikrofon im Eingabefeld: sprechen statt tippen (Deutsch, Ukrainisch, Russisch, Polnisch, Englisch). Mikrofon im KI-Feld: sagen, *was* geantwortet werden soll („sag ihm, ich komme morgen um 8“) – die KI formuliert die fertige Antwort |
 | Vorlesen | Einzelne Nachricht, offene Nachrichten eines Chats, **alle neuen Nachrichten** (dringende zuerst) und das Tagesbriefing – freihändig im Auto oder auf der Baustelle; ukrainische/russische Texte mit passender Stimme; eigenen Entwurf vor dem Senden anhören |
 | Sprachnachrichten | Aufnehmen und senden; empfangene Sprachnachrichten direkt im Chat abspielen |
+| Videoanrufe | Video- oder Sprachanruf mit einem Tipp aus jedem Chat: OS startet sofort und schickt dem Kontakt den Link in seinen Messenger – er tippt ihn an, **ohne App und ohne Konto**. Jitsi Meet/WebRTC, verschlüsselt, bei zwei Personen direkt von Gerät zu Gerät (kürzeste Verzögerung), HD 720p/Full HD 1080p mit automatischer Anpassung an schwache Verbindungen. Videotermine planen (Einladung + Kalender). Anruf-Links im Chat (auch Zoom/Teams/Meet) mit „Beitreten“-Knopf |
+| Gesprächsprotokoll | Nach dem Anruf Stichworte tippen oder diktieren – die KI erstellt eine versandfertige Gesprächsnotiz mit Vereinbarungen, Aufgaben und Terminen |
 | Emojis | Emoji-Leiste mit Baustellen-Emojis, zuletzt genutzte zuerst; empfangene Emojis werden normal angezeigt |
 | Schnell | Für die wichtigsten ungelesenen Chats bereitet die KI die Antwortvorschläge im Hintergrund vor – beim Öffnen sofort da |
 | Heute (Tagesbriefing) | KI-Lagebild über alle offenen Chats: was heute Priorität hat, wer heute eine Antwort braucht, neue Aufgaben und anstehende Termine – mit Kennzahlen *Ungelesen / Dringend / Aufgaben* |
@@ -124,6 +126,13 @@ Signierung und Zertifikate erledigt Xcode in der Cloud automatisch über den API
 ```bash
 brew install xcodegen && xcodegen generate && open UniMessenger.xcodeproj
 ```
+
+### Eigener Videoserver (empfohlen für den Firmeneinsatz)
+
+Standard ist der öffentliche Jitsi-Server **meet.ffmuc.net** (Freifunk München, ohne Login). Für volle
+Kontrolle und DSGVO-Sicherheit einen eigenen Jitsi-Server betreiben – am einfachsten auf dem Matrix-Server:
+im Ansible-Playbook `jitsi_enabled: true` setzen (Anleitung im Playbook unter „Jitsi“). Danach in OS unter
+**Einstellungen → Videoanrufe → Server → Eigener Server** die Adresse eintragen (z. B. `video.hsd-hamburg.de`).
 
 ### KI aktivieren
 

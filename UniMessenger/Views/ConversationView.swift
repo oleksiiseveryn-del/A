@@ -25,6 +25,10 @@ struct ConversationView: View {
     @State private var showRecorder = false
     @State private var dictation = Dictation()
     @State private var dictationTarget: DictationTarget?
+    @State private var showCallMenu = false
+    @State private var activeCall: ActiveCall?
+    @State private var endedCall: EndedCall?
+    @Environment(\.openURL) private var openURL
     @Environment(SpeechReader.self) private var reader
 
     private enum DictationTarget { case draft, instruction }
@@ -81,11 +85,11 @@ struct ConversationView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        withAnimation { showAIPanel.toggle() }
+                        showCallMenu = true
                     } label: {
-                        Image(systemName: showAIPanel ? "sparkles.rectangle.stack.fill" : "sparkles.rectangle.stack")
+                        Image(systemName: "video")
                     }
-                    .accessibilityLabel("KI-Assistent ein-/ausblenden")
+                    .accessibilityLabel("Video- oder Sprachanruf")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -100,9 +104,19 @@ struct ConversationView: View {
                             Label(conversation.note?.isEmpty == false ? "Notiz bearbeiten" : "Notiz zum Kontakt", systemImage: "note.text")
                         }
                         Button {
+                            showCallMenu = true
+                        } label: {
+                            Label("Video- oder Sprachanruf", systemImage: "video")
+                        }
+                        Button {
                             reader.speak(SpeechReader.parts(forChat: conversation))
                         } label: {
                             Label("Offene Nachrichten vorlesen", systemImage: "speaker.wave.2")
+                        }
+                        Button {
+                            withAnimation { showAIPanel.toggle() }
+                        } label: {
+                            Label(showAIPanel ? "KI-Vorschläge ausblenden" : "KI-Vorschläge einblenden", systemImage: "sparkles")
                         }
                         Button {
                             hub.togglePin(conversationID)
@@ -158,6 +172,20 @@ struct ConversationView: View {
                 }
             }
             .onDisappear { dictation.stop() }
+            .sheet(isPresented: $showCallMenu) {
+                CallMenuSheet(conversation: conversation,
+                              onStart: { audioOnly in startCall(audioOnly: audioOnly) },
+                              onPlan: { date in Task { await planCall(at: date, conversation) } })
+            }
+            .fullScreenCover(item: $activeCall) { call in
+                CallScreen(call: call, title: conversation.title) { minutes in
+                    activeCall = nil
+                    endedCall = EndedCall(minutes: minutes)
+                }
+            }
+            .sheet(item: $endedCall) { ended in
+                CallProtocolSheet(conversation: conversation, minutes: ended.minutes)
+            }
             .sheet(isPresented: $showAnalysis) {
                 AnalysisSheet(conversation: conversation)
             }
@@ -181,7 +209,9 @@ struct ConversationView: View {
             ScrollView {
                 LazyVStack(spacing: 8) {
                     ForEach(conversation.messages) { message in
-                        MessageBubble(message: message, accent: conversation.platform.color, conversation: conversation)
+                        MessageBubble(message: message, accent: conversation.platform.color, conversation: conversation) { link in
+                            if link.inApp { activeCall = ActiveCall(room: link.url, audioOnly: false) } else { openURL(link.url) }
+                        }
                             .id(message.id)
                     }
                 }
@@ -398,6 +428,40 @@ struct ConversationView: View {
         .opacity(isSending ? 0.5 : 1)
     }
 
+    // MARK: - Calls
+
+    /// Opens the call at once and sends the invitation link in parallel – fast hand-over.
+    private func startCall(audioOnly: Bool) {
+        reader.stop()
+        dictation.stop()
+        let room = CallSettings.newRoomURL()
+        activeCall = ActiveCall(room: room, audioOnly: audioOnly)
+        Task {
+            do {
+                try await hub.send(CallSettings.invitation(url: room, from: hub.profile, audioOnly: audioOnly), in: conversationID)
+            } catch {
+                errorText = "Einladung nicht gesendet: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func planCall(at date: Date, _ conversation: Conversation) async {
+        let room = CallSettings.newRoomURL()
+        let when = date.formatted(.dateTime.weekday(.abbreviated).day().month(.twoDigits).hour().minute().locale(Locale(identifier: "de_DE")))
+        let text = "🗓 Einladung zum Videogespräch mit \(hub.profile.ownerName) (\(hub.profile.company)) am \(when) Uhr:\n\(room.absoluteString)\nZum Termin einfach den Link antippen – keine App nötig."
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm"
+        do {
+            try await hub.send(text, in: conversationID)
+            try await CalendarService.add(ActionAppointment(conversation_id: conversationID, title: "Videogespräch \(conversation.title)",
+                                                            start: formatter.string(from: date), duration_minutes: 30,
+                                                            location: room.absoluteString),
+                                          context: conversation.title)
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+
     private func toggleDictation(_ target: DictationTarget, _ conversation: Conversation) {
         if dictation.isListening {
             dictation.stop()
@@ -487,6 +551,7 @@ struct MessageBubble: View {
     let message: Message
     let accent: Color
     let conversation: Conversation
+    var onJoinCall: ((url: URL, inApp: Bool)) -> Void = { _ in }
 
     var body: some View {
         HStack {
@@ -499,8 +564,22 @@ struct MessageBubble: View {
                     AttachmentBubble(attachment: attachment, conversation: conversation, isOutgoing: message.isOutgoing)
                 }
                 if !message.text.isEmpty {
-                    Text(message.text)
+                    Text(Self.linkified(message.text))
+                        .tint(message.isOutgoing ? .white : .accentColor)
                         .textSelection(.enabled)
+                }
+                if let link = CallSettings.meetingLink(in: message.text) {
+                    Button {
+                        onJoinCall(link)
+                    } label: {
+                        Label("Anruf beitreten", systemImage: "video.fill")
+                            .font(.subheadline.weight(.bold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(message.isOutgoing ? Color.white : Color.green, in: Capsule())
+                            .foregroundStyle(message.isOutgoing ? Color.green : Color.white)
+                    }
+                    .buttonStyle(.plain)
                 }
                 Text(message.date.formatted(date: .omitted, time: .shortened))
                     .font(.caption2)
