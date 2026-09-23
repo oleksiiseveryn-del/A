@@ -2,6 +2,9 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(MessageHub.self) private var hub
+    @Environment(SpeechReader.self) private var reader
+    @AppStorage("speechLang") private var speechLanguage = "de-DE"
+    @AppStorage("speechRate") private var speechRate = 1.0
     @State private var apiKey = ""
     @State private var hasKey = KeychainStore.get(KeychainStore.Key.anthropicAPIKey) != nil
 
@@ -35,6 +38,30 @@ struct SettingsView: View {
                     Text("KI-Assistent (Claude)")
                 } footer: {
                     Text("Den Schlüssel erhalten Sie unter console.anthropic.com. Chat-Inhalte werden nur für Vorschläge an die Claude API gesendet; nichts wird automatisch verschickt.")
+                }
+
+                Section {
+                    Picker("Sprache", selection: $speechLanguage) {
+                        ForEach(VoiceSettings.languages, id: \.id) { Text($0.name).tag($0.id) }
+                    }
+                    Picker("Vorlesetempo", selection: $speechRate) {
+                        ForEach(VoiceSettings.rates, id: \.value) { Text($0.name).tag($0.value) }
+                    }
+                    Button {
+                        let samples = ["uk-UA": "Доброго дня! Це голос для читання повідомлень.",
+                                       "ru-RU": "Добрый день! Это голос для чтения сообщений.",
+                                       "pl-PL": "Dzień dobry! To jest głos do czytania wiadomości.",
+                                       "en-US": "Hello! This is the voice that reads your messages."]
+                        let first = hub.profile.ownerName.split(separator: " ").first.map(String.init) ?? ""
+                        reader.speak([.init(text: samples[speechLanguage] ?? "Guten Tag, \(first)! So klingt das Vorlesen Ihrer Nachrichten.",
+                                            language: speechLanguage)])
+                    } label: {
+                        Label("Stimme testen", systemImage: "speaker.wave.2")
+                    }
+                } header: {
+                    Text("Sprache & Vorlesen")
+                } footer: {
+                    Text("Gilt für die Spracheingabe und das Vorlesen. Ukrainische und russische Nachrichten werden automatisch mit passender Stimme gelesen. Bessere Stimmen: Einstellungen → Bedienungshilfen → Gesprochene Inhalte → Stimmen.")
                 }
 
                 Section("Antwortstil") {

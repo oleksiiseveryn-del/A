@@ -1,3 +1,4 @@
+import AVFoundation
 import PhotosUI
 import QuickLook
 import SwiftUI
@@ -36,7 +37,77 @@ struct AttachmentBubble: View {
     @State private var previewURL: URL?
     @State private var isOpening = false
 
+    @State private var player: AVAudioPlayer?
+    @State private var isPlaying = false
+
     var body: some View {
+        if attachment.kind == .audio { audioBody } else { fileBody }
+    }
+
+    /// Voice messages play inline; formats iOS cannot play (e.g. Telegram OGG) fall back to QuickLook.
+    private var audioBody: some View {
+        Button {
+            Task { await togglePlayback() }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: isPlaying ? "pause.circle.fill" : "play.circle.fill")
+                    .font(.system(size: 34))
+                    .foregroundStyle(isOutgoing ? Color.white : Color.accentColor)
+                Image(systemName: "waveform")
+                    .font(.title2)
+                    .symbolEffect(.variableColor.iterative, isActive: isPlaying)
+                VStack(alignment: .leading) {
+                    Text("Sprachnachricht").font(.subheadline.weight(.semibold))
+                    if let player {
+                        Text(Duration.seconds(player.duration).formatted(.time(pattern: .minuteSecond))).font(.caption2).opacity(0.75)
+                    } else if let failure {
+                        Text(failure).font(.caption2).opacity(0.75)
+                    }
+                }
+                if isOpening { ProgressView() }
+            }
+            .padding(.vertical, 4)
+            .frame(minWidth: 200, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+        .onDisappear { player?.stop(); isPlaying = false }
+        .quickLookPreview($previewURL)
+    }
+
+    private func togglePlayback() async {
+        if let player, isPlaying {
+            player.pause()
+            isPlaying = false
+            return
+        }
+        do {
+            if player == nil {
+                isOpening = true
+                defer { isOpening = false }
+                let data = try await hub.loadAttachment(attachment, in: conversation)
+                do {
+                    player = try AVAudioPlayer(data: data)
+                } catch {
+                    previewURL = try FileStore.previewURL(for: data, name: attachment.name)
+                    return
+                }
+            }
+            try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio)
+            try? AVAudioSession.sharedInstance().setActive(true)
+            player?.play()
+            isPlaying = true
+            // Reset the button when playback ends.
+            let duration = (player?.duration ?? 0) - (player?.currentTime ?? 0)
+            Task {
+                try? await Task.sleep(for: .seconds(duration + 0.2))
+                if player?.isPlaying == false { isPlaying = false }
+            }
+        } catch {
+            failure = error.localizedDescription
+        }
+    }
+
+    private var fileBody: some View {
         Button(action: open) {
             if attachment.kind == .image {
                 Group {
@@ -162,5 +233,51 @@ struct CameraPicker: UIViewControllerRepresentable {
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             parent.dismiss()
         }
+    }
+}
+
+/// Records a voice message; returns m4a data on "Anhängen".
+struct VoiceRecorderSheet: View {
+    let onFinish: (Data) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var recorder = VoiceRecorder()
+    @State private var errorText: String?
+
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("Sprachnachricht").font(.headline).padding(.top)
+            Image(systemName: "mic.fill")
+                .font(.system(size: 44))
+                .foregroundStyle(.red)
+                .symbolEffect(.pulse, isActive: recorder.isRecording)
+            TimelineView(.periodic(from: .now, by: 0.5)) { context in
+                let seconds = Int(context.date.timeIntervalSince(recorder.startedAt ?? context.date))
+                Text(String(format: "%d:%02d", seconds / 60, seconds % 60))
+                    .font(.system(size: 44, weight: .bold).monospacedDigit())
+            }
+            Text(errorText ?? "Aufnahme läuft – sprechen Sie jetzt.")
+                .foregroundStyle(errorText == nil ? Color.secondary : Color.red)
+                .multilineTextAlignment(.center)
+            Button {
+                if let data = recorder.finish() { onFinish(data) }
+                dismiss()
+            } label: {
+                Label("Stopp & anhängen", systemImage: "stop.fill").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(!recorder.isRecording)
+            Button("Verwerfen", role: .destructive) {
+                recorder.cancel()
+                dismiss()
+            }
+        }
+        .padding()
+        .presentationDetents([.medium])
+        .interactiveDismissDisabled(recorder.isRecording)
+        .task {
+            do { try await recorder.start() } catch { errorText = error.localizedDescription }
+        }
+        .onDisappear { if recorder.isRecording { recorder.cancel() } }
     }
 }

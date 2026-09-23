@@ -94,4 +94,30 @@ final class UniMessengerTests: XCTestCase {
         XCTAssertEqual(Attachment.kind(for: "video/mp4"), .video)
         XCTAssertEqual(Attachment.kind(for: "application/pdf"), .file)
     }
+
+    func testReadAloudLanguageDetection() {
+        UserDefaults.standard.set("de-DE", forKey: "speechLang")
+        XCTAssertEqual(VoiceSettings.language(for: "Guten Tag, ich komme morgen."), "de-DE")
+        XCTAssertEqual(VoiceSettings.language(for: "Доброго дня, я прийду завтра"), "uk-UA")
+        XCTAssertEqual(VoiceSettings.language(for: "Добрый день, мы будем завтра"), "ru-RU")
+    }
+
+    @MainActor
+    func testReadAloudTextForNewMessages() {
+        let account = UUID()
+        let urgent = Conversation(accountID: account, remoteID: "a", platform: .whatsapp, title: "Hr. Petersen", messages: [
+            Message(id: "1", senderName: "Hr. Petersen", text: "Wasser im Keller!", date: .now, isOutgoing: false),
+            Message(id: "2", senderName: "Hr. Petersen", text: "", date: .now, isOutgoing: false,
+                    attachment: Attachment(kind: .image, name: "Foto.jpg", mime: "image/jpeg", size: 1, source: .local(key: "k"))),
+        ], unreadCount: 2, priority: .urgent)
+        let read = Conversation(accountID: account, remoteID: "b", platform: .telegram, title: "Polier", messages: [
+            Message(id: "3", senderName: "Andrej", text: "Alles erledigt", date: .now, isOutgoing: false),
+        ], unreadCount: 0)
+        let texts = SpeechReader.parts(forNew: [read, urgent]).map(\.text)
+        XCTAssertEqual(texts.first, "2 neue Nachrichten in einem Chat.")
+        XCTAssertTrue(texts.contains("Dringend! WhatsApp von Hr. Petersen."))
+        XCTAssertTrue(texts.contains("Wasser im Keller!"))
+        XCTAssertTrue(texts.contains("Hr. Petersen schickt ein Foto."))
+        XCTAssertFalse(texts.contains("Alles erledigt"))
+    }
 }

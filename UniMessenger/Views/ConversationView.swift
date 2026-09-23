@@ -22,6 +22,12 @@ struct ConversationView: View {
     @State private var showCamera = false
     @State private var showFileImporter = false
     @State private var showEmoji = false
+    @State private var showRecorder = false
+    @State private var dictation = Dictation()
+    @State private var dictationTarget: DictationTarget?
+    @Environment(SpeechReader.self) private var reader
+
+    private enum DictationTarget { case draft, instruction }
     @Environment(\.dismiss) private var dismiss
     @FocusState private var draftFocused: Bool
 
@@ -67,6 +73,14 @@ struct ConversationView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
+                        if reader.isSpeaking { reader.stop() } else { reader.speak(SpeechReader.parts(forChat: conversation)) }
+                    } label: {
+                        Image(systemName: reader.isSpeaking ? "stop.circle" : "speaker.wave.2")
+                    }
+                    .accessibilityLabel("Offene Nachrichten vorlesen")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
                         withAnimation { showAIPanel.toggle() }
                     } label: {
                         Image(systemName: showAIPanel ? "sparkles.rectangle.stack.fill" : "sparkles.rectangle.stack")
@@ -84,6 +98,11 @@ struct ConversationView: View {
                             showNote = true
                         } label: {
                             Label(conversation.note?.isEmpty == false ? "Notiz bearbeiten" : "Notiz zum Kontakt", systemImage: "note.text")
+                        }
+                        Button {
+                            reader.speak(SpeechReader.parts(forChat: conversation))
+                        } label: {
+                            Label("Offene Nachrichten vorlesen", systemImage: "speaker.wave.2")
                         }
                         Button {
                             hub.togglePin(conversationID)
@@ -132,6 +151,13 @@ struct ConversationView: View {
                     }
                 }
             }
+            .sheet(isPresented: $showRecorder) {
+                VoiceRecorderSheet { data in
+                    let stamp = Date.now.formatted(.dateTime.hour().minute()).replacingOccurrences(of: ":", with: "-")
+                    pending.append(PendingAttachment(data: data, name: "Sprachnachricht \(stamp).m4a", mime: "audio/mp4"))
+                }
+            }
+            .onDisappear { dictation.stop() }
             .sheet(isPresented: $showAnalysis) {
                 AnalysisSheet(conversation: conversation)
             }
@@ -194,11 +220,20 @@ struct ConversationView: View {
                 .disabled(isThinking)
             }
             HStack {
-                TextField("Vorgabe, z. B. „Termin Do. 14 Uhr anbieten“", text: $instruction)
+                TextField("Was antworten? Tippen oder sprechen", text: $instruction)
                     .textFieldStyle(.roundedBorder)
                     .font(.caption)
                     .submitLabel(.go)
                     .onSubmit { Task { await generate(conversation) } }
+                Button {
+                    toggleDictation(.instruction, conversation)
+                } label: {
+                    Image(systemName: dictationTarget == .instruction ? "stop.circle.fill" : "mic.fill")
+                        .symbolEffect(.pulse, isActive: dictationTarget == .instruction)
+                }
+                .buttonStyle(.bordered)
+                .tint(dictationTarget == .instruction ? .red : .accentColor)
+                .accessibilityLabel("Vorgabe sprechen – die KI formuliert")
             }
             if isThinking {
                 HStack(spacing: 8) {
@@ -241,6 +276,7 @@ struct ConversationView: View {
                 Button { showCamera = true } label: { Label("Kamera", systemImage: "camera") }
                 Button { showPhotoPicker = true } label: { Label("Fotos & Videos", systemImage: "photo.on.rectangle") }
                 Button { showFileImporter = true } label: { Label("Dokument (PDF, Plan, Excel …)", systemImage: "doc") }
+                Button { showRecorder = true } label: { Label("Sprachnachricht aufnehmen", systemImage: "mic") }
             } label: {
                 Image(systemName: "plus.circle.fill")
                     .font(.title2)
@@ -267,6 +303,12 @@ struct ConversationView: View {
                 ForEach(ReplyAssistant.RewriteAction.allCases) { action in
                     Button(action.label) { Task { await rewrite(action, conversation) } }
                 }
+                Divider()
+                Button {
+                    reader.speak([.init(text: draft)])
+                } label: {
+                    Label("Entwurf vorlesen", systemImage: "speaker.wave.2")
+                }
             } label: {
                 Image(systemName: "wand.and.stars")
                     .font(.title3)
@@ -278,19 +320,31 @@ struct ConversationView: View {
             TextField("Nachricht an \(conversation.platform.displayName)", text: $draft, axis: .vertical)
                 .lineLimit(1...8)
                 .padding(.leading, 12)
-                .padding(.trailing, 36)
+                .padding(.trailing, 64)
                 .padding(.vertical, 8)
                 .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 18))
                 .focused($draftFocused)
                 .overlay(alignment: .bottomTrailing) {
-                    Button {
-                        withAnimation { showEmoji.toggle() }
-                    } label: {
-                        Image(systemName: showEmoji ? "keyboard" : "face.smiling")
-                            .font(.title3)
-                            .padding(6)
+                    HStack(spacing: 0) {
+                        Button {
+                            toggleDictation(.draft, conversation)
+                        } label: {
+                            Image(systemName: dictationTarget == .draft ? "stop.circle.fill" : "mic")
+                                .font(.title3)
+                                .foregroundStyle(dictationTarget == .draft ? Color.red : Color.accentColor)
+                                .symbolEffect(.pulse, isActive: dictationTarget == .draft)
+                                .padding(6)
+                        }
+                        .accessibilityLabel("Spracheingabe")
+                        Button {
+                            withAnimation { showEmoji.toggle() }
+                        } label: {
+                            Image(systemName: showEmoji ? "keyboard" : "face.smiling")
+                                .font(.title3)
+                                .padding(6)
+                        }
+                        .accessibilityLabel("Emoji")
                     }
-                    .accessibilityLabel("Emoji")
                 }
 
             Button {
@@ -342,6 +396,35 @@ struct ConversationView: View {
             .padding(.top, 8)
         }
         .opacity(isSending ? 0.5 : 1)
+    }
+
+    private func toggleDictation(_ target: DictationTarget, _ conversation: Conversation) {
+        if dictation.isListening {
+            dictation.stop()
+            return
+        }
+        reader.stop()
+        let base = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        dictationTarget = target
+        Task {
+            do {
+                try await dictation.start(onText: { text in
+                    switch target {
+                    case .draft: draft = base.isEmpty ? text : base + " " + text
+                    case .instruction: instruction = text
+                    }
+                }, onEnd: { text in
+                    dictationTarget = nil
+                    // Spoken instruction: the AI turns it into a professional reply.
+                    if target == .instruction, !text.isEmpty {
+                        Task { await generate(conversation) }
+                    }
+                })
+            } catch {
+                dictationTarget = nil
+                errorText = error.localizedDescription
+            }
+        }
     }
 
     private func loadPickedPhotos() async {
@@ -400,6 +483,7 @@ struct ConversationView: View {
 }
 
 struct MessageBubble: View {
+    @Environment(SpeechReader.self) private var reader
     let message: Message
     let accent: Color
     let conversation: Conversation
@@ -427,6 +511,20 @@ struct MessageBubble: View {
             .background(message.isOutgoing ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color(.secondarySystemBackground)),
                         in: RoundedRectangle(cornerRadius: 16))
             .foregroundStyle(message.isOutgoing ? .white : .primary)
+            .contextMenu {
+                Button {
+                    reader.speak(SpeechReader.parts(for: message))
+                } label: {
+                    Label("Vorlesen", systemImage: "speaker.wave.2")
+                }
+                if !message.text.isEmpty {
+                    Button {
+                        UIPasteboard.general.string = message.text
+                    } label: {
+                        Label("Text kopieren", systemImage: "doc.on.doc")
+                    }
+                }
+            }
             if !message.isOutgoing { Spacer(minLength: 48) }
         }
     }

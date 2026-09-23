@@ -127,6 +127,107 @@ const blobToBase64 = (blob) => new Promise((resolve, reject) => {
 });
 
 // ---------------------------------------------------------------------------
+// Voice: dictation (speech to text) and reading aloud (text to speech)
+// ---------------------------------------------------------------------------
+
+const SPEECH_LANGS = { "de-DE": "Deutsch", "uk-UA": "Українська", "ru-RU": "Русский", "pl-PL": "Polski", "en-US": "English" };
+const SPEECH_RATES = { "0.85": "Langsam", "1": "Normal", "1.15": "Schnell", "1.3": "Sehr schnell" };
+const voiceSettings = () => ({ lang: store.get("speechLang", "de-DE"), rate: Number(store.get("speechRate", "1")) });
+
+const dictation = {
+  Recognition: window.SpeechRecognition || window.webkitSpeechRecognition,
+  rec: null,
+  // Streams the recognised text (final + interim) to onText; onEnd gets the last full text.
+  start({ onText, onEnd }) {
+    if (!this.Recognition) {
+      toast("Spracheingabe wird hier nicht unterstützt – bitte das Mikrofon der iPhone-Tastatur nutzen.");
+      onEnd?.("");
+      return false;
+    }
+    this.stop();
+    const rec = new this.Recognition();
+    rec.lang = voiceSettings().lang;
+    rec.interimResults = true;
+    rec.continuous = true;
+    let finalText = "", latest = "";
+    rec.onresult = (e) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        if (e.results[i].isFinal) finalText += e.results[i][0].transcript + " ";
+        else interim += e.results[i][0].transcript;
+      }
+      latest = (finalText + interim).replace(/\s+/g, " ").trim();
+      onText(latest);
+    };
+    rec.onerror = (e) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") toast("Mikrofon bzw. Spracherkennung nicht erlaubt – in den iPhone-Einstellungen für Safari erlauben.");
+      else if (e.error !== "aborted" && e.error !== "no-speech") toast("Spracheingabe: " + e.error);
+    };
+    rec.onend = () => {
+      if (this.rec === rec) this.rec = null;
+      onEnd?.(latest);
+    };
+    this.rec = rec;
+    try { rec.start(); } catch { this.rec = null; onEnd?.(""); return false; }
+    return true;
+  },
+  stop() { try { this.rec?.stop(); } catch { /* already stopped */ } },
+  get active() { return !!this.rec; },
+};
+
+// Picks Ukrainian/Russian voices for Cyrillic text, otherwise the configured language.
+function detectLang(text) {
+  const { lang } = voiceSettings();
+  if (/[\u0400-\u04FF]/.test(text)) {
+    if (/[іїєґІЇЄҐ]/.test(text)) return "uk-UA";
+    if (/[ыэъЫЭЪ]/.test(text)) return "ru-RU";
+    return /^(uk|ru)/.test(lang) ? lang : "uk-UA";
+  }
+  return /^(uk|ru)/.test(lang) ? "de-DE" : lang;
+}
+
+const reader = {
+  speaking: false,
+  get supported() { return "speechSynthesis" in window; },
+  voiceFor(lang) {
+    const norm = (v) => v.lang.replace("_", "-");
+    const same = speechSynthesis.getVoices().filter((v) => norm(v).slice(0, 2).toLowerCase() === lang.slice(0, 2).toLowerCase());
+    return same.find((v) => norm(v) === lang && /premium|enhanced|erweitert|siri/i.test(v.name))
+      || same.find((v) => norm(v) === lang) || same[0] || null;
+  },
+  // parts: [{ text, lang? }] – spoken one after another.
+  speak(parts) {
+    if (!this.supported) return toast("Vorlesen wird hier nicht unterstützt.");
+    const list = parts.filter((p) => p.text && p.text.trim());
+    if (!list.length) return toast("Nichts zum Vorlesen.");
+    speechSynthesis.cancel();
+    const { rate } = voiceSettings();
+    list.forEach((part, i) => {
+      const u = new SpeechSynthesisUtterance(part.text);
+      u.lang = part.lang || detectLang(part.text);
+      const voice = this.voiceFor(u.lang);
+      if (voice) u.voice = voice;
+      u.rate = rate;
+      if (i === list.length - 1) u.onend = u.onerror = () => { this.speaking = false; updateSpeakBar(); };
+      speechSynthesis.speak(u);
+    });
+    this.speaking = true;
+    updateSpeakBar();
+  },
+  stop() {
+    if (this.supported) speechSynthesis.cancel();
+    this.speaking = false;
+    updateSpeakBar();
+  },
+};
+if ("speechSynthesis" in window) speechSynthesis.getVoices(); // iOS loads voices lazily
+
+function updateSpeakBar() {
+  const bar = document.getElementById("speak-bar");
+  if (bar) bar.hidden = !reader.speaking;
+}
+
+// ---------------------------------------------------------------------------
 // Domain
 // ---------------------------------------------------------------------------
 
@@ -948,7 +1049,13 @@ function openSheet(title, html, onClick) {
   document.body.appendChild(el);
   return el;
 }
-function closeSheet() { $("#sheet")?.remove(); }
+let sheetCleanup = null;
+function closeSheet() {
+  const cleanup = sheetCleanup;
+  sheetCleanup = null;
+  $("#sheet")?.remove();
+  cleanup?.();
+}
 
 // Renders summary/tasks/appointments with action buttons; shared by chat analysis and briefing.
 function actionListHTML({ tasks = [], appointments = [] }) {
@@ -1006,6 +1113,7 @@ function chatMenu() {
     <button class="sheet-btn" data-act="analyze">🔍 Zusammenfassen, Aufgaben & Termine erkennen</button>
     <button class="sheet-btn" data-act="note">📝 ${c.note ? "Notiz bearbeiten" : "Notiz zum Kontakt hinzufügen"}</button>
     <button class="sheet-btn" data-act="pin">📌 ${c.isPinned ? "Nicht mehr anheften" : "Oben anheften"}</button>
+    <button class="sheet-btn" data-act="read">🔊 Offene Nachrichten vorlesen</button>
     <button class="sheet-btn" data-act="archive">🗄 ${c.isArchived ? "Aus dem Archiv holen" : "Archivieren"}</button>`,
   (e) => {
     const act = e.target.closest("[data-act]")?.dataset.act;
@@ -1015,7 +1123,122 @@ function chatMenu() {
     if (act === "note") editNote();
     if (act === "pin") { c.isPinned = !c.isPinned; sortConversations(); save(); toast(c.isPinned ? "Angeheftet" : "Gelöst"); }
     if (act === "archive") { c.isArchived = !c.isArchived; save(); history.back(); }
+    if (act === "read") readChat(c);
   });
+}
+
+// ---------------------------------------------------------------------------
+// Reading messages aloud
+// ---------------------------------------------------------------------------
+
+function messageParts(m) {
+  const who = m.isOutgoing ? "Sie" : m.senderName;
+  const att = m.attachment && { image: "ein Foto", video: "ein Video", audio: "eine Sprachnachricht",
+    file: "das Dokument " + (m.attachment.name || "").replace(/\.[a-z0-9]{2,4}$/i, "") }[m.attachment.kind];
+  const intro = att ? `${who} schickt ${att}${m.text ? " und schreibt:" : "."}` : `${who} schreibt:`;
+  return [{ text: intro, lang: "de-DE" }, ...(m.text ? [{ text: m.text }] : [])];
+}
+
+// Messages since the last own reply, i.e. what still needs an answer.
+function unanswered(c) {
+  const lastOwn = c.messages.map((m) => m.isOutgoing).lastIndexOf(true);
+  return c.messages.slice(lastOwn + 1);
+}
+
+function readChat(c) {
+  const open = unanswered(c).slice(-8);
+  const list = open.length ? open : c.messages.slice(-3);
+  reader.speak([{ text: `${PLATFORMS[c.platform]?.name || ""}, ${c.title}.`, lang: "de-DE" }, ...list.flatMap(messageParts)]);
+}
+
+function readAllNew() {
+  const rank = { urgent: 0, normal: 1, low: 2 };
+  const chats = state.conversations.filter((c) => !c.isArchived && c.unreadCount > 0)
+    .sort((a, b) => (rank[a.priority] ?? 1) - (rank[b.priority] ?? 1));
+  if (!chats.length) return reader.speak([{ text: "Keine neuen Nachrichten.", lang: "de-DE" }]);
+  const total = chats.reduce((n, c) => n + c.unreadCount, 0);
+  const parts = [{ text: `${total === 1 ? "Eine neue Nachricht" : total + " neue Nachrichten"} in ${chats.length === 1 ? "einem Chat" : chats.length + " Chats"}.`, lang: "de-DE" }];
+  for (const c of chats) {
+    parts.push({ text: `${c.priority === "urgent" ? "Dringend! " : ""}${PLATFORMS[c.platform]?.name || ""} von ${c.title}.`, lang: "de-DE" });
+    const incoming = c.messages.filter((m) => !m.isOutgoing).slice(-Math.min(c.unreadCount, 5));
+    parts.push(...incoming.flatMap(messageParts));
+  }
+  reader.speak(parts);
+}
+
+function readBriefing() {
+  const b = state.briefing;
+  if (!b) return toast("Noch kein Briefing vorhanden.");
+  const title = (id) => state.conversations.find((c) => convID(c) === id)?.title || "Chat";
+  const parts = [{ text: b.summary, lang: "de-DE" }];
+  if (b.urgent.length) parts.push({ text: "Heute reagieren: " + b.urgent.map((u) => `${title(u.conversation_id)}, ${u.reason}`).join(". ") + ".", lang: "de-DE" });
+  if (b.todos.length) parts.push({ text: "Aufgaben: " + b.todos.map((t) => t.text).join(". ") + ".", lang: "de-DE" });
+  if (b.appointments.length) parts.push({ text: "Termine: " + b.appointments.map((a) => `${a.title}, ${formatStart(a.start)}`).join(". ") + ".", lang: "de-DE" });
+  reader.speak(parts);
+}
+
+// Inline playback of voice messages and audio files.
+const player = new Audio();
+let playingID = null;
+player.addEventListener("ended", () => { playingID = null; fillMessages(); });
+
+async function togglePlay(messageID) {
+  const c = currentChat();
+  const m = c?.messages.find((x) => x.id === messageID);
+  if (!m?.attachment) return;
+  if (playingID === messageID) { player.pause(); playingID = null; return fillMessages(); }
+  reader.stop();
+  try {
+    const { url } = await loadAttachment(c, m.attachment);
+    player.src = url;
+    await player.play();
+    playingID = messageID;
+  } catch (error) {
+    playingID = null;
+    toast(error.name === "NotSupportedError" ? "Dieses Audioformat kann Safari nicht abspielen – über Teilen öffnen." : error.message);
+    if (error.name === "NotSupportedError") openAttachment(messageID);
+  }
+  fillMessages();
+}
+
+// Records a voice message with the microphone and adds it to the pending attachments.
+async function recordVoice() {
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) return toast("Sprachaufnahme wird hier nicht unterstützt.");
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+  catch { return toast("Kein Mikrofonzugriff – in den iPhone-Einstellungen für Safari erlauben."); }
+  reader.stop();
+  const mime = ["audio/mp4", "audio/webm;codecs=opus", "audio/webm"].find((t) => MediaRecorder.isTypeSupported(t)) || "";
+  const recorder = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  const chunks = [];
+  let keep = false;
+  const started = Date.now();
+  recorder.ondataavailable = (e) => { if (e.data.size) chunks.push(e.data); };
+  const sheet = openSheet("Sprachnachricht", `<div class="rec-view">
+      <div class="rec-dot"></div><div class="rec-time" id="rec-time">0:00</div>
+      <p class="muted">Aufnahme läuft – sprechen Sie jetzt.</p>
+      <button class="primary" id="rec-stop">■ Stopp &amp; anhängen</button>
+      <button class="sheet-btn center" id="rec-cancel">Verwerfen</button>
+    </div>`);
+  const timer = setInterval(() => {
+    const sec = Math.floor((Date.now() - started) / 1000);
+    const el = $("#rec-time", sheet);
+    if (el) el.textContent = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+  }, 250);
+  recorder.onstop = () => {
+    clearInterval(timer);
+    stream.getTracks().forEach((t) => t.stop());
+    if (!keep || !chunks.length) return;
+    const type = (recorder.mimeType || mime || "audio/mp4").split(";")[0];
+    const stamp = new Date().toLocaleTimeString("de-DE", { hour: "2-digit", minute: "2-digit" }).replace(":", "-");
+    chatUI.pending.push({ file: new File(chunks, `Sprachnachricht ${stamp}.${type.includes("webm") ? "webm" : "m4a"}`, { type }), url: null });
+    fillPending();
+    $("#draft")?.dispatchEvent(new Event("input"));
+  };
+  sheetCleanup = () => { if (recorder.state !== "inactive") recorder.stop(); };
+  recorder.start(250);
+  $("#rec-stop", sheet).addEventListener("click", () => { keep = true; closeSheet(); });
+  $("#rec-cancel", sheet).addEventListener("click", closeSheet);
 }
 
 // Suggestions are prepared in the background for unread chats, so opening a chat is instant.
@@ -1113,6 +1336,7 @@ function renderInbox() {
     <div class="header">
       <div class="header-row">
         <h1>Posteingang</h1>
+        <button class="icon-btn" id="btn-readall" title="Neue Nachrichten vorlesen">🔊</button>
         <button class="icon-btn" id="btn-refresh" title="Aktualisieren">⟳</button>
         <button class="icon-btn" id="btn-triage" title="KI-Sortierung">✨</button>
       </div>
@@ -1123,6 +1347,7 @@ function renderInbox() {
     <div class="scroll" id="list"></div>`;
   $("#search").addEventListener("input", (e) => { ui.search = e.target.value; fillInbox(); });
   $("#btn-refresh").addEventListener("click", () => refresh());
+  $("#btn-readall").addEventListener("click", () => (reader.speaking ? reader.stop() : readAllNew()));
   $("#btn-triage").addEventListener("click", () => {
     if (!store.get("anthropicKey", null)) return toast("Bitte zuerst API-Schlüssel in den Einstellungen hinterlegen.");
     triage();
@@ -1213,6 +1438,9 @@ function openChat(id) {
 }
 
 function closeChat() {
+  dictation.stop();
+  player.pause();
+  playingID = null;
   ui.chatID = null;
   document.body.classList.remove("in-chat");
   render();
@@ -1227,8 +1455,9 @@ function renderChat() {
   screen.innerHTML = `
     <div class="header">
       <div class="header-row">
-        <button class="icon-btn" id="btn-back">‹ Zurück</button>
+        <button class="icon-btn back" id="btn-back" aria-label="Zurück">‹</button>
         <div class="title-block"><h2>${esc(c.title)}</h2><div class="sub" style="color:${p.color}">${esc(p.name)}</div></div>
+        <button class="icon-btn" id="btn-read" title="Vorlesen">🔊</button>
         <button class="icon-btn" id="btn-ai" title="KI-Leiste">✨</button>
         <button class="icon-btn" id="btn-more" title="Mehr">•••</button>
       </div>
@@ -1241,15 +1470,19 @@ function renderChat() {
           <select id="tone">${Object.entries(TONES).map(([k, v]) => `<option value="${k}" ${chatUI.tone === k ? "selected" : ""}>${v}</option>`).join("")}</select>
           <button class="icon-btn" id="btn-gen" title="Neu erstellen">⟳</button>
         </div>
-        <input class="ai-instr" id="instr" placeholder="Vorgabe, z. B. „Termin Do. 14 Uhr anbieten“" enterkeyhint="go">
+        <div class="instr-row">
+          <input class="ai-instr" id="instr" placeholder="Was antworten? Tippen oder 🎤" enterkeyhint="go">
+          <button class="mic-inline" id="btn-instr-mic" title="Vorgabe sprechen – die KI formuliert">🎤</button>
+        </div>
         <div id="sugs"></div>
       </div>
-      <div class="menu" id="menu" hidden>${Object.entries(assistant.REWRITES).map(([k, [label]]) => `<button data-rewrite="${k}">${label}</button>`).join("")}</div>
+      <div class="menu" id="menu" hidden>${Object.entries(assistant.REWRITES).map(([k, [label]]) => `<button data-rewrite="${k}">${label}</button>`).join("")}<button data-speak-draft>🔊 Entwurf vorlesen</button></div>
       <div class="menu" id="tpl-menu" hidden>${state.templates.map((t, i) => `<button data-tpl="${i}">${esc(t.title)}</button>`).join("") || `<button disabled>Keine Textbausteine</button>`}</div>
       <div class="menu" id="att-menu" hidden>
         <button data-pick="camera">📷 Kamera</button>
         <button data-pick="photos">🖼 Fotos &amp; Videos</button>
         <button data-pick="files">📄 Dokument (PDF, Plan, Excel …)</button>
+        <button data-pick="voice">🎙 Sprachnachricht aufnehmen</button>
       </div>
       <input type="file" id="pick-camera" accept="image/*" capture="environment" hidden>
       <input type="file" id="pick-photos" accept="image/*,video/*" multiple hidden>
@@ -1262,6 +1495,7 @@ function renderChat() {
         <button class="wand" id="btn-wand" title="Entwurf mit KI überarbeiten">🪄</button>
         <div class="draft-wrap">
           <textarea id="draft" rows="1" placeholder="Nachricht an ${esc(p.name)}"></textarea>
+          <button class="mic-btn" id="btn-mic" title="Spracheingabe">🎤</button>
           <button class="emoji-btn" id="btn-emoji" title="Emoji">😊</button>
         </div>
         <button class="send" id="btn-send" title="Senden">↑</button>
@@ -1310,6 +1544,7 @@ function renderChat() {
     const b = e.target.closest("[data-pick]");
     if (!b) return;
     $("#att-menu").hidden = true;
+    if (b.dataset.pick === "voice") return recordVoice();
     $("#pick-" + b.dataset.pick).click();
   });
   ["camera", "photos", "files"].forEach((k) => $("#pick-" + k).addEventListener("change", (e) => {
@@ -1329,6 +1564,13 @@ function renderChat() {
     syncButtons();
   });
   $("#messages").addEventListener("click", (e) => {
+    const say = e.target.closest("[data-say]");
+    if (say) {
+      const m = currentChat()?.messages.find((x) => x.id === say.dataset.say);
+      return m && reader.speak(messageParts(m));
+    }
+    const play = e.target.closest("[data-play]");
+    if (play) return togglePlay(play.dataset.play);
     const target = e.target.closest("[data-att-msg]");
     if (target) openAttachment(target.dataset.attMsg);
   });
@@ -1342,8 +1584,37 @@ function renderChat() {
     draft.focus();
   });
   $("#btn-more").addEventListener("click", chatMenu);
+  $("#btn-read").addEventListener("click", () => (reader.speaking ? reader.stop() : readChat(currentChat())));
+  const mic = $("#btn-mic");
+  mic.addEventListener("click", () => {
+    if (dictation.active) return dictation.stop();
+    const base = draft.value.trim();
+    mic.classList.add("rec");
+    reader.stop();
+    dictation.start({
+      onText: (t) => { draft.value = base ? base + " " + t : t; autosize(); },
+      onEnd: () => { mic.classList.remove("rec"); draft.focus(); },
+    });
+  });
+  const instrMic = $("#btn-instr-mic");
+  instrMic.addEventListener("click", () => {
+    if (dictation.active) return dictation.stop();
+    instrMic.classList.add("rec");
+    reader.stop();
+    dictation.start({
+      onText: (t) => { $("#instr").value = t; chatUI.instruction = t; },
+      onEnd: (t) => {
+        instrMic.classList.remove("rec");
+        if (t) { chatUI.instruction = t; generate(); }
+      },
+    });
+  });
   $("#note-line")?.addEventListener("click", editNote);
   $("#menu").addEventListener("click", async (e) => {
+    if (e.target.closest("[data-speak-draft]")) {
+      $("#menu").hidden = true;
+      return reader.speak([{ text: draft.value }]);
+    }
     const b = e.target.closest("[data-rewrite]");
     if (!b) return;
     $("#menu").hidden = true;
@@ -1405,6 +1676,11 @@ function fillPending() {
 function attachmentHTML(m) {
   const att = m.attachment;
   const cached = objectURLs.get(attKey(att));
+  if (att.kind === "audio") {
+    const playing = playingID === m.id;
+    return `<button class="att-audio ${playing ? "playing" : ""}" data-play="${esc(m.id)}"><span class="play-ic">${playing ? "❚❚" : "▶"}</span>
+      <span class="wave">${"<i></i>".repeat(18)}</span><small>${esc(formatSize(att.size))}</small></button>`;
+  }
   if (att.kind === "image") {
     return `<button class="att-img" data-att-msg="${esc(m.id)}">${cached
       ? `<img src="${cached.url}" alt="Foto">` : `<span class="att-loading" data-att-load="${esc(m.id)}">🖼 Foto wird geladen …</span>`}</button>`;
@@ -1488,7 +1764,7 @@ function fillMessages(forceBottom = false) {
       ${m.isOutgoing ? "" : `<div class="who" style="color:${color}">${esc(m.senderName)}</div>`}
       ${m.attachment ? attachmentHTML(m) : ""}
       ${m.text ? `<div class="txt">${esc(m.text)}</div>` : ""}
-      <div class="when">${clock(m.date)}</div>
+      <div class="when">${m.isOutgoing ? "" : `<button class="say" data-say="${esc(m.id)}" aria-label="Vorlesen">🔊</button>`}${clock(m.date)}</div>
     </div>`).join("");
   if (forceBottom || atBottom || !box.dataset.scrolled) { box.scrollTop = box.scrollHeight; box.dataset.scrolled = "1"; }
   hydrateAttachments(c);
@@ -1549,9 +1825,11 @@ function renderToday() {
   screen.innerHTML = `
     <div class="header"><div class="header-row">
       <h1>Heute</h1>
+      <button class="icon-btn" id="btn-readbrief" title="Briefing vorlesen">🔊</button>
       <button class="icon-btn" id="btn-brief" title="Briefing aktualisieren">⟳</button>
     </div><div class="muted" id="today-date"></div></div>
     <div class="scroll" id="today"></div>`;
+  $("#btn-readbrief").addEventListener("click", () => (reader.speaking ? reader.stop() : readBriefing()));
   $("#btn-brief").addEventListener("click", () => {
     if (!store.get("anthropicKey", null)) return toast("Bitte zuerst API-Schlüssel in den Einstellungen hinterlegen.");
     loadBriefing();
@@ -1779,6 +2057,14 @@ function renderSettings() {
       </div>
       <div class="footer">Schlüssel unter console.anthropic.com erstellen. Er bleibt nur in diesem Browser gespeichert. Chat-Inhalte gehen nur für Vorschläge an die Claude API; gesendet wird nie automatisch.</div>
 
+      <div class="section-title">Sprache &amp; Vorlesen</div>
+      <div class="group">
+        <div class="field"><label>Sprache</label><select id="f-speech-lang">${opts(SPEECH_LANGS, voiceSettings().lang)}</select></div>
+        <div class="field"><label>Vorlesetempo</label><select id="f-speech-rate">${opts(SPEECH_RATES, String(voiceSettings().rate))}</select></div>
+        <button class="btn-row" id="btn-voice-test">🔊 Stimme testen</button>
+      </div>
+      <div class="footer">Gilt für die Spracheingabe 🎤 und das Vorlesen 🔊. Ukrainische und russische Nachrichten werden automatisch mit passender Stimme gelesen. Bessere Stimmen: iPhone-Einstellungen → Bedienungshilfen → Gesprochene Inhalte → Stimmen (z. B. „Anna (Erweitert)“ laden).</div>
+
       <div class="section-title">Antwortstil</div>
       <div class="group">
         <div class="field"><label>Tonfall</label><select data-p="defaultTone">${opts(TONES, p.defaultTone)}</select></div>
@@ -1821,6 +2107,14 @@ function renderSettings() {
     save();
   });
   $("#f-model").addEventListener("change", (e) => { state.model = e.target.value; store.set("model", state.model); });
+  $("#f-speech-lang").addEventListener("change", (e) => store.set("speechLang", e.target.value));
+  $("#f-speech-rate").addEventListener("change", (e) => store.set("speechRate", e.target.value));
+  $("#btn-voice-test").addEventListener("click", () => reader.speak([{
+    text: { "uk-UA": "Доброго дня! Це голос для читання повідомлень.", "ru-RU": "Добрый день! Это голос для чтения сообщений.",
+      "pl-PL": "Dzień dobry! To jest głos do czytania wiadomości.", "en-US": "Hello! This is the voice that reads your messages." }[voiceSettings().lang]
+      || `Guten Tag, ${state.profile.ownerName.split(" ")[0]}! So klingt das Vorlesen Ihrer Nachrichten.`,
+    lang: voiceSettings().lang,
+  }]));
   $("#f-triage").addEventListener("change", (e) => { state.autoTriage = e.target.checked; store.set("autoTriage", state.autoTriage); });
   $("#btn-savekey")?.addEventListener("click", () => {
     const key = $("#f-key").value.trim();
@@ -1854,6 +2148,8 @@ function render() {
   if (ui.tab === "settings") renderSettings();
   updateBadge();
 }
+
+$("#speak-stop").addEventListener("click", () => reader.stop());
 
 $("#tabbar").addEventListener("click", (e) => {
   const b = e.target.closest("button[data-tab]");

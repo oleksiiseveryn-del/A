@@ -19,6 +19,8 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
+        NSMicrophoneUsageDescription: OS nutzt das Mikrofon für die Spracheingabe und für Sprachnachrichten.
+        NSSpeechRecognitionUsageDescription: OS wandelt Ihre gesprochenen Nachrichten in Text um.
         NSCameraUsageDescription: OS nutzt die Kamera, um Fotos von der Baustelle direkt in einen Chat zu senden.
         NSPhotoLibraryAddUsageDescription: OS speichert empfangene Fotos auf Ihren Wunsch in Ihrer Fotomediathek.
         NSCalendarsWriteOnlyAccessUsageDescription: OS trägt von der KI erkannte Termine auf Ihren Wunsch in den Kalender ein.

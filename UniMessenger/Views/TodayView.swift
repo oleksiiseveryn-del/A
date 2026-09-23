@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TodayView: View {
     @Environment(MessageHub.self) private var hub
+    @Environment(SpeechReader.self) private var reader
     @Binding var tab: AppTab
     @State private var openChat: String?
 
@@ -72,6 +73,18 @@ struct TodayView: View {
                 ConversationView(conversationID: id)
             }
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        if reader.isSpeaking {
+                            reader.stop()
+                        } else if let briefing = hub.briefing {
+                            reader.speak(SpeechReader.parts(for: briefing) { hub.conversation(id: $0)?.title ?? "Chat" })
+                        }
+                    } label: {
+                        Label("Briefing vorlesen", systemImage: reader.isSpeaking ? "stop.circle" : "speaker.wave.2")
+                    }
+                    .disabled(hub.briefing == nil && !reader.isSpeaking)
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await hub.loadBriefing() }

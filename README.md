@@ -17,6 +17,9 @@ oder übersetzt Ihre Entwürfe. Gesendet wird immer erst, wenn Sie auf „Senden
 | KI-Triage | Jeder neue Chat bekommt Priorität (*Dringend / Normal / Niedrig*) und eine Ein-Satz-Zusammenfassung „was ist zu tun“ |
 | Fotos & Dokumente | Senden aus Kamera, Fotomediathek oder Dateien (PDF, Pläne, Excel …) mit Vorschau vor dem Senden; große Fotos werden automatisch verkleinert (schneller Versand). Empfangene Fotos direkt im Chat, Dokumente per Tipp öffnen, teilen oder sichern |
 | KI sieht Fotos | Die KI bezieht die letzten Fotos (Analyse: auch ein PDF) in Vorschläge und Zusammenfassung ein; „Foto von der KI beschreiben lassen“ liefert Befund, Dringlichkeit und nächste Schritte |
+| Spracheingabe | Mikrofon im Eingabefeld: sprechen statt tippen (Deutsch, Ukrainisch, Russisch, Polnisch, Englisch). Mikrofon im KI-Feld: sagen, *was* geantwortet werden soll („sag ihm, ich komme morgen um 8“) – die KI formuliert die fertige Antwort |
+| Vorlesen | Einzelne Nachricht, offene Nachrichten eines Chats, **alle neuen Nachrichten** (dringende zuerst) und das Tagesbriefing – freihändig im Auto oder auf der Baustelle; ukrainische/russische Texte mit passender Stimme; eigenen Entwurf vor dem Senden anhören |
+| Sprachnachrichten | Aufnehmen und senden; empfangene Sprachnachrichten direkt im Chat abspielen |
 | Emojis | Emoji-Leiste mit Baustellen-Emojis, zuletzt genutzte zuerst; empfangene Emojis werden normal angezeigt |
 | Schnell | Für die wichtigsten ungelesenen Chats bereitet die KI die Antwortvorschläge im Hintergrund vor – beim Öffnen sofort da |
 | Heute (Tagesbriefing) | KI-Lagebild über alle offenen Chats: was heute Priorität hat, wer heute eine Antwort braucht, neue Aufgaben und anstehende Termine – mit Kennzahlen *Ungelesen / Dringend / Aufgaben* |

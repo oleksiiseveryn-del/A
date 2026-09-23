@@ -214,3 +214,33 @@ body.in-chat #tabbar { display: none; }
 .draft-wrap textarea { min-width: 0; width: 100%; }
 .composer .wand { width: 30px; flex: none; }
 #app, #screen { overflow-x: hidden; }
+
+/* Voice */
+.icon-btn.back { font-size: 30px; font-weight: 300; min-width: 36px; padding: 0 4px; }
+.draft-wrap textarea { padding-right: 72px; }
+.mic-btn { position: absolute; right: 38px; bottom: 5px; font-size: 19px; width: 30px; height: 28px; border-radius: 14px; }
+.mic-btn.rec, .mic-inline.rec { background: var(--accent); animation: pulse 1s infinite; }
+.instr-row { display: flex; gap: 6px; align-items: center; }
+.instr-row .ai-instr { flex: 1; min-width: 0; }
+.mic-inline { flex: none; width: 36px; height: 34px; border-radius: 10px; background: var(--card2); font-size: 18px; }
+@keyframes pulse { 50% { box-shadow: 0 0 0 6px var(--accent-soft); } }
+.say { font-size: 12px; opacity: .55; padding: 0 6px 0 0; }
+.att-audio { display: flex; align-items: center; gap: 8px; padding: 6px 4px; min-width: 210px; }
+.play-ic { width: 34px; height: 34px; flex: none; border-radius: 50%; display: grid; place-items: center; font-size: 13px;
+  background: var(--accent); color: #fff; }
+.bubble.out .play-ic { background: #fff; color: var(--accent); }
+.wave { display: flex; gap: 2px; align-items: center; flex: 1; height: 24px; }
+.wave i { display: block; width: 3px; border-radius: 2px; background: currentColor; opacity: .45; height: 40%; }
+.wave i:nth-child(3n) { height: 80%; } .wave i:nth-child(4n+1) { height: 60%; } .wave i:nth-child(5n) { height: 95%; }
+.att-audio.playing .wave i { animation: bars .9s infinite ease-in-out; opacity: .8; }
+.att-audio.playing .wave i:nth-child(2n) { animation-delay: .3s; }
+@keyframes bars { 50% { transform: scaleY(.4); } }
+.att-audio small { opacity: .7; font-size: 11px; }
+.rec-view { text-align: center; padding: 10px 0 6px; }
+.rec-dot { width: 18px; height: 18px; border-radius: 50%; background: var(--accent); margin: 8px auto; animation: pulse 1s infinite; }
+.rec-time { font-size: 40px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sheet-btn.center { text-align: center; margin-top: 8px; }
+#speak-bar { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 64px); z-index: 15;
+  display: flex; gap: 12px; align-items: center; background: #222e; color: #fff; padding: 8px 8px 8px 16px; border-radius: 99px; font-size: 14px; }
+#speak-bar button { background: var(--accent); color: #fff; border-radius: 99px; padding: 6px 12px; font-weight: 700; }
+body.in-chat #speak-bar { bottom: calc(env(safe-area-inset-bottom) + 70px); }

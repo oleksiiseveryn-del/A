@@ -6,6 +6,7 @@ enum AppTab: Hashable {
 
 struct ContentView: View {
     @Environment(MessageHub.self) private var hub
+    @Environment(SpeechReader.self) private var reader
     @State private var tab: AppTab = .inbox
     @State private var showOnboarding = false
 
@@ -29,6 +30,25 @@ struct ContentView: View {
                 .tabItem { Label("Einstellungen", systemImage: "gearshape.fill") }
                 .tag(AppTab.settings)
         }
+        .overlay(alignment: .bottom) {
+            if reader.isSpeaking {
+                HStack(spacing: 12) {
+                    Label("Wird vorgelesen …", systemImage: "speaker.wave.2.fill")
+                        .font(.subheadline)
+                    Button("Stopp") { reader.stop() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                }
+                .padding(.leading, 16)
+                .padding(.trailing, 8)
+                .padding(.vertical, 8)
+                .background(.thinMaterial, in: Capsule())
+                .shadow(radius: 6)
+                .padding(.bottom, 64)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.default, value: reader.isSpeaking)
         .onAppear { showOnboarding = !hub.hasOnboarded }
         .fullScreenCover(isPresented: $showOnboarding) {
             OnboardingView {

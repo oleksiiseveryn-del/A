@@ -2,6 +2,7 @@ import SwiftUI
 
 struct InboxView: View {
     @Environment(MessageHub.self) private var hub
+    @Environment(SpeechReader.self) private var reader
     @State private var search = ""
     @State private var filter: Filter = .all
     @State private var platformFilter: Platform?
@@ -84,6 +85,13 @@ struct InboxView: View {
             .refreshable { await hub.refresh() }
             .safeAreaInset(edge: .top) { filterBar }
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        if reader.isSpeaking { reader.stop() } else { reader.speak(SpeechReader.parts(forNew: hub.conversations)) }
+                    } label: {
+                        Label("Neue Nachrichten vorlesen", systemImage: reader.isSpeaking ? "stop.circle" : "speaker.wave.2")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         Task { await hub.triage() }
