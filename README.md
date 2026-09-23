@@ -59,24 +59,64 @@ Nicht möglich (technische Sperre von Apple): Zugriff auf **iMessage** ohne Mac-
 
 Die App erkennt automatisch, aus welchem Messenger ein Chat kommt, und zeigt das passende Symbol.
 
-## App bauen und auf das iPhone bringen
+## Ohne Mac: zwei Wege aufs iPhone
 
-Voraussetzungen: Mac mit **Xcode 15** oder neuer, iPhone mit **iOS 17** oder neuer, Apple-ID.
+### Weg 1 – sofort: Web-App auf dem Home-Bildschirm (kostenlos)
+
+Die Web-App in `web/` hat dieselben Funktionen wie die native App und wird automatisch
+veröffentlicht unter:
+
+**https://oleksiiseveryn-del.github.io/A/**
+
+1. Den Link auf dem iPhone in **Safari** öffnen.
+2. Teilen-Symbol (□↑) → **„Zum Home-Bildschirm“** → Hinzufügen.
+3. UniMessenger startet jetzt wie eine normale App im Vollbild.
+
+Alle Daten (Chats, Zugangsdaten, API-Schlüssel) bleiben nur in Safari auf diesem iPhone.
+
+> Falls die Seite noch nicht erreichbar ist: auf GitHub im Repository **Settings → Pages →
+> Source: „GitHub Actions“** wählen und unter **Settings → Environments → github-pages** den
+> Branch `claude/unified-messenger-iphone-app-67g1uc` zulassen (oder den Branch in `main` mergen).
+
+### Weg 2 – echte iPhone-App, gebaut auf einem Mac in der Cloud
+
+GitHub stellt für öffentliche Repositories kostenlose Mac-Server bereit. Der Ablauf
+`.github/workflows/ios.yml` baut und testet die App bei jeder Änderung automatisch.
+
+Für die Installation über **TestFlight** (einmalig, alles im Browser, auch unter Windows):
+
+1. **Apple Developer Program** beitreten: <https://developer.apple.com/programs/> (99 €/Jahr,
+   als Firma mit D-U-N-S-Nummer).
+2. In **App Store Connect** → *Apps* → „+“ → neue App: Bundle-ID
+   `de.hsd-hamburg.UniMessenger`, Name „UniMessenger“.
+3. App Store Connect → *Benutzer und Zugriff* → *Integrationen* → **API-Schlüssel** erzeugen
+   (Rolle „App-Manager“), `.p8`-Datei herunterladen, *Key ID* und *Issuer ID* notieren.
+4. Auf GitHub: Repository → *Settings → Secrets and variables → Actions* → vier Secrets anlegen:
+
+   | Name | Inhalt |
+   |---|---|
+   | `ASC_KEY_ID` | Key ID des API-Schlüssels |
+   | `ASC_ISSUER_ID` | Issuer ID |
+   | `ASC_KEY_P8` | kompletter Inhalt der `.p8`-Datei |
+   | `APPLE_TEAM_ID` | Team-ID (developer.apple.com → Membership) |
+
+5. GitHub → *Actions* → **iOS-App** → *Run workflow* → Haken bei „Nach TestFlight hochladen“.
+6. Nach ca. 15–30 Minuten erscheint der Build in der **TestFlight-App** auf dem iPhone.
+   Mitarbeiter lädt man dort per E-Mail ein.
+
+Signierung und Zertifikate erledigt Xcode in der Cloud automatisch über den API-Schlüssel.
+
+### Mit eigenem Mac (optional)
 
 ```bash
-brew install xcodegen          # einmalig
-git clone <dieses Repository> && cd A
-xcodegen generate              # erzeugt UniMessenger.xcodeproj aus project.yml
-open UniMessenger.xcodeproj
+brew install xcodegen && xcodegen generate && open UniMessenger.xcodeproj
 ```
-
-In Xcode: Ziel *UniMessenger* → *Signing & Capabilities* → Team wählen → iPhone anschließen →
-▶︎ Ausführen. Für die Verteilung an Mitarbeiter: TestFlight oder Apple Business Manager.
 
 ### KI aktivieren
 
 1. API-Schlüssel unter <https://console.anthropic.com> erstellen.
 2. In der App: **Einstellungen → KI-Assistent** → Schlüssel einfügen → Speichern.
+   Tipp: in der Anthropic Console ein monatliches Ausgabenlimit setzen.
 3. Modell: *Claude Opus 5* (Standard, beste Qualität) oder *Claude Sonnet 5* (schneller, günstiger).
 
 Kosten: je Vorschlag ca. 1–3 Tausend Tokens, d. h. grob **1–3 Cent** pro Chat mit Opus 5 (Sonnet 5 etwa die Hälfte).
@@ -95,6 +135,8 @@ Kosten: je Vorschlag ca. 1–3 Tausend Tokens, d. h. grob **1–3 Cent** pro Cha
 
 ```
 project.yml                      XcodeGen-Projektdefinition (iOS 17, SwiftUI)
+web/                             Web-App (PWA) mit gleichem Funktionsumfang, läuft in Safari
+.github/workflows/               Cloud-Build der iOS-App (+ TestFlight) und Veröffentlichung der Web-App
 UniMessenger/
   App/UniMessengerApp.swift      Einstieg, Abruf alle 20 s solange die App offen ist
   Models/Models.swift            Platform, Conversation, Message, Account, Priority
