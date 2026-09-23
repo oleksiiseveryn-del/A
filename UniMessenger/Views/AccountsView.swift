@@ -1,0 +1,166 @@
+import SwiftUI
+
+struct AccountsView: View {
+    @Environment(MessageHub.self) private var hub
+    @State private var editing: Account?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    ForEach(hub.accounts) { account in
+                        Button {
+                            editing = account
+                        } label: {
+                            HStack {
+                                Image(systemName: icon(for: account.kind))
+                                    .frame(width: 28)
+                                VStack(alignment: .leading) {
+                                    Text(account.name).foregroundStyle(.primary)
+                                    if let error = hub.accountErrors[account.id] {
+                                        Text(error).font(.caption).foregroundStyle(.red).lineLimit(2)
+                                    } else {
+                                        Text(account.isEnabled ? "Verbunden" : "Deaktiviert")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .onDelete { offsets in
+                        for index in offsets {
+                            let id = hub.accounts[index].id
+                            KeychainStore.set(nil, for: KeychainStore.Key.secret(id))
+                            KeychainStore.set(nil, for: KeychainStore.Key.token(id))
+                        }
+                        hub.accounts.remove(atOffsets: offsets)
+                    }
+                } header: {
+                    Text("Verbundene Konten")
+                }
+
+                Section {
+                    ForEach(Account.Kind.allCases) { kind in
+                        Button {
+                            editing = Account(kind: kind, name: defaultName(for: kind))
+                        } label: {
+                            Label(kind.title, systemImage: icon(for: kind))
+                        }
+                    }
+                } header: {
+                    Text("Konto hinzufügen")
+                } footer: {
+                    Text("""
+                    WhatsApp, Signal, Instagram, Facebook Messenger, SMS und weitere Dienste werden über einen \
+                    Matrix-Server mit Bridges angebunden (siehe README). Apple erlaubt keiner App den direkten \
+                    Zugriff auf fremde Messenger – dies ist der offiziell zulässige Weg.
+                    """)
+                }
+            }
+            .navigationTitle("Konten")
+            .sheet(item: $editing) { account in
+                AccountEditor(account: account)
+            }
+        }
+    }
+
+    private func icon(for kind: Account.Kind) -> String {
+        switch kind {
+        case .matrix: "square.grid.3x3.fill"
+        case .telegramBot: "paperplane.fill"
+        case .demo: "sparkles"
+        }
+    }
+
+    private func defaultName(for kind: Account.Kind) -> String {
+        switch kind {
+        case .matrix: "Alle Messenger (Matrix)"
+        case .telegramBot: "Telegram Firmen-Bot"
+        case .demo: "Demo"
+        }
+    }
+}
+
+struct AccountEditor: View {
+    @Environment(MessageHub.self) private var hub
+    @Environment(\.dismiss) private var dismiss
+    @State var account: Account
+    @State private var secret = ""
+
+    private var isNew: Bool { !hub.accounts.contains { $0.id == account.id } }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Allgemein") {
+                    TextField("Name", text: $account.name)
+                    Toggle("Aktiv", isOn: $account.isEnabled)
+                }
+                switch account.kind {
+                case .matrix:
+                    Section {
+                        TextField("Homeserver, z. B. matrix.hsd-hamburg.de", text: $account.serverURL)
+                            .textInputAutocapitalization(.never).keyboardType(.URL).autocorrectionDisabled()
+                        TextField("Benutzername", text: $account.username)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                        SecureField(isNew ? "Passwort" : "Neues Passwort (optional)", text: $secret)
+                    } header: {
+                        Text("Matrix-Anmeldung")
+                    } footer: {
+                        Text("Das Passwort wird nur einmal zur Anmeldung verwendet; danach speichert die App ausschließlich ein Geräte-Token im Schlüsselbund.")
+                    }
+                case .telegramBot:
+                    Section {
+                        SecureField(isNew ? "Bot-Token von @BotFather" : "Neues Token (optional)", text: $secret)
+                            .textInputAutocapitalization(.never).autocorrectionDisabled()
+                    } header: {
+                        Text("Telegram")
+                    } footer: {
+                        Text("Kunden schreiben Ihrem Firmen-Bot; Sie antworten hier. Das Token liegt verschlüsselt im iOS-Schlüsselbund.")
+                    }
+                case .demo:
+                    Section {
+                        Text("Beispiel-Chats aus dem Baualltag zum Ausprobieren der KI-Funktionen.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle(isNew ? "Konto hinzufügen" : "Konto bearbeiten")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Sichern") { save() }
+                        .disabled(!isValid)
+                }
+            }
+        }
+    }
+
+    private var isValid: Bool {
+        switch account.kind {
+        case .matrix: !account.serverURL.isEmpty && !account.username.isEmpty && (!isNew || !secret.isEmpty)
+        case .telegramBot: !isNew || !secret.isEmpty
+        case .demo: true
+        }
+    }
+
+    private func save() {
+        if !secret.isEmpty {
+            KeychainStore.set(secret, for: KeychainStore.Key.secret(account.id))
+            // New credentials invalidate any stored session token.
+            KeychainStore.set(nil, for: KeychainStore.Key.token(account.id))
+            UserDefaults.standard.removeObject(forKey: "matrix.since.\(account.id.uuidString)")
+        }
+        if let index = hub.accounts.firstIndex(where: { $0.id == account.id }) {
+            hub.accounts[index] = account
+        } else {
+            hub.accounts.append(account)
+        }
+        hub.resetConnection(for: account.id)
+        Task { await hub.refresh() }
+        dismiss()
+    }
+}
