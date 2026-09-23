@@ -47,7 +47,7 @@ final class MatrixConnector: MessengerConnector {
                 "type": "m.login.password",
                 "identifier": ["type": "m.id.user", "user": account.username],
                 "password": password,
-                "initial_device_display_name": "UniMessenger iPhone",
+                "initial_device_display_name": "OS iPhone",
             ]
             let response = try await HTTP.json(try HTTP.request(try endpoint("login"), method: "POST", body: body))
             guard let token = response["access_token"] as? String else { throw ConnectorError.invalidResponse }

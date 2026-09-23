@@ -1,5 +1,5 @@
 "use strict";
-// UniMessenger Web (PWA) – same feature set as the native iOS app, runs in Safari
+// OS Web (PWA) – same feature set as the native iOS app, runs in Safari
 // and can be added to the iPhone home screen. All data stays in this browser.
 
 // ---------------------------------------------------------------------------
@@ -222,7 +222,7 @@ function matrixConnector(account) {
           type: "m.login.password",
           identifier: { type: "m.id.user", user: account.username },
           password,
-          initial_device_display_name: "UniMessenger iPhone (Web)",
+          initial_device_display_name: "OS iPhone (Web)",
         } });
         token = res.access_token;
         userID = res.user_id;
@@ -985,7 +985,7 @@ function renderSettings() {
 
       <div class="section-title">Daten</div>
       <div class="group"><button class="btn-row danger" id="btn-reset">Alle Chats auf diesem Gerät löschen</button></div>
-      <div class="footer">UniMessenger · HSD Hamburg GmbH · Merckmannstraße 30 · 20539 Hamburg</div>
+      <div class="footer">OS · HSD Hamburg GmbH · Merckmannstraße 30 · 20539 Hamburg</div>
     </div>`;
   screen.querySelectorAll("[data-p]").forEach((el) => el.addEventListener("input", () => {
     state.profile[el.dataset.p] = el.value;

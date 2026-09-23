@@ -1,8 +1,8 @@
-# UniMessenger – alle Messenger in einer iPhone-App, mit KI-Antworten
+# OS – alle Messenger in einer iPhone-App, mit KI-Antworten
 
-**HSD Hamburg GmbH** · Merckmannstraße 30 · 20539 Hamburg
+App-Name auf dem iPhone: **OS** · Farbe: Rot · **HSD Hamburg GmbH** · Merckmannstraße 30 · 20539 Hamburg
 
-UniMessenger bündelt Nachrichten aus WhatsApp, Telegram, Signal, Instagram, Facebook Messenger,
+**OS** bündelt Nachrichten aus WhatsApp, Telegram, Signal, Instagram, Facebook Messenger,
 SMS, Slack, LinkedIn u. a. in **einem Posteingang**. Eine KI (Claude von Anthropic) macht zu jeder
 Nachricht **drei Antwortvorschläge**, sortiert den Posteingang nach **Dringlichkeit** und überarbeitet
 oder übersetzt Ihre Entwürfe. Gesendet wird immer erst, wenn Sie auf „Senden“ tippen.
@@ -26,12 +26,12 @@ die in fremden Nachrichten stehen, werden ignoriert (Schutz vor Manipulation).
 
 Apple erlaubt **keiner** iPhone-App, die Nachrichten anderer Apps (WhatsApp, iMessage, Signal …)
 direkt zu lesen. Alle seriösen „Alles-in-einem“-Messenger lösen das über einen Server mit
-**Bridges**. UniMessenger nutzt dafür den offenen Standard **Matrix**:
+**Bridges**. OS nutzt dafür den offenen Standard **Matrix**:
 
 ```
  WhatsApp ─┐
  Signal ───┤   mautrix-Bridges      Matrix-Server           iPhone
- Instagram ┼──────────────────────▶ (z. B. Synapse)  ◀────▶ UniMessenger ◀──▶ Claude (KI)
+ Instagram ┼──────────────────────▶ (z. B. Synapse)  ◀────▶ OS ◀──────────▶ Claude (KI)
  Messenger ┤                        matrix.hsd-…de
  SMS ──────┘
  Telegram-Firmenbot ──────────────────────────────────────▶ (direkt, ohne Server)
@@ -55,7 +55,7 @@ Nicht möglich (technische Sperre von Apple): Zugriff auf **iMessage** ohne Mac-
    `matrix_mautrix_meta_instagram_enabled: true`, `matrix_mautrix_gmessages_enabled: true`.
 4. Pro Messenger einmal koppeln (QR-Code in WhatsApp → *Verknüpfte Geräte* usw., Anleitung je
    Bridge unter <https://docs.mau.fi/bridges/>).
-5. In UniMessenger: **Konten → Matrix / Bridges** → Homeserver-Adresse, Benutzername, Passwort.
+5. In OS: **Konten → Matrix / Bridges** → Homeserver-Adresse, Benutzername, Passwort.
 
 Die App erkennt automatisch, aus welchem Messenger ein Chat kommt, und zeigt das passende Symbol.
 
@@ -70,7 +70,7 @@ veröffentlicht unter:
 
 1. Den Link auf dem iPhone in **Safari** öffnen.
 2. Teilen-Symbol (□↑) → **„Zum Home-Bildschirm“** → Hinzufügen.
-3. UniMessenger startet jetzt wie eine normale App im Vollbild.
+3. **OS** (rotes Symbol) startet jetzt wie eine normale App im Vollbild.
 
 Alle Daten (Chats, Zugangsdaten, API-Schlüssel) bleiben nur in Safari auf diesem iPhone.
 
@@ -88,7 +88,8 @@ Für die Installation über **TestFlight** (einmalig, alles im Browser, auch unt
 1. **Apple Developer Program** beitreten: <https://developer.apple.com/programs/> (99 €/Jahr,
    als Firma mit D-U-N-S-Nummer).
 2. In **App Store Connect** → *Apps* → „+“ → neue App: Bundle-ID
-   `de.hsd-hamburg.UniMessenger`, Name „UniMessenger“.
+   `de.hsd-hamburg.UniMessenger`, Name z. B. „OS – HSD Hamburg“ (der Name im App Store muss weltweit eindeutig sein;
+   auf dem Home-Bildschirm erscheint immer „OS“).
 3. App Store Connect → *Benutzer und Zugriff* → *Integrationen* → **API-Schlüssel** erzeugen
    (Rolle „App-Manager“), `.p8`-Datei herunterladen, *Key ID* und *Issuer ID* notieren.
 4. Auf GitHub: Repository → *Settings → Secrets and variables → Actions* → vier Secrets anlegen:

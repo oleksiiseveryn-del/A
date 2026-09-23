@@ -9,6 +9,7 @@ struct UniMessengerApp: App {
         WindowGroup {
             ContentView()
                 .environment(hub)
+                .tint(Color("AccentColor"))
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     if phase == .active { hub.startPolling() } else { hub.stopPolling() }
                 }
