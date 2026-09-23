@@ -1,10 +1,12 @@
 // Offline shell cache. API calls (Matrix, Telegram, Claude) always go to the network.
-const CACHE = "os-v6";
-const SHELL = ["./", "index.html", "app.css", "app.js", "manifest.webmanifest",
+const CACHE = "os-v7";
+const SHELL = ["./", "index.html", "app.css", "app.js", "manifest.json",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.addAll(SHELL)));
+  // Cache each file on its own: one failing file (e.g. a redirected icon) must not stop the rest.
+  event.waitUntil(caches.open(CACHE).then((cache) =>
+    Promise.all(SHELL.map((url) => cache.add(url).catch(() => undefined)))));
   self.skipWaiting();
 });
 

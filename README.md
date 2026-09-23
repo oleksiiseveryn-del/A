@@ -77,20 +77,21 @@ Die App erkennt automatisch, aus welchem Messenger ein Chat kommt, und zeigt das
 
 ### Weg 1 – sofort: Web-App auf dem Home-Bildschirm (kostenlos)
 
-Die Web-App in `web/` hat dieselben Funktionen wie die native App und wird automatisch
-veröffentlicht unter:
+**Link zum Installieren (ohne jede Einstellung, direkt aus diesem Repository):**
 
-**https://oleksiiseveryn-del.github.io/A/**
+**https://raw.githack.com/oleksiiseveryn-del/A/claude/unified-messenger-iphone-app-67g1uc/web/index.html**
 
-1. Den Link auf dem iPhone in **Safari** öffnen.
-2. Teilen-Symbol (□↑) → **„Zum Home-Bildschirm“** → Hinzufügen.
-3. **OS** (rotes Symbol) startet jetzt wie eine normale App im Vollbild.
+1. Den Link auf dem iPhone in **Safari** öffnen (nicht in der GitHub- oder Claude-App).
+2. Unten auf Teilen **□↑** tippen → **„Zum Home-Bildschirm“** → Name „OS“ → **Hinzufügen**.
+3. Das rote **OS**-Symbol starten – ab jetzt läuft OS im Vollbild wie eine normale App.
+4. Der Einrichtungs-Assistent führt durch KI-Schlüssel und Konten.
 
-Alle Daten (Chats, Zugangsdaten, API-Schlüssel) bleiben nur in Safari auf diesem iPhone.
+Neue Versionen kommen automatisch: Änderungen in diesem Branch sind nach wenigen Minuten in der App.
 
-> Falls die Seite noch nicht erreichbar ist: auf GitHub im Repository **Settings → Pages →
-> Source: „GitHub Actions“** wählen und unter **Settings → Environments → github-pages** den
-> Branch `claude/unified-messenger-iphone-app-67g1uc` zulassen (oder den Branch in `main` mergen).
+> Hinweis: raw.githack.com ist ein kostenloser Auslieferungsdienst für öffentliche GitHub-Dateien. Alle
+> dort ausgelieferten Seiten teilen sich eine Web-Adresse; öffnen Sie in Safari daher keine fremden
+> raw.githack.com-Links. Dauerhaft professioneller ist eine eigene Adresse (z. B. `os.hsd-hamburg.de`)
+> oder GitHub Pages (Settings → Pages → Source „GitHub Actions“), sobald das freigeschaltet ist.
 
 ### Weg 2 – echte iPhone-App, gebaut auf einem Mac in der Cloud
 
