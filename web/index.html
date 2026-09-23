@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="UniMessenger">
+  <meta name="theme-color" content="#1f5fc9">
+  <title>UniMessenger</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="app">
+    <main id="screen"></main>
+    <nav id="tabbar">
+      <button data-tab="inbox" class="active"><span class="ico">📥</span><span>Posteingang</span><b id="unread-badge" hidden></b></button>
+      <button data-tab="accounts"><span class="ico">👤</span><span>Konten</span></button>
+      <button data-tab="settings"><span class="ico">⚙️</span><span>Einstellungen</span></button>
+    </nav>
+  </div>
+  <div id="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
