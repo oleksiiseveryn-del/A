@@ -28,6 +28,9 @@ struct ConversationView: View {
     @State private var showCallMenu = false
     @State private var activeCall: ActiveCall?
     @State private var endedCall: EndedCall?
+    /// Presentations queued until the covering sheet/cover has finished dismissing.
+    @State private var queuedCallAudioOnly: Bool?
+    @State private var queuedProtocolMinutes: Int?
     @Environment(\.openURL) private var openURL
     @Environment(SpeechReader.self) private var reader
 
@@ -172,15 +175,26 @@ struct ConversationView: View {
                 }
             }
             .onDisappear { dictation.stop() }
-            .sheet(isPresented: $showCallMenu) {
+            .sheet(isPresented: $showCallMenu, onDismiss: {
+                // The call screen can only be presented once the menu sheet is gone.
+                if let audioOnly = queuedCallAudioOnly {
+                    queuedCallAudioOnly = nil
+                    startCall(audioOnly: audioOnly)
+                }
+            }) {
                 CallMenuSheet(conversation: conversation,
-                              onStart: { audioOnly in startCall(audioOnly: audioOnly) },
+                              onStart: { audioOnly in queuedCallAudioOnly = audioOnly },
                               onPlan: { date in Task { await planCall(at: date, conversation) } })
             }
-            .fullScreenCover(item: $activeCall) { call in
-                CallScreen(call: call, title: conversation.title) { minutes in
-                    activeCall = nil
+            .fullScreenCover(item: $activeCall, onDismiss: {
+                if let minutes = queuedProtocolMinutes {
+                    queuedProtocolMinutes = nil
                     endedCall = EndedCall(minutes: minutes)
+                }
+            }) { call in
+                CallScreen(call: call, title: conversation.title) { minutes in
+                    queuedProtocolMinutes = minutes
+                    activeCall = nil
                 }
             }
             .sheet(item: $endedCall) { ended in
@@ -450,6 +464,8 @@ struct ConversationView: View {
         let when = date.formatted(.dateTime.weekday(.abbreviated).day().month(.twoDigits).hour().minute().locale(Locale(identifier: "de_DE")))
         let text = "🗓 Einladung zum Videogespräch mit \(hub.profile.ownerName) (\(hub.profile.company)) am \(when) Uhr:\n\(room.absoluteString)\nZum Termin einfach den Link antippen – keine App nötig."
         let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = .gregorian
         formatter.dateFormat = "yyyy-MM-dd'T'HH:mm"
         do {
             try await hub.send(text, in: conversationID)

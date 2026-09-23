@@ -47,17 +47,25 @@ struct ReplyAssistant {
     private func transcript(_ conversation: Conversation, limit: Int = 30) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "dd.MM. HH:mm"
+        // Third-party text is escaped so it cannot close or fake the surrounding tags.
         let lines = conversation.messages.suffix(limit).map { message in
-            let who = message.isOutgoing ? profile.ownerName + " (ich)" : message.senderName
-            let media = message.attachment.map { "[\($0.label)] " } ?? ""
-            return "[\(formatter.string(from: message.date))] \(who): \(media)\(message.text)"
+            let who = message.isOutgoing ? profile.ownerName + " (ich)" : Self.xmlSafe(message.senderName)
+            let media = message.attachment.map { "[\(Self.xmlSafe($0.label))] " } ?? ""
+            return "[\(formatter.string(from: message.date))] \(who): \(media)\(Self.xmlSafe(message.text))"
         }
-        let note = conversation.note.map { $0.isEmpty ? "" : "<contact_note>\($0)</contact_note>\n" } ?? ""
+        let note = conversation.note.map { $0.isEmpty ? "" : "<contact_note>\(Self.xmlSafe($0))</contact_note>\n" } ?? ""
         return """
-        <conversation channel="\(conversation.platform.displayName)" title="\(conversation.title)">
+        <conversation channel="\(conversation.platform.displayName)" title="\(Self.xmlSafe(conversation.title))">
         \(note)\(lines.joined(separator: "\n"))
         </conversation>
         """
+    }
+
+    static func xmlSafe(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     private var now: String {

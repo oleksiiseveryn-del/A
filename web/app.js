@@ -78,9 +78,9 @@ const files = {
     });
   },
   async put(key, blob) {
-    this.mem.set(key, blob);
     const db = await this.open();
-    if (!db) return;
+    // Memory is only the fallback when IndexedDB is unavailable (e.g. private mode).
+    if (!db) { this.mem.set(key, blob); return; }
     try { db.transaction("files", "readwrite").objectStore("files").put(blob, key); } catch { /* quota */ }
   },
 };
@@ -608,23 +608,28 @@ function resetConnection(accountID) {
   connectors.delete(accountID);
 }
 
+// Returns { changed, incoming }: whether anything stored changed / new incoming messages arrived.
 function merge(update) {
   const id = convID(update);
   const existing = state.conversations.find((c) => convID(c) === id);
   if (!existing) {
     state.conversations.push({ isPinned: false, isArchived: false, priority: null, aiSummary: null, ...update });
-    return update.messages.some((m) => !m.isOutgoing);
+    return { changed: true, incoming: update.messages.some((m) => !m.isOutgoing) };
   }
   const known = new Set(existing.messages.map((m) => m.id));
   const fresh = update.messages.filter((m) => !known.has(m.id));
-  existing.messages.push(...fresh);
-  existing.messages.sort((a, b) => a.date - b.date);
+  const before = [existing.title, existing.platform, existing.unreadCount, existing.isArchived].join("\u0000");
+  if (fresh.length) {
+    existing.messages.push(...fresh);
+    existing.messages.sort((a, b) => a.date - b.date);
+  }
   existing.title = update.title;
   existing.platform = update.platform;
   if (update.unreadCount > 0) existing.unreadCount = Math.max(existing.unreadCount, update.unreadCount);
   const incoming = fresh.some((m) => !m.isOutgoing);
   if (incoming) existing.isArchived = false;
-  return incoming;
+  const after = [existing.title, existing.platform, existing.unreadCount, existing.isArchived].join("\u0000");
+  return { changed: fresh.length > 0 || before !== after, incoming };
 }
 
 function sortConversations() {
@@ -636,21 +641,31 @@ async function refresh() {
   if (state.refreshing) return;
   state.refreshing = true;
   const valid = new Set(state.accounts.map((a) => a.id));
+  const count = state.conversations.length;
   state.conversations = state.conversations.filter((c) => valid.has(c.accountID));
+  let dirty = state.conversations.length !== count;
   const changed = [];
   await Promise.all(state.accounts.filter((a) => a.enabled).map(async (account) => {
     const entry = connectorFor(account);
     try {
       if (!entry.connected) { await entry.connector.connect(); entry.connected = true; }
       const updates = await entry.connector.fetchUpdates();
+      // Account edited or deleted meanwhile: its connector was replaced, drop the stale result.
+      if (connectors.get(account.id) !== entry) return;
       delete state.accountErrors[account.id];
-      for (const u of updates) if (merge(u)) changed.push(convID(u));
+      for (const u of updates) {
+        const outcome = merge(u);
+        dirty ||= outcome.changed;
+        if (outcome.incoming) changed.push(convID(u));
+      }
     } catch (error) {
-      state.accountErrors[account.id] = error.message;
+      if (connectors.get(account.id) === entry) state.accountErrors[account.id] = error.message;
     }
   }));
-  sortConversations();
-  save();
+  if (dirty) {
+    sortConversations();
+    save();
+  }
   state.refreshing = false;
   view.update();
   if (state.autoTriage && changed.length) triage(changed);
@@ -663,7 +678,8 @@ async function sendMessage(id, text) {
   const entry = connectorFor(account);
   if (!entry.connected) { await entry.connector.connect(); entry.connected = true; }
   const message = await entry.connector.send(text, conversation);
-  conversation.messages.push(message);
+  // A poll that ran during the send may already have merged the same event.
+  if (!conversation.messages.some((m) => m.id === message.id)) conversation.messages.push(message);
   Object.assign(conversation, { unreadCount: 0, priority: "low", aiSummary: null });
   sortConversations();
   save();
@@ -681,8 +697,10 @@ async function sendFile(id, original) {
   // Keep our own copy so the bubble shows instantly without downloading again.
   const key = uuid();
   await files.put("local:" + key, file);
-  conversation.messages.push({ id: messageID, senderName: "Ich", text: "", date: Date.now(), isOutgoing: true,
-    attachment: { kind: kindFor(file.type), name: file.name, mime: file.type, size: file.size, src: { type: "local", key } } });
+  if (!conversation.messages.some((m) => m.id === messageID)) {
+    conversation.messages.push({ id: messageID, senderName: "Ich", text: "", date: Date.now(), isOutgoing: true,
+      attachment: { kind: kindFor(file.type), name: file.name, mime: file.type, size: file.size, src: { type: "local", key } } });
+  }
   Object.assign(conversation, { unreadCount: 0, priority: "low", aiSummary: null });
   sortConversations();
   save();
@@ -705,6 +723,12 @@ async function loadAttachment(conversation, att) {
   }
   const result = { blob, url: URL.createObjectURL(blob) };
   objectURLs.set(key, result);
+  // Keep at most 60 files in memory; the oldest are released (they stay in IndexedDB).
+  while (objectURLs.size > 60) {
+    const [oldKey, old] = objectURLs.entries().next().value;
+    URL.revokeObjectURL(old.url);
+    objectURLs.delete(oldKey);
+  }
   return result;
 }
 
@@ -781,9 +805,10 @@ ${p.signature}`;
   transcript(c, limit = 30) {
     const fmt = (ms) => new Date(ms).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
     const lines = c.messages.slice(-limit).map((m) =>
-      `[${fmt(m.date)}] ${m.isOutgoing ? state.profile.ownerName + " (ich)" : m.senderName}: ${m.attachment ? `[${attachmentLabel(m.attachment)}] ` : ""}${m.text}`);
-    const note = c.note ? `<contact_note>${c.note}</contact_note>\n` : "";
-    return `<conversation channel="${PLATFORMS[c.platform]?.name}" title="${c.title}">\n${note}${lines.join("\n")}\n</conversation>`;
+      // Third-party text is escaped so it cannot close or fake the surrounding tags.
+      `[${fmt(m.date)}] ${m.isOutgoing ? state.profile.ownerName + " (ich)" : esc(m.senderName)}: ${m.attachment ? `[${esc(attachmentLabel(m.attachment))}] ` : ""}${esc(m.text)}`);
+    const note = c.note ? `<contact_note>${esc(c.note)}</contact_note>\n` : "";
+    return `<conversation channel="${PLATFORMS[c.platform]?.name}" title="${esc(c.title)}">\n${note}${lines.join("\n")}\n</conversation>`;
   },
 
   // Recent photos (and optionally one PDF) as content blocks so the AI can see them.
@@ -1295,9 +1320,9 @@ function meetingLink(text) {
   for (const raw of String(text || "").match(/https:\/\/[^\s<>"]+/g) || []) {
     try {
       const url = new URL(raw.replace(/[).,;!?]+$/, ""));
-      const own = url.host === callSettings().server || /^\/OS-HSD-/.test(url.pathname);
-      if (own || JITSI_HOSTS.test(url.hostname)) return { url: url.href, inApp: url.pathname.length > 1 };
-      if (MEETING_HOSTS.test(url.hostname)) return { url: url.href, inApp: false };
+      // In-app joins load the host's external_api.js into this origin, so only trusted Jitsi hosts qualify.
+      if (url.host === callSettings().server || JITSI_HOSTS.test(url.hostname)) return { url: url.href, inApp: url.pathname.length > 1 };
+      if (/^\/OS-HSD-/.test(url.pathname) || MEETING_HOSTS.test(url.hostname)) return { url: url.href, inApp: false };
     } catch { /* not a URL */ }
   }
   return null;
@@ -2187,7 +2212,8 @@ function renderTasks() {
 function fillTasks() {
   const el = $("#tasks");
   if (!el) return;
-  const today = new Date().toISOString().slice(0, 10);
+  const d = new Date(); // local date, not UTC
+  const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const byDue = (a, b) => (a.due || "9999").localeCompare(b.due || "9999") || b.created - a.created;
   const open = state.tasks.filter((t) => !t.done).sort(byDue);
   const done = state.tasks.filter((t) => t.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 20);
@@ -2291,7 +2317,9 @@ function renderAccountEditor() {
     const updated = { id: a.id, kind: a.kind, name: val("#f-name") || ACCOUNT_KINDS[a.kind],
       serverURL: val("#f-server"), username: val("#f-user"), enabled: $("#f-enabled").checked };
     if (a.kind === "matrix" && (!updated.serverURL || !updated.username)) return toast("Homeserver und Benutzer angeben.");
-    if (a.kind !== "demo" && a.isNew && !secret) return toast(a.kind === "matrix" ? "Passwort angeben." : "Bot-Token angeben.");
+    // A stored device token belongs to one homeserver and user; changing either needs a fresh login.
+    const loginChanged = a.kind === "matrix" && (updated.serverURL !== a.serverURL || updated.username !== a.username);
+    if (a.kind !== "demo" && (a.isNew || loginChanged) && !secret) return toast(a.kind === "matrix" ? "Passwort angeben." : "Bot-Token angeben.");
     if (secret) {
       store.set(secretKey(a.id), secret);
       store.set(tokenKey(a.id), null);

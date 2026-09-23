@@ -89,6 +89,12 @@ struct AccountEditor: View {
 
     private var isNew: Bool { !hub.accounts.contains { $0.id == account.id } }
 
+    /// A stored device token belongs to one homeserver and user; changing either needs a fresh login.
+    private var loginChanged: Bool {
+        guard let stored = hub.accounts.first(where: { $0.id == account.id }) else { return true }
+        return stored.serverURL != account.serverURL || stored.username != account.username
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -103,7 +109,7 @@ struct AccountEditor: View {
                             .textInputAutocapitalization(.never).keyboardType(.URL).autocorrectionDisabled()
                         TextField("Benutzername", text: $account.username)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
-                        SecureField(isNew ? "Passwort" : "Neues Passwort (optional)", text: $secret)
+                        SecureField(loginChanged ? "Passwort" : "Neues Passwort (optional)", text: $secret)
                     } header: {
                         Text("Matrix-Anmeldung")
                     } footer: {
@@ -141,7 +147,7 @@ struct AccountEditor: View {
 
     private var isValid: Bool {
         switch account.kind {
-        case .matrix: !account.serverURL.isEmpty && !account.username.isEmpty && (!isNew || !secret.isEmpty)
+        case .matrix: !account.serverURL.isEmpty && !account.username.isEmpty && (!loginChanged || !secret.isEmpty)
         case .telegramBot: !isNew || !secret.isEmpty
         case .demo: true
         }

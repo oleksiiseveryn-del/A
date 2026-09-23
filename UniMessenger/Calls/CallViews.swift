@@ -105,7 +105,8 @@ struct CallWebView: UIViewRepresentable {
         func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin,
                      initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType,
                      decisionHandler: @escaping (WKPermissionDecision) -> Void) {
-            decisionHandler(.grant)
+            // Auto-grant only the call server itself; anything else gets the normal WebKit prompt.
+            decisionHandler(origin.host == parent.url.host ? .grant : .prompt)
         }
 
         /// Jitsi navigates away from the room after hanging up – treat that as the end of the call.
@@ -262,7 +263,7 @@ extension MessageBubble {
     /// Message text with tappable web links.
     static func linkified(_ text: String) -> AttributedString {
         var attributed = AttributedString(text)
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return attributed }
+        guard let detector = CallSettings.linkDetector else { return attributed }
         for match in detector.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
             guard let url = match.url, let range = Range(match.range, in: text),
                   let lower = AttributedString.Index(range.lowerBound, within: attributed),

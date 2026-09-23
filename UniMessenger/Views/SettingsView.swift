@@ -9,27 +9,23 @@ struct SettingsView: View {
     @AppStorage("callQuality") private var callQuality = 720
     @AppStorage("speechRate") private var speechRate = 1.0
     @State private var apiKey = ""
-    @State private var hasKey = KeychainStore.get(KeychainStore.Key.anthropicAPIKey) != nil
 
     var body: some View {
         @Bindable var hub = hub
         NavigationStack {
             Form {
                 Section {
-                    if hasKey {
+                    if hub.hasAPIKey {
                         LabeledContent("API-Schlüssel", value: "hinterlegt ✓")
                         Button("Schlüssel entfernen", role: .destructive) {
-                            KeychainStore.set(nil, for: KeychainStore.Key.anthropicAPIKey)
-                            hasKey = false
+                            hub.setAPIKey(nil)
                         }
                     } else {
                         SecureField("Anthropic API-Schlüssel (sk-ant-…)", text: $apiKey)
                             .textInputAutocapitalization(.never).autocorrectionDisabled()
                         Button("Speichern") {
-                            KeychainStore.set(apiKey.trimmingCharacters(in: .whitespacesAndNewlines),
-                                              for: KeychainStore.Key.anthropicAPIKey)
+                            hub.setAPIKey(apiKey)
                             apiKey = ""
-                            hasKey = true
                         }
                         .disabled(apiKey.isEmpty)
                     }

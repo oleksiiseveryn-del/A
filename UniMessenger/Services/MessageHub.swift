@@ -49,7 +49,14 @@ final class MessageHub {
         ReplyAssistant(profile: profile, client: ClaudeClient(model: model))
     }
 
-    var hasAPIKey: Bool { KeychainStore.get(KeychainStore.Key.anthropicAPIKey) != nil }
+    /// Stored (not read from the Keychain on demand) so views update when the key changes.
+    private(set) var hasAPIKey = KeychainStore.get(KeychainStore.Key.anthropicAPIKey) != nil
+
+    func setAPIKey(_ key: String?) {
+        let trimmed = key?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        KeychainStore.set(trimmed.isEmpty ? nil : trimmed, for: KeychainStore.Key.anthropicAPIKey)
+        hasAPIKey = !trimmed.isEmpty
+    }
     var openTaskCount: Int { tasks.filter { !$0.isDone }.count }
 
     func conversation(id: String) -> Conversation? {
@@ -133,44 +140,56 @@ final class MessageHub {
             return collected
         }
 
+        // Accounts edited or deleted while fetching got a new (or no) connector: drop their stale results.
+        let started = Dictionary(uniqueKeysWithValues: jobs.map { ($0.id, $0.connector) })
         var changedIDs: [String] = []
+        var didChange = false
         for (id, result) in results {
+            guard let current = connectors[id], let origin = started[id], current === origin else { continue }
             switch result {
             case .success(let updates):
                 connected.insert(id)
                 accountErrors[id] = nil
-                for update in updates where merge(update) { changedIDs.append(update.id) }
+                for update in updates {
+                    let outcome = merge(update)
+                    didChange = didChange || outcome.changed
+                    if outcome.hasIncoming { changedIDs.append(update.id) }
+                }
             case .failure(let error):
                 accountErrors[id] = error.localizedDescription
             }
         }
-        sort()
-        Persistence.save(conversations, to: "conversations")
+        if didChange {
+            sort()
+            Persistence.save(conversations, to: "conversations")
+        }
 
         if autoTriage, !changedIDs.isEmpty {
             await triage(ids: changedIDs)
         }
     }
 
-    /// Returns true if the conversation received new incoming messages.
-    @discardableResult
-    private func merge(_ update: Conversation) -> Bool {
+    /// `changed`: anything stored was modified; `hasIncoming`: new incoming messages arrived.
+    private func merge(_ update: Conversation) -> (changed: Bool, hasIncoming: Bool) {
         guard let index = conversations.firstIndex(where: { $0.id == update.id }) else {
             conversations.append(update)
-            return update.messages.contains { !$0.isOutgoing }
+            return (true, update.messages.contains { !$0.isOutgoing })
         }
         var existing = conversations[index]
         let known = Set(existing.messages.map(\.id))
         let fresh = update.messages.filter { !known.contains($0.id) }
-        existing.messages.append(contentsOf: fresh)
-        existing.messages.sort { $0.date < $1.date }
+        if !fresh.isEmpty {
+            existing.messages.append(contentsOf: fresh)
+            existing.messages.sort { $0.date < $1.date }
+        }
         existing.title = update.title
         existing.platform = update.platform
         if update.unreadCount > 0 { existing.unreadCount = max(existing.unreadCount, update.unreadCount) }
         let hasIncoming = fresh.contains { !$0.isOutgoing }
         if hasIncoming { existing.isArchived = false }
-        conversations[index] = existing
-        return hasIncoming
+        let changed = existing != conversations[index]
+        if changed { conversations[index] = existing }
+        return (changed, hasIncoming)
     }
 
     private func sort() {
@@ -189,7 +208,10 @@ final class MessageHub {
         }
         let message = try await connector.send(text: text, to: conversations[index])
         guard let current = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
-        conversations[current].messages.append(message)
+        // A poll that ran during the send may already have merged the same event.
+        if !conversations[current].messages.contains(where: { $0.id == message.id }) {
+            conversations[current].messages.append(message)
+        }
         conversations[current].unreadCount = 0
         conversations[current].priority = .low
         conversations[current].aiSummary = nil
@@ -224,7 +246,9 @@ final class MessageHub {
                               attachment: Attachment(kind: Attachment.kind(for: type), name: fileName, mime: type,
                                                      size: data.count, source: .local(key: key)))
         guard let current = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
-        conversations[current].messages.append(message)
+        if !conversations[current].messages.contains(where: { $0.id == message.id }) {
+            conversations[current].messages.append(message)
+        }
         conversations[current].unreadCount = 0
         conversations[current].priority = .low
         sort()

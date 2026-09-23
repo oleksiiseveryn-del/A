@@ -218,9 +218,12 @@ final class VoiceRecorder {
     private(set) var isRecording = false
     private(set) var startedAt: Date?
     @ObservationIgnored private var recorder: AVAudioRecorder?
+    @ObservationIgnored private var isCancelled = false
 
     func start() async throws {
         guard await AVAudioApplication.requestRecordPermission() else { throw VoiceError.notAllowed }
+        // The sheet may have been discarded while the permission prompt was open.
+        guard !isCancelled else { return }
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
         try session.setActive(true)
@@ -247,6 +250,7 @@ final class VoiceRecorder {
     }
 
     func cancel() {
+        isCancelled = true
         recorder?.stop()
         cleanup()
     }

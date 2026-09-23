@@ -244,7 +244,8 @@ struct ActionAppointment: Codable, Hashable {
                 hasTime = true
             }
         }
-        guard let date = Calendar.current.date(from: components) else { return nil }
+        // The AI always answers in ISO (Gregorian) dates, whatever calendar the device uses.
+        guard let date = Calendar.gregorian.date(from: components) else { return nil }
         return (date, hasTime)
     }
 
@@ -271,4 +272,13 @@ struct Briefing: Codable, Hashable {
     let todos: [ActionTodo]
     let appointments: [ActionAppointment]
     var created: Date?
+}
+
+extension Calendar {
+    /// Gregorian calendar in the user's time zone, for ISO "YYYY-MM-DD" strings.
+    static var gregorian: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        return calendar
+    }
 }

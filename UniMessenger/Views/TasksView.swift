@@ -58,7 +58,7 @@ struct TasksView: View {
     }
 
     private func row(_ task: TaskItem) -> some View {
-        let parts = Calendar.current.dateComponents([.year, .month, .day], from: .now)
+        let parts = Calendar.gregorian.dateComponents([.year, .month, .day], from: .now)
         let today = String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
         let overdue = !task.isDone && !task.due.isEmpty && task.due < today
         return HStack(alignment: .top, spacing: 12) {

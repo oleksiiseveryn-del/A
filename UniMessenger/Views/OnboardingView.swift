@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct OnboardingView: View {
+    @Environment(MessageHub.self) private var hub
     var onFinish: () -> Void
     @State private var step = 0
     @State private var apiKey = ""
@@ -51,7 +52,7 @@ struct OnboardingView: View {
             Spacer()
             Button {
                 let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !key.isEmpty { KeychainStore.set(key, for: KeychainStore.Key.anthropicAPIKey) }
+                if !key.isEmpty { hub.setAPIKey(key) }
                 if step < steps.count - 1 { withAnimation { step += 1 } } else { onFinish() }
             } label: {
                 Text(step < steps.count - 1 ? "Weiter" : "Los geht's")

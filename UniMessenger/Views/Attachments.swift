@@ -278,6 +278,7 @@ struct VoiceRecorderSheet: View {
         .task {
             do { try await recorder.start() } catch { errorText = error.localizedDescription }
         }
-        .onDisappear { if recorder.isRecording { recorder.cancel() } }
+        // Also cancels a start that is still waiting for microphone permission.
+        .onDisappear { recorder.cancel() }
     }
 }

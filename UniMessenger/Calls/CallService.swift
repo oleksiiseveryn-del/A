@@ -33,16 +33,20 @@ enum CallSettings {
     private static let jitsiHosts = ["jit.si", "ffmuc.net", "8x8.vc"]
     private static let meetingHosts = ["zoom.us", "teams.microsoft.com", "teams.live.com", "meet.google.com", "whereby.com", "webex.com"]
 
+    /// Created once – building an NSDataDetector is expensive and bubbles redraw often.
+    static let linkDetector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue)
+
     /// A call link in a message. Jitsi rooms open inside OS, other services in Safari.
     static func meetingLink(in text: String) -> (url: URL, inApp: Bool)? {
-        guard let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) else { return nil }
+        guard let detector = linkDetector else { return nil }
         for match in detector.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
             guard let url = match.url, url.scheme == "https", let host = url.host?.lowercased() else { continue }
             let matches = { (domains: [String]) in domains.contains { host == $0 || host.hasSuffix("." + $0) } }
-            if host == server || url.path.hasPrefix("/OS-HSD-") || matches(jitsiHosts) {
+            // In-app calls get camera and microphone, so only trusted Jitsi hosts open inside OS.
+            if host == server || matches(jitsiHosts) {
                 return (url, url.path.count > 1)
             }
-            if matches(meetingHosts) { return (url, false) }
+            if url.path.hasPrefix("/OS-HSD-") || matches(meetingHosts) { return (url, false) }
         }
         return nil
     }
