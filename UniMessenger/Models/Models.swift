@@ -97,6 +97,8 @@ struct Conversation: Identifiable, Codable, Hashable {
     /// Set by the AI triage; nil until analysed.
     var priority: Priority?
     var aiSummary: String?
+    /// Personal note about the contact (project, order number …); fed to the AI.
+    var note: String? = nil
 
     var lastMessage: Message? { messages.last }
     var lastActivity: Date { lastMessage?.date ?? .distantPast }
@@ -123,4 +125,94 @@ struct Account: Identifiable, Codable, Hashable {
     var serverURL: String = ""
     var username: String = ""
     var isEnabled = true
+}
+
+// MARK: - Tasks, templates, AI actions
+
+struct TaskItem: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var text: String
+    /// "YYYY-MM-DD" or empty.
+    var due: String = ""
+    var conversationID: String = ""
+    var source: String = ""
+    var isDone = false
+    var created = Date()
+    var doneAt: Date?
+}
+
+struct ReplyTemplate: Identifiable, Codable, Hashable {
+    var id = UUID()
+    var title: String
+    var text: String
+
+    static let defaults: [ReplyTemplate] = [
+        .init(title: "Besichtigung anbieten", text: "Gerne schaue ich mir das vor Ort an. Passt Ihnen [Tag] um [Uhrzeit]?"),
+        .init(title: "Angebot folgt", text: "Vielen Dank für Ihre Anfrage. Sie erhalten unser schriftliches Angebot bis [Datum]."),
+        .init(title: "Rückruf", text: "Ich rufe Sie heute bis [Uhrzeit] zurück."),
+        .init(title: "Eingang bestätigt", text: "Vielen Dank, ist angekommen. Ich prüfe das und melde mich bis [Datum]."),
+        .init(title: "Notfall", text: "Wir kümmern uns sofort. Ein Mitarbeiter ist bis [Uhrzeit] bei Ihnen. Bitte bis dahin [Maßnahme]."),
+    ]
+}
+
+struct ActionTodo: Codable, Hashable {
+    let conversation_id: String
+    let text: String
+    let due: String
+}
+
+struct ActionAppointment: Codable, Hashable {
+    let conversation_id: String
+    let title: String
+    /// "YYYY-MM-DDTHH:MM", "YYYY-MM-DD" or empty.
+    let start: String
+    let duration_minutes: Int
+    let location: String
+
+    /// Parsed start and whether it carries a time of day.
+    var startDate: (date: Date, hasTime: Bool)? {
+        Self.parse(start)
+    }
+
+    static func parse(_ value: String) -> (date: Date, hasTime: Bool)? {
+        let parts = value.split(separator: "T")
+        let dateParts = parts.first?.split(separator: "-").compactMap { Int($0) } ?? []
+        guard dateParts.count == 3 else { return nil }
+        var components = DateComponents(year: dateParts[0], month: dateParts[1], day: dateParts[2])
+        var hasTime = false
+        if parts.count > 1 {
+            let time = parts[1].split(separator: ":").compactMap { Int($0) }
+            if time.count >= 2 {
+                components.hour = time[0]
+                components.minute = time[1]
+                hasTime = true
+            }
+        }
+        guard let date = Calendar.current.date(from: components) else { return nil }
+        return (date, hasTime)
+    }
+
+    static func label(_ value: String) -> String {
+        guard let parsed = parse(value) else { return value.isEmpty ? "Datum offen" : value }
+        let day = parsed.date.formatted(.dateTime.weekday(.abbreviated).day().month(.twoDigits))
+        return parsed.hasTime ? "\(day), \(parsed.date.formatted(date: .omitted, time: .shortened)) Uhr" : day
+    }
+}
+
+struct ChatAnalysis: Codable, Hashable {
+    let summary: String
+    let tasks: [ActionTodo]
+    let appointments: [ActionAppointment]
+}
+
+struct Briefing: Codable, Hashable {
+    struct Urgent: Codable, Hashable {
+        let conversation_id: String
+        let reason: String
+    }
+    let summary: String
+    let urgent: [Urgent]
+    let todos: [ActionTodo]
+    let appointments: [ActionAppointment]
+    var created: Date?
 }

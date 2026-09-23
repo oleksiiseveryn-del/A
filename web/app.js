@@ -87,7 +87,19 @@ const DEFAULT_PROFILE = {
   extraContext: "Wir führen Bauprojekte nach DIN-Normen, VOB und GEG aus. Termine und Angebote werden erst nach Rücksprache verbindlich bestätigt.",
 };
 
+const DEFAULT_TEMPLATES = [
+  { title: "Besichtigung anbieten", text: "Gerne schaue ich mir das vor Ort an. Passt Ihnen [Tag] um [Uhrzeit]?" },
+  { title: "Angebot folgt", text: "Vielen Dank für Ihre Anfrage. Sie erhalten unser schriftliches Angebot bis [Datum]." },
+  { title: "Rückruf", text: "Ich rufe Sie heute bis [Uhrzeit] zurück." },
+  { title: "Eingang bestätigt", text: "Vielen Dank, ist angekommen. Ich prüfe das und melde mich bis [Datum]." },
+  { title: "Notfall", text: "Wir kümmern uns sofort. Ein Mitarbeiter ist bis [Uhrzeit] bei Ihnen. Bitte bis dahin [Maßnahme]." },
+];
+
 const state = {
+  tasks: store.get("tasks", []),
+  templates: store.get("templates", DEFAULT_TEMPLATES),
+  briefing: store.get("briefing", null),
+  briefingLoading: false,
   accounts: store.get("accounts", null) ?? [{ id: uuid(), kind: "demo", name: "Demo", enabled: true }],
   conversations: store.get("conversations", []),
   profile: { ...DEFAULT_PROFILE, ...store.get("profile", {}) },
@@ -108,6 +120,9 @@ function save() {
   store.set("accounts", state.accounts);
   store.set("conversations", state.conversations);
   store.set("profile", state.profile);
+  store.set("tasks", state.tasks);
+  store.set("templates", state.templates);
+  store.set("briefing", state.briefing);
 }
 
 // ---------------------------------------------------------------------------
@@ -476,7 +491,8 @@ ${p.signature}`;
     const fmt = (ms) => new Date(ms).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
     const lines = c.messages.slice(-limit).map((m) =>
       `[${fmt(m.date)}] ${m.isOutgoing ? state.profile.ownerName + " (ich)" : m.senderName}: ${m.text}`);
-    return `<conversation channel="${PLATFORMS[c.platform]?.name}" title="${c.title}">\n${lines.join("\n")}\n</conversation>`;
+    const note = c.note ? `<contact_note>${c.note}</contact_note>\n` : "";
+    return `<conversation channel="${PLATFORMS[c.platform]?.name}" title="${c.title}">\n${note}${lines.join("\n")}\n</conversation>`;
   },
 
   languageRule(lang) {
@@ -551,6 +567,241 @@ Gib für jede item-id genau einen Eintrag zurück.`;
   },
 };
 
+const now = () => new Date().toLocaleString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+const APPOINTMENT_SCHEMA = {
+  type: "object",
+  properties: {
+    conversation_id: { type: "string" },
+    title: { type: "string" },
+    start: { type: "string", description: "YYYY-MM-DDTHH:MM, nur YYYY-MM-DD wenn keine Uhrzeit, leer wenn unklar" },
+    duration_minutes: { type: "integer" },
+    location: { type: "string" },
+  },
+  required: ["conversation_id", "title", "start", "duration_minutes", "location"],
+  additionalProperties: false,
+};
+const TODO_SCHEMA = {
+  type: "object",
+  properties: {
+    conversation_id: { type: "string" },
+    text: { type: "string" },
+    due: { type: "string", description: "YYYY-MM-DD oder leer" },
+  },
+  required: ["conversation_id", "text", "due"],
+  additionalProperties: false,
+};
+
+// Summary, to-dos and appointments for one chat.
+assistant.analyze = async function (c) {
+  const user = `Aktuelles Datum: ${now()}.
+${this.transcript(c, 60)}
+
+Analysiere diesen Chat für ${state.profile.ownerName}:
+- summary: 2–3 deutsche Sätze: worum geht es, was ist der Stand, was ist offen.
+- tasks: konkrete Aufgaben für ${state.profile.ownerName} (Imperativ, kurz), nur echte offene Punkte.
+- appointments: Termine, Liefertermine, Fristen und Besichtigungen mit Datum. Relative Angaben („Freitag", „morgen") in ein Datum umrechnen. Dauer schätzen (Standard 60 Minuten).
+Für conversation_id immer "${convID(c)}" verwenden. Nichts erfinden, was nicht im Chat steht.`;
+  return claudeJSON({ system: this.system(), user, schema: {
+    type: "object",
+    properties: {
+      summary: { type: "string" },
+      tasks: { type: "array", items: TODO_SCHEMA },
+      appointments: { type: "array", items: APPOINTMENT_SCHEMA },
+    },
+    required: ["summary", "tasks", "appointments"],
+    additionalProperties: false,
+  } });
+};
+
+// Daily overview over all open chats.
+assistant.briefing = async function (list) {
+  const blocks = list.map((c) => `<item id="${convID(c)}">\n${this.transcript(c, 12)}\n</item>`).join("\n");
+  const openTasks = state.tasks.filter((t) => !t.done).map((t) => `- ${t.text}${t.due ? " (fällig " + t.due + ")" : ""}`).join("\n") || "keine";
+  const user = `Aktuelles Datum: ${now()}.
+Bereits erfasste offene Aufgaben:
+${openTasks}
+
+${blocks}
+
+Erstelle das Tagesbriefing für ${state.profile.ownerName} (${state.profile.role}):
+- summary: 2–4 Sätze Lagebild auf Deutsch – was heute Priorität hat.
+- urgent: Chats, die heute eine Reaktion brauchen, mit kurzem Grund (max. 12 Wörter).
+- todos: neue konkrete Aufgaben aus den Chats (nicht die bereits erfassten wiederholen).
+- appointments: anstehende Termine/Lieferungen/Fristen mit Datum; relative Angaben umrechnen.
+Verwende als conversation_id die item-id. Nichts erfinden.`;
+  return claudeJSON({ system: this.system(), user, maxTokens: 8000, schema: {
+    type: "object",
+    properties: {
+      summary: { type: "string" },
+      urgent: { type: "array", items: {
+        type: "object",
+        properties: { conversation_id: { type: "string" }, reason: { type: "string" } },
+        required: ["conversation_id", "reason"], additionalProperties: false } },
+      todos: { type: "array", items: TODO_SCHEMA },
+      appointments: { type: "array", items: APPOINTMENT_SCHEMA },
+    },
+    required: ["summary", "urgent", "todos", "appointments"],
+    additionalProperties: false,
+  } });
+};
+
+// ---------------------------------------------------------------------------
+// Tasks & calendar
+// ---------------------------------------------------------------------------
+
+function addTask({ text, due = "", conversation_id = "" }) {
+  const exists = state.tasks.some((t) => !t.done && t.text.trim().toLowerCase() === text.trim().toLowerCase());
+  if (exists) return toast("Aufgabe ist schon in der Liste");
+  const c = state.conversations.find((x) => convID(x) === conversation_id);
+  state.tasks.unshift({ id: uuid(), text, due, conversationID: conversation_id, source: c?.title || "", done: false, created: Date.now() });
+  save();
+  updateBadge();
+  toast("✅ Aufgabe gespeichert");
+}
+
+function formatStart(start) {
+  if (!start) return "Datum offen";
+  const [date, time] = start.split("T");
+  const [y, m, d] = date.split("-").map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  const day = dt.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
+  return time ? `${day}, ${time} Uhr` : day;
+}
+
+function icsEscape(text) {
+  return String(text || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
+}
+
+// Builds an .ics file; iOS offers "Zum Kalender hinzufügen" when it is opened.
+function addToCalendar(appt) {
+  if (!appt.start) return toast("Kein Datum erkannt – bitte im Kalender manuell anlegen.");
+  const [date, time] = appt.start.split("T");
+  const d = date.replace(/-/g, "");
+  const pad = (n) => String(n).padStart(2, "0");
+  let dtStart, dtEnd;
+  if (time) {
+    const [h, min] = time.split(":").map(Number);
+    const [y, m, day] = date.split("-").map(Number);
+    const end = new Date(y, m - 1, day, h, min + (appt.duration_minutes || 60));
+    dtStart = `DTSTART:${d}T${pad(h)}${pad(min)}00`;
+    dtEnd = `DTEND:${end.getFullYear()}${pad(end.getMonth() + 1)}${pad(end.getDate())}T${pad(end.getHours())}${pad(end.getMinutes())}00`;
+  } else {
+    const [y, m, day] = date.split("-").map(Number);
+    const next = new Date(y, m - 1, day + 1);
+    dtStart = `DTSTART;VALUE=DATE:${d}`;
+    dtEnd = `DTEND;VALUE=DATE:${next.getFullYear()}${pad(next.getMonth() + 1)}${pad(next.getDate())}`;
+  }
+  const c = state.conversations.find((x) => convID(x) === appt.conversation_id);
+  const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+  const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//HSD Hamburg GmbH//OS//DE", "BEGIN:VEVENT",
+    `UID:${uuid()}@os.hsd-hamburg`, `DTSTAMP:${stamp}`, dtStart, dtEnd,
+    `SUMMARY:${icsEscape(appt.title)}`,
+    appt.location ? `LOCATION:${icsEscape(appt.location)}` : "",
+    `DESCRIPTION:${icsEscape(c ? "Aus Chat: " + c.title : "Erstellt mit OS")}`,
+    "BEGIN:VALARM", "TRIGGER:-PT30M", "ACTION:DISPLAY", `DESCRIPTION:${icsEscape(appt.title)}`, "END:VALARM",
+    "END:VEVENT", "END:VCALENDAR"].filter(Boolean).join("\r\n");
+  const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = (appt.title || "Termin").replace(/[^\wäöüÄÖÜß -]/g, "").slice(0, 40) + ".ics";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+// ---------------------------------------------------------------------------
+// Bottom sheet
+// ---------------------------------------------------------------------------
+
+function openSheet(title, html, onClick) {
+  closeSheet();
+  const el = document.createElement("div");
+  el.id = "sheet";
+  el.innerHTML = `<div class="sheet-backdrop"></div>
+    <div class="sheet" role="dialog" aria-label="${esc(title)}">
+      <div class="sheet-grip"></div>
+      <div class="sheet-head"><b>${esc(title)}</b><button class="icon-btn" data-close>Fertig</button></div>
+      <div class="sheet-body">${html}</div>
+    </div>`;
+  el.addEventListener("click", (e) => {
+    if (e.target.classList.contains("sheet-backdrop") || e.target.closest("[data-close]")) return closeSheet();
+    onClick?.(e);
+  });
+  document.body.appendChild(el);
+  return el;
+}
+function closeSheet() { $("#sheet")?.remove(); }
+
+// Renders summary/tasks/appointments with action buttons; shared by chat analysis and briefing.
+function actionListHTML({ tasks = [], appointments = [] }) {
+  const t = tasks.map((x, i) => `<div class="action-item"><div><div>${esc(x.text)}</div>${x.due ? `<div class="muted">fällig ${esc(formatStart(x.due))}</div>` : ""}</div>
+      <button class="pill" data-task="${i}">＋ Aufgabe</button></div>`).join("");
+  const a = appointments.map((x, i) => `<div class="action-item"><div><div>${esc(x.title)}</div><div class="muted">${esc(formatStart(x.start))}${x.location ? " · " + esc(x.location) : ""}</div></div>
+      <button class="pill" data-appt="${i}">📅 Kalender</button></div>`).join("");
+  return (t ? `<div class="sheet-sec">Aufgaben</div>${t}` : "") + (a ? `<div class="sheet-sec">Termine</div>${a}` : "")
+    + (!t && !a ? `<p class="muted">Keine offenen Aufgaben oder Termine erkannt.</p>` : "");
+}
+
+function handleActionClick(e, data) {
+  const task = e.target.closest("[data-task]");
+  const appt = e.target.closest("[data-appt]");
+  if (task) { addTask(data.tasks[+task.dataset.task]); task.disabled = true; task.textContent = "✓ gespeichert"; }
+  if (appt) addToCalendar(data.appointments[+appt.dataset.appt]);
+}
+
+async function analyzeChat() {
+  const c = currentChat();
+  if (!c) return;
+  if (!store.get("anthropicKey", null)) return toast("Bitte zuerst API-Schlüssel in den Einstellungen hinterlegen.");
+  const sheet = openSheet("Zusammenfassung & Aktionen", `<div class="thinking">⏳ Die KI liest den Chat …</div>`);
+  try {
+    const data = await assistant.analyze(c);
+    if (!document.body.contains(sheet)) return;
+    $(".sheet-body", sheet).innerHTML = `<p>${esc(data.summary)}</p>${actionListHTML(data)}`;
+    sheet.addEventListener("click", (e) => handleActionClick(e, data));
+  } catch (error) {
+    $(".sheet-body", sheet).innerHTML = `<p class="err">${esc(error.message)}</p>`;
+  }
+}
+
+function editNote() {
+  const c = currentChat();
+  if (!c) return;
+  const sheet = openSheet("Notiz zum Kontakt", `
+    <p class="muted">Die KI berücksichtigt diese Notiz bei jedem Vorschlag, z. B. Bauvorhaben, Auftragsnummer, Ansprechpartner, Besonderheiten.</p>
+    <textarea class="note-input" id="note-input" placeholder="z. B. EFH Wandsbek, Auftrag 2026-114, Bauherr bevorzugt Anrufe vormittags">${esc(c.note || "")}</textarea>
+    <button class="primary" id="note-save">Speichern</button>`);
+  $("#note-input", sheet).focus();
+  $("#note-save", sheet).addEventListener("click", () => {
+    c.note = $("#note-input", sheet).value.trim();
+    save();
+    closeSheet();
+    toast("Notiz gespeichert");
+    renderChat();
+  });
+}
+
+function chatMenu() {
+  const c = currentChat();
+  if (!c) return;
+  openSheet(c.title, `
+    <button class="sheet-btn" data-act="analyze">🔍 Zusammenfassen, Aufgaben & Termine erkennen</button>
+    <button class="sheet-btn" data-act="note">📝 ${c.note ? "Notiz bearbeiten" : "Notiz zum Kontakt hinzufügen"}</button>
+    <button class="sheet-btn" data-act="pin">📌 ${c.isPinned ? "Nicht mehr anheften" : "Oben anheften"}</button>
+    <button class="sheet-btn" data-act="archive">🗄 ${c.isArchived ? "Aus dem Archiv holen" : "Archivieren"}</button>`,
+  (e) => {
+    const act = e.target.closest("[data-act]")?.dataset.act;
+    if (!act) return;
+    closeSheet();
+    if (act === "analyze") analyzeChat();
+    if (act === "note") editNote();
+    if (act === "pin") { c.isPinned = !c.isPinned; sortConversations(); save(); toast(c.isPinned ? "Angeheftet" : "Gelöst"); }
+    if (act === "archive") { c.isArchived = !c.isArchived; save(); history.back(); }
+  });
+}
+
 async function triage(ids) {
   const targets = state.conversations.filter((c) => !c.isArchived
     && (ids ? ids.includes(convID(c)) : c.unreadCount > 0)
@@ -590,6 +841,14 @@ function updateBadge() {
   const badge = $("#unread-badge");
   badge.hidden = unread === 0;
   badge.textContent = unread;
+  const tasksBadge = $("#tasks-badge");
+  const openTasks = state.tasks.filter((t) => !t.done).length;
+  if (tasksBadge) { tasksBadge.hidden = openTasks === 0; tasksBadge.textContent = openTasks; }
+  // Number on the home-screen icon (iOS 16.4+ for installed web apps).
+  try {
+    if (unread && navigator.setAppBadge) navigator.setAppBadge(unread);
+    else if (navigator.clearAppBadge) navigator.clearAppBadge();
+  } catch { /* not supported */ }
 }
 
 // --- Inbox -----------------------------------------------------------------
@@ -658,7 +917,10 @@ function fillInbox() {
     used.map((p) => `<button class="chip ${ui.platform === p ? "on" : ""}" data-platform="${esc(p)}">${esc(PLATFORMS[p]?.name || p)}</button>`).join("");
   $("#btn-triage").disabled = state.triaging;
   $("#btn-refresh").disabled = state.refreshing;
-  $("#triage-banner").innerHTML = state.triaging ? `<div class="banner">✨ KI sortiert nach Dringlichkeit …</div>` : "";
+  const installHint = isIOS && !isStandalone && !store.get("hintDismissed", false)
+    ? `<div class="banner hint"><span>📲 Tipp: In Safari auf Teilen □↑ → „Zum Home-Bildschirm“ – dann läuft OS wie eine App.</span><button class="icon-btn" id="hint-x">✕</button></div>` : "";
+  $("#triage-banner").innerHTML = installHint + (state.triaging ? `<div class="banner">✨ KI sortiert nach Dringlichkeit …</div>` : "");
+  $("#hint-x")?.addEventListener("click", () => { store.set("hintDismissed", true); fillInbox(); });
   const list = visibleConversations();
   $("#list").innerHTML = list.length ? list.map((c) => {
     const id = convID(c), last = lastMsg(c);
@@ -718,7 +980,9 @@ function renderChat() {
         <button class="icon-btn" id="btn-back">‹ Zurück</button>
         <div class="title-block"><h2>${esc(c.title)}</h2><div class="sub" style="color:${p.color}">${esc(p.name)}</div></div>
         <button class="icon-btn" id="btn-ai" title="KI-Leiste">✨</button>
+        <button class="icon-btn" id="btn-more" title="Mehr">•••</button>
       </div>
+      ${c.note ? `<div class="note-line" id="note-line">📝 ${esc(c.note)}</div>` : ""}
     </div>
     <div class="chat-wrap">
       <div class="messages" id="messages"></div>
@@ -731,7 +995,9 @@ function renderChat() {
         <div id="sugs"></div>
       </div>
       <div class="menu" id="menu" hidden>${Object.entries(assistant.REWRITES).map(([k, [label]]) => `<button data-rewrite="${k}">${label}</button>`).join("")}</div>
+      <div class="menu" id="tpl-menu" hidden>${state.templates.map((t, i) => `<button data-tpl="${i}">${esc(t.title)}</button>`).join("") || `<button disabled>Keine Textbausteine</button>`}</div>
       <div class="composer">
+        <button class="wand" id="btn-tpl" title="Textbausteine">📋</button>
         <button class="wand" id="btn-wand" title="Entwurf mit KI überarbeiten">🪄</button>
         <textarea id="draft" rows="1" placeholder="Nachricht an ${esc(p.name)}"></textarea>
         <button class="send" id="btn-send" title="Senden">↑</button>
@@ -759,7 +1025,19 @@ function renderChat() {
     autosize();
     draft.focus();
   });
-  $("#btn-wand").addEventListener("click", () => { const m = $("#menu"); m.hidden = !m.hidden; });
+  $("#btn-wand").addEventListener("click", () => { const m = $("#menu"); m.hidden = !m.hidden; $("#tpl-menu").hidden = true; });
+  $("#btn-tpl").addEventListener("click", () => { const m = $("#tpl-menu"); m.hidden = !m.hidden; $("#menu").hidden = true; });
+  $("#tpl-menu").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-tpl]");
+    if (!b) return;
+    $("#tpl-menu").hidden = true;
+    const text = state.templates[+b.dataset.tpl].text;
+    draft.value = draft.value.trim() ? draft.value.trimEnd() + " " + text : text;
+    autosize();
+    draft.focus();
+  });
+  $("#btn-more").addEventListener("click", chatMenu);
+  $("#note-line")?.addEventListener("click", editNote);
   $("#menu").addEventListener("click", async (e) => {
     const b = e.target.closest("[data-rewrite]");
     if (!b) return;
@@ -833,6 +1111,133 @@ async function generate() {
   }
   chatUI.thinking = false;
   fillSuggestions();
+}
+
+// --- Today (AI briefing) ----------------------------------------------------
+
+async function loadBriefing() {
+  if (state.briefingLoading) return;
+  const open = state.conversations.filter((c) => !c.isArchived && lastMsg(c)).slice(0, 30);
+  if (!open.length) return toast("Keine Chats für ein Briefing vorhanden.");
+  state.briefingLoading = true;
+  view.update();
+  try {
+    state.briefing = { ...(await assistant.briefing(open)), created: Date.now() };
+    save();
+  } catch (error) {
+    toast(error.message);
+  } finally {
+    state.briefingLoading = false;
+    view.update();
+  }
+}
+
+function renderToday() {
+  screen.innerHTML = `
+    <div class="header"><div class="header-row">
+      <h1>Heute</h1>
+      <button class="icon-btn" id="btn-brief" title="Briefing aktualisieren">⟳</button>
+    </div><div class="muted" id="today-date"></div></div>
+    <div class="scroll" id="today"></div>`;
+  $("#btn-brief").addEventListener("click", () => {
+    if (!store.get("anthropicKey", null)) return toast("Bitte zuerst API-Schlüssel in den Einstellungen hinterlegen.");
+    loadBriefing();
+  });
+  $("#today").addEventListener("click", (e) => {
+    const open = e.target.closest("[data-open]");
+    if (open) return openChat(open.dataset.open);
+    if (state.briefing) handleActionClick(e, { tasks: state.briefing.todos, appointments: state.briefing.appointments });
+    if (e.target.closest("[data-goto]")) { ui.tab = e.target.closest("[data-goto]").dataset.goto; render(); }
+  });
+  view.update = fillToday;
+  fillToday();
+  const stale = !state.briefing || Date.now() - state.briefing.created > 2 * 3600e3;
+  if (stale && store.get("anthropicKey", null) && state.conversations.length) loadBriefing();
+  if (store.get("anthropicKey", null) && state.conversations.some((c) => c.unreadCount && !c.priority)) triage();
+}
+
+function fillToday() {
+  const el = $("#today");
+  if (!el) return;
+  $("#today-date").textContent = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  $("#btn-brief").disabled = state.briefingLoading;
+  const active = state.conversations.filter((c) => !c.isArchived);
+  const unread = active.reduce((n, c) => n + c.unreadCount, 0);
+  const urgent = active.filter((c) => c.priority === "urgent").length;
+  const openTasks = state.tasks.filter((t) => !t.done).length;
+  const hour = new Date().getHours();
+  const greet = hour < 11 ? "Guten Morgen" : hour < 18 ? "Guten Tag" : "Guten Abend";
+  const b = state.briefing;
+  const title = (id) => state.conversations.find((c) => convID(c) === id)?.title || "Chat";
+  let body = `<div class="hello">${greet}, ${esc(state.profile.ownerName.split(" ")[0])}</div>
+    <div class="stats">
+      <button class="stat" data-goto="inbox"><b>${unread}</b><span>Ungelesen</span></button>
+      <button class="stat ${urgent ? "hot" : ""}" data-goto="inbox"><b>${urgent}</b><span>Dringend</span></button>
+      <button class="stat" data-goto="tasks"><b>${openTasks}</b><span>Aufgaben</span></button>
+    </div>`;
+  if (state.briefingLoading) body += `<div class="card"><div class="thinking">⏳ Die KI erstellt Ihr Tagesbriefing …</div></div>`;
+  if (!store.get("anthropicKey", null)) {
+    body += `<div class="card"><p>Für das KI-Tagesbriefing bitte einen API-Schlüssel hinterlegen.</p><button class="primary" data-goto="settings">Zu den Einstellungen</button></div>`;
+  } else if (b) {
+    body += `<div class="card"><div class="card-title">✨ Lagebild <span class="muted">· ${clock(b.created)} Uhr</span></div><p>${esc(b.summary)}</p></div>`;
+    if (b.urgent.length) body += `<div class="card"><div class="card-title">🔴 Heute reagieren</div>${b.urgent.map((u) =>
+      `<button class="action-item link" data-open="${esc(u.conversation_id)}"><div><div>${esc(title(u.conversation_id))}</div><div class="muted">${esc(u.reason)}</div></div><span>›</span></button>`).join("")}</div>`;
+    if (b.todos.length || b.appointments.length) body += `<div class="card">${actionListHTML({ tasks: b.todos, appointments: b.appointments })}</div>`;
+  } else if (!state.briefingLoading) {
+    body += `<div class="card"><p>Noch kein Briefing erstellt.</p><button class="primary" id="brief-now">✨ Briefing erstellen</button></div>`;
+  }
+  el.innerHTML = body;
+  $("#brief-now")?.addEventListener("click", loadBriefing);
+}
+
+// --- Tasks -----------------------------------------------------------------
+
+function renderTasks() {
+  screen.innerHTML = `
+    <div class="header">
+      <div class="header-row"><h1>Aufgaben</h1></div>
+      <form id="task-form" class="task-form"><input id="task-input" class="search" placeholder="Neue Aufgabe …" enterkeyhint="done"><button class="primary small">＋</button></form>
+    </div>
+    <div class="scroll" id="tasks"></div>`;
+  $("#task-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = $("#task-input").value.trim();
+    if (!text) return;
+    addTask({ text });
+    $("#task-input").value = "";
+    fillTasks();
+  });
+  $("#tasks").addEventListener("click", (e) => {
+    const t = state.tasks.find((x) => x.id === e.target.closest("[data-id]")?.dataset.id);
+    if (!t) return;
+    if (e.target.closest("[data-toggle]")) { t.done = !t.done; t.doneAt = Date.now(); }
+    else if (e.target.closest("[data-del]")) state.tasks = state.tasks.filter((x) => x !== t);
+    else if (e.target.closest("[data-src]") && t.conversationID) return openChat(t.conversationID);
+    save();
+    fillTasks();
+    updateBadge();
+  });
+  view.update = fillTasks;
+  fillTasks();
+}
+
+function fillTasks() {
+  const el = $("#tasks");
+  if (!el) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const byDue = (a, b) => (a.due || "9999").localeCompare(b.due || "9999") || b.created - a.created;
+  const open = state.tasks.filter((t) => !t.done).sort(byDue);
+  const done = state.tasks.filter((t) => t.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0)).slice(0, 20);
+  const row = (t) => `<div class="task ${t.done ? "done" : ""}" data-id="${t.id}">
+      <button class="check" data-toggle aria-label="erledigt">${t.done ? "✓" : ""}</button>
+      <div class="task-main">
+        <div>${esc(t.text)}</div>
+        <div class="muted">${t.due ? `<span class="${!t.done && t.due < today ? "overdue" : ""}">📅 ${esc(formatStart(t.due))}</span> ` : ""}${t.source ? `<button class="src" data-src>💬 ${esc(t.source)}</button>` : ""}</div>
+      </div>
+      <button class="del" data-del aria-label="löschen">✕</button>
+    </div>`;
+  el.innerHTML = (open.length ? open.map(row).join("") : `<div class="empty"><div class="big">🎉</div><p>Keine offenen Aufgaben.</p><p>Im Chat über ••• → „Aufgaben erkennen“ oder im Tagesbriefing hinzufügen.</p></div>`)
+    + (done.length ? `<div class="section-title">Erledigt</div>${done.map(row).join("")}` : "");
 }
 
 // --- Accounts --------------------------------------------------------------
@@ -983,6 +1388,10 @@ function renderSettings() {
       <div class="group"><div class="field"><textarea data-p="extraContext">${esc(p.extraContext)}</textarea></div></div>
       <div class="footer">Z. B. laufende Baustellen, Urlaubszeiten, Standardantworten. Wird bei jedem Vorschlag berücksichtigt.</div>
 
+      <div class="section-title">Textbausteine</div>
+      <div class="group"><div class="field"><textarea id="f-templates" style="min-height:150px">${esc(state.templates.map((t) => t.title + " | " + t.text).join("\n"))}</textarea></div></div>
+      <div class="footer">Eine Zeile pro Baustein: <i>Titel | Text</i>. Platzhalter in [eckigen Klammern] vor dem Senden ersetzen.</div>
+
       <div class="section-title">Daten</div>
       <div class="group"><button class="btn-row danger" id="btn-reset">Alle Chats auf diesem Gerät löschen</button></div>
       <div class="footer">OS · HSD Hamburg GmbH · Merckmannstraße 30 · 20539 Hamburg</div>
@@ -991,6 +1400,13 @@ function renderSettings() {
     state.profile[el.dataset.p] = el.value;
     save();
   }));
+  $("#f-templates").addEventListener("input", (e) => {
+    state.templates = e.target.value.split("\n").map((line) => {
+      const i = line.indexOf("|");
+      return i < 0 ? null : { title: line.slice(0, i).trim(), text: line.slice(i + 1).trim() };
+    }).filter((t) => t && t.title && t.text);
+    save();
+  });
   $("#f-model").addEventListener("change", (e) => { state.model = e.target.value; store.set("model", state.model); });
   $("#f-triage").addEventListener("change", (e) => { state.autoTriage = e.target.checked; store.set("autoTriage", state.autoTriage); });
   $("#btn-savekey")?.addEventListener("click", () => {
@@ -1017,7 +1433,10 @@ function renderSettings() {
 
 function render() {
   document.querySelectorAll("#tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === ui.tab));
+  closeSheet();
   if (ui.tab === "inbox") renderInbox();
+  if (ui.tab === "today") renderToday();
+  if (ui.tab === "tasks") renderTasks();
   if (ui.tab === "accounts") renderAccounts();
   if (ui.tab === "settings") renderSettings();
   updateBadge();
@@ -1047,6 +1466,47 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
+const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
+const isStandalone = window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+
+function showOnboarding() {
+  const steps = [
+    { icon: "OS", title: "Willkommen bei OS", text: "Alle Messenger in einem Posteingang – WhatsApp, Telegram, Signal, Instagram, SMS und mehr. Die KI schreibt Antwortvorschläge, erkennt Dringendes und macht aus Chats Aufgaben und Termine. Gesendet wird nur, wenn Sie tippen." },
+    { icon: "✨", title: "KI aktivieren", text: "Einen API-Schlüssel von console.anthropic.com einfügen (kann auch später unter Einstellungen erfolgen). Der Schlüssel bleibt nur auf diesem iPhone.", key: true },
+    { icon: "💬", title: "Messenger verbinden", text: "Zum Ausprobieren sind Beispiel-Chats aktiv. Unter „Konten“ verbinden Sie einen Telegram-Firmen-Bot oder Ihren Matrix-Server mit WhatsApp-, Signal- und Instagram-Bridges." },
+  ];
+  if (isIOS && !isStandalone) steps.push({ icon: "📲", title: "Auf den Home-Bildschirm", text: "Unten in Safari auf Teilen □↑ tippen und „Zum Home-Bildschirm“ wählen. Dann startet OS wie eine App im Vollbild und zeigt ungelesene Nachrichten am Symbol." });
+  let i = 0;
+  const el = document.createElement("div");
+  el.id = "onboarding";
+  const draw = () => {
+    const s = steps[i];
+    el.innerHTML = `<div class="ob-card">
+      <div class="ob-icon ${s.icon === "OS" ? "brand" : ""}">${s.icon}</div>
+      <h2>${esc(s.title)}</h2><p>${esc(s.text)}</p>
+      ${s.key ? `<input id="ob-key" class="search" type="password" placeholder="sk-ant-… (optional)" autocapitalize="off" autocorrect="off">` : ""}
+      <div class="ob-dots">${steps.map((_, j) => `<span class="${j === i ? "on" : ""}"></span>`).join("")}</div>
+      <button class="primary" id="ob-next">${i < steps.length - 1 ? "Weiter" : "Los geht's"}</button>
+      ${i < steps.length - 1 ? `<button class="icon-btn" id="ob-skip">Überspringen</button>` : ""}
+    </div>`;
+    $("#ob-next", el).addEventListener("click", () => {
+      const key = $("#ob-key", el)?.value.trim();
+      if (key) store.set("anthropicKey", key);
+      if (++i < steps.length) draw(); else finish();
+    });
+    $("#ob-skip", el)?.addEventListener("click", finish);
+  };
+  const finish = () => {
+    store.set("onboarded", true);
+    el.remove();
+    render();
+    if (store.get("anthropicKey", null)) triage();
+  };
+  draw();
+  document.body.appendChild(el);
+}
+
 sortConversations();
 render();
 startPolling();
+if (!store.get("onboarded", false)) showOnboarding();

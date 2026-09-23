@@ -15,6 +15,11 @@ oder übersetzt Ihre Entwürfe. Gesendet wird immer erst, wenn Sie auf „Senden
 | KI-Antworten | 3 Entwürfe pro Chat (direkte Antwort · Rückfrage · nächster Schritt/Termin), Tonfall wählbar (professionell, freundlich, kurz, förmlich), eigene Vorgabe möglich („Termin Do. 14 Uhr anbieten“) |
 | KI-Überarbeitung | Entwurf verbessern, kürzen, förmlicher/freundlicher, übersetzen (DE / EN / UK) |
 | KI-Triage | Jeder neue Chat bekommt Priorität (*Dringend / Normal / Niedrig*) und eine Ein-Satz-Zusammenfassung „was ist zu tun“ |
+| Heute (Tagesbriefing) | KI-Lagebild über alle offenen Chats: was heute Priorität hat, wer heute eine Antwort braucht, neue Aufgaben und anstehende Termine – mit Kennzahlen *Ungelesen / Dringend / Aufgaben* |
+| Aufgaben & Termine | Pro Chat „Zusammenfassen, Aufgaben & Termine erkennen“ (relative Angaben wie „Freitag 7 Uhr“ werden in Datum umgerechnet); Aufgabenliste mit Fälligkeit und Sprung zum Chat; Termine mit einem Tipp in den iPhone-Kalender (mit Erinnerung 30 min vorher) |
+| Kontakt-Notizen | z. B. „EFH Wandsbek, Auftrag 2026-114“ – die KI berücksichtigt die Notiz bei jedem Vorschlag |
+| Textbausteine | eigene Standardantworten (Besichtigung, Angebot folgt, Rückruf, Notfall …) mit Platzhaltern |
+| Einrichtung | Assistent beim ersten Start; Zahl ungelesener Nachrichten am App-Symbol (Web-App ab iOS 16.4) |
 | Firmenprofil | Name, Funktion, Adresse, Telefon, E-Mail-Signatur und „Wissen für die KI“ (z. B. „Termine erst nach Rücksprache verbindlich“) – vorbelegt für HSD Hamburg GmbH |
 | Sicherheit | Passwörter, Tokens und API-Schlüssel nur im iOS-Schlüsselbund (nur dieses Gerät); lokale Daten mit iOS-Dateischutz verschlüsselt |
 

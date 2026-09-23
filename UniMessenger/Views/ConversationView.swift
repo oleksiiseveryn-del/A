@@ -12,6 +12,9 @@ struct ConversationView: View {
     @State private var isSending = false
     @State private var showAIPanel = true
     @State private var errorText: String?
+    @State private var showAnalysis = false
+    @State private var showNote = false
+    @Environment(\.dismiss) private var dismiss
     @FocusState private var draftFocused: Bool
 
     private var conversation: Conversation? {
@@ -21,6 +24,21 @@ struct ConversationView: View {
     var body: some View {
         if let conversation {
             VStack(spacing: 0) {
+                if let note = conversation.note, !note.isEmpty {
+                    Button {
+                        showNote = true
+                    } label: {
+                        Label(note, systemImage: "note.text")
+                            .font(.caption)
+                            .lineLimit(1)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal)
+                            .padding(.vertical, 6)
+                            .background(Color(.secondarySystemBackground))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                }
                 messageList(conversation)
                 Divider()
                 if showAIPanel { aiPanel(conversation) }
@@ -43,6 +61,33 @@ struct ConversationView: View {
                     }
                     .accessibilityLabel("KI-Assistent ein-/ausblenden")
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button {
+                            if hub.hasAPIKey { showAnalysis = true } else { errorText = ClaudeClient.ClaudeError.missingAPIKey.localizedDescription }
+                        } label: {
+                            Label("Zusammenfassen, Aufgaben & Termine", systemImage: "doc.text.magnifyingglass")
+                        }
+                        Button {
+                            showNote = true
+                        } label: {
+                            Label(conversation.note?.isEmpty == false ? "Notiz bearbeiten" : "Notiz zum Kontakt", systemImage: "note.text")
+                        }
+                        Button {
+                            hub.togglePin(conversationID)
+                        } label: {
+                            Label(conversation.isPinned ? "Nicht mehr anheften" : "Oben anheften", systemImage: "pin")
+                        }
+                        Button {
+                            hub.toggleArchive(conversationID)
+                            dismiss()
+                        } label: {
+                            Label(conversation.isArchived ? "Aus dem Archiv holen" : "Archivieren", systemImage: "archivebox")
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                }
             }
             .onAppear {
                 tone = hub.profile.defaultTone
@@ -50,6 +95,12 @@ struct ConversationView: View {
                 if suggestions.isEmpty, conversation.lastMessage?.isOutgoing == false {
                     Task { await generate(conversation) }
                 }
+            }
+            .sheet(isPresented: $showAnalysis) {
+                AnalysisSheet(conversation: conversation)
+            }
+            .sheet(isPresented: $showNote) {
+                NoteEditor(conversationID: conversationID, text: conversation.note ?? "")
             }
             .alert("Fehler", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
                 Button("OK", role: .cancel) {}
@@ -151,6 +202,21 @@ struct ConversationView: View {
     private func composer(_ conversation: Conversation) -> some View {
         HStack(alignment: .bottom, spacing: 8) {
             Menu {
+                ForEach(hub.templates) { template in
+                    Button(template.title) {
+                        draft = draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            ? template.text : draft.trimmingCharacters(in: .whitespacesAndNewlines) + " " + template.text
+                        draftFocused = true
+                    }
+                }
+            } label: {
+                Image(systemName: "text.badge.plus")
+                    .font(.title3)
+                    .frame(width: 32, height: 36)
+            }
+            .accessibilityLabel("Textbaustein einfügen")
+
+            Menu {
                 ForEach(ReplyAssistant.RewriteAction.allCases) { action in
                     Button(action.label) { Task { await rewrite(action, conversation) } }
                 }
@@ -248,5 +314,72 @@ struct MessageBubble: View {
             .foregroundStyle(message.isOutgoing ? .white : .primary)
             if !message.isOutgoing { Spacer(minLength: 48) }
         }
+    }
+}
+
+struct AnalysisSheet: View {
+    @Environment(MessageHub.self) private var hub
+    @Environment(\.dismiss) private var dismiss
+    let conversation: Conversation
+    @State private var result: ChatAnalysis?
+    @State private var errorText: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                if let result {
+                    Section("Zusammenfassung") { Text(result.summary) }
+                    ActionListView(todos: result.tasks, appointments: result.appointments)
+                } else if let errorText {
+                    Text(errorText).foregroundStyle(.red)
+                } else {
+                    HStack { ProgressView(); Text("Die KI liest den Chat …").foregroundStyle(.secondary) }
+                }
+            }
+            .navigationTitle(conversation.title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) { Button("Fertig") { dismiss() } }
+            }
+            .task {
+                do {
+                    result = try await hub.assistant.analyze(conversation)
+                } catch {
+                    errorText = error.localizedDescription
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+}
+
+struct NoteEditor: View {
+    @Environment(MessageHub.self) private var hub
+    @Environment(\.dismiss) private var dismiss
+    let conversationID: String
+    @State var text: String
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextEditor(text: $text).frame(minHeight: 140)
+                } footer: {
+                    Text("Die KI berücksichtigt diese Notiz bei jedem Vorschlag, z. B. Bauvorhaben, Auftragsnummer, Ansprechpartner, Besonderheiten.")
+                }
+            }
+            .navigationTitle("Notiz zum Kontakt")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Abbrechen") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Sichern") {
+                        hub.setNote(text, for: conversationID)
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }

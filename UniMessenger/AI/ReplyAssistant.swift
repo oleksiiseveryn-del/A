@@ -50,11 +50,110 @@ struct ReplyAssistant {
         let lines = conversation.messages.suffix(limit).map {
             "[\(formatter.string(from: $0.date))] \($0.isOutgoing ? profile.ownerName + " (ich)" : $0.senderName): \($0.text)"
         }
+        let note = conversation.note.map { $0.isEmpty ? "" : "<contact_note>\($0)</contact_note>\n" } ?? ""
         return """
         <conversation channel="\(conversation.platform.displayName)" title="\(conversation.title)">
-        \(lines.joined(separator: "\n"))
+        \(note)\(lines.joined(separator: "\n"))
         </conversation>
         """
+    }
+
+    private var now: String {
+        Date.now.formatted(.dateTime.weekday(.wide).day().month(.twoDigits).year().hour().minute().locale(Locale(identifier: "de_DE")))
+    }
+
+    private static let todoSchema: [String: Any] = [
+        "type": "object",
+        "properties": [
+            "conversation_id": ["type": "string"],
+            "text": ["type": "string"],
+            "due": ["type": "string", "description": "YYYY-MM-DD oder leer"],
+        ],
+        "required": ["conversation_id", "text", "due"],
+        "additionalProperties": false,
+    ]
+
+    private static let appointmentSchema: [String: Any] = [
+        "type": "object",
+        "properties": [
+            "conversation_id": ["type": "string"],
+            "title": ["type": "string"],
+            "start": ["type": "string", "description": "YYYY-MM-DDTHH:MM, nur YYYY-MM-DD ohne Uhrzeit, leer wenn unklar"],
+            "duration_minutes": ["type": "integer"],
+            "location": ["type": "string"],
+        ],
+        "required": ["conversation_id", "title", "start", "duration_minutes", "location"],
+        "additionalProperties": false,
+    ]
+
+    // MARK: - Chat analysis
+
+    func analyze(_ conversation: Conversation) async throws -> ChatAnalysis {
+        let user = """
+        Aktuelles Datum: \(now).
+        \(transcript(conversation, limit: 60))
+
+        Analysiere diesen Chat für \(profile.ownerName):
+        - summary: 2–3 deutsche Sätze: worum geht es, was ist der Stand, was ist offen.
+        - tasks: konkrete Aufgaben für \(profile.ownerName) (Imperativ, kurz), nur echte offene Punkte.
+        - appointments: Termine, Liefertermine, Fristen und Besichtigungen mit Datum. Relative Angaben („Freitag", „morgen") \
+          in ein Datum umrechnen. Dauer schätzen (Standard 60 Minuten).
+        Für conversation_id immer "\(conversation.id)" verwenden. Nichts erfinden, was nicht im Chat steht.
+        """
+        let schema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "summary": ["type": "string"],
+                "tasks": ["type": "array", "items": Self.todoSchema],
+                "appointments": ["type": "array", "items": Self.appointmentSchema],
+            ],
+            "required": ["summary", "tasks", "appointments"],
+            "additionalProperties": false,
+        ]
+        return try await client.structured(ChatAnalysis.self, system: systemPrompt, user: user, schema: schema)
+    }
+
+    // MARK: - Daily briefing
+
+    func briefing(_ conversations: [Conversation], openTasks: [TaskItem]) async throws -> Briefing {
+        let blocks = conversations.map { "<item id=\"\($0.id)\">\n\(transcript($0, limit: 12))\n</item>" }
+            .joined(separator: "\n")
+        let tasks = openTasks.map { "- \($0.text)\($0.due.isEmpty ? "" : " (fällig \($0.due))")" }
+            .joined(separator: "\n")
+        let user = """
+        Aktuelles Datum: \(now).
+        Bereits erfasste offene Aufgaben:
+        \(tasks.isEmpty ? "keine" : tasks)
+
+        \(blocks)
+
+        Erstelle das Tagesbriefing für \(profile.ownerName) (\(profile.role)):
+        - summary: 2–4 Sätze Lagebild auf Deutsch – was heute Priorität hat.
+        - urgent: Chats, die heute eine Reaktion brauchen, mit kurzem Grund (max. 12 Wörter).
+        - todos: neue konkrete Aufgaben aus den Chats (nicht die bereits erfassten wiederholen).
+        - appointments: anstehende Termine/Lieferungen/Fristen mit Datum; relative Angaben umrechnen.
+        Verwende als conversation_id die item-id. Nichts erfinden.
+        """
+        let schema: [String: Any] = [
+            "type": "object",
+            "properties": [
+                "summary": ["type": "string"],
+                "urgent": ["type": "array", "items": [
+                    "type": "object",
+                    "properties": ["conversation_id": ["type": "string"], "reason": ["type": "string"]],
+                    "required": ["conversation_id", "reason"],
+                    "additionalProperties": false,
+                ]],
+                "todos": ["type": "array", "items": Self.todoSchema],
+                "appointments": ["type": "array", "items": Self.appointmentSchema],
+            ],
+            "required": ["summary", "urgent", "todos", "appointments"],
+            "additionalProperties": false,
+        ]
+        var result = try await client.structured(Briefing.self, system: systemPrompt, user: user,
+                                                 schema: schema, maxTokens: 8000)
+        result.created = .now
+        return result
     }
 
     private func languageRule(_ language: AssistantProfile.ReplyLanguage) -> String {

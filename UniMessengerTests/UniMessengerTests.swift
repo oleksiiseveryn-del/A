@@ -33,4 +33,31 @@ final class UniMessengerTests: XCTestCase {
         let second = try await connector.fetchUpdates()
         XCTAssertTrue(second.isEmpty)
     }
+
+    func testAppointmentStartParsing() throws {
+        let timed = try XCTUnwrap(ActionAppointment.parse("2026-09-25T07:30"))
+        XCTAssertTrue(timed.hasTime)
+        let parts = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: timed.date)
+        XCTAssertEqual([parts.year, parts.month, parts.day, parts.hour, parts.minute], [2026, 9, 25, 7, 30])
+
+        let allDay = try XCTUnwrap(ActionAppointment.parse("2026-09-25"))
+        XCTAssertFalse(allDay.hasTime)
+
+        XCTAssertNil(ActionAppointment.parse(""))
+        XCTAssertNil(ActionAppointment.parse("Freitag"))
+        XCTAssertEqual(ActionAppointment.label(""), "Datum offen")
+    }
+
+    func testBriefingDecodesAPIResponseWithoutCreatedDate() throws {
+        let json = #"{"summary":"Lage","urgent":[{"conversation_id":"a|b","reason":"Wasser"}],"todos":[],"appointments":[{"conversation_id":"a|b","title":"Betonage","start":"2026-09-25T07:00","duration_minutes":240,"location":"Harburg"}]}"#
+        let briefing = try JSONDecoder().decode(Briefing.self, from: Data(json.utf8))
+        XCTAssertNil(briefing.created)
+        XCTAssertEqual(briefing.appointments.first?.duration_minutes, 240)
+    }
+
+    func testConversationWithoutNoteStillDecodes() throws {
+        let legacy = #"{"accountID":"6F9619FF-8B86-D011-B42D-00C04FC964FF","remoteID":"r","platform":"whatsapp","title":"T","messages":[],"unreadCount":0,"isPinned":false,"isArchived":false}"#
+        let conversation = try JSONDecoder().decode(Conversation.self, from: Data(legacy.utf8))
+        XCTAssertNil(conversation.note)
+    }
 }

@@ -61,6 +61,25 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    ForEach($hub.templates) { $template in
+                        VStack(alignment: .leading) {
+                            TextField("Titel", text: $template.title).font(.headline)
+                            TextField("Text", text: $template.text, axis: .vertical).font(.subheadline)
+                        }
+                    }
+                    .onDelete { hub.templates.remove(atOffsets: $0) }
+                    Button {
+                        hub.templates.append(ReplyTemplate(title: "Neuer Baustein", text: ""))
+                    } label: {
+                        Label("Baustein hinzufügen", systemImage: "plus")
+                    }
+                } header: {
+                    Text("Textbausteine")
+                } footer: {
+                    Text("Im Chat über das Symbol links neben dem Eingabefeld einfügen. Platzhalter in [eckigen Klammern] vor dem Senden ersetzen.")
+                }
+
+                Section {
                     TextEditor(text: $hub.profile.extraContext).frame(minHeight: 110)
                 } header: {
                     Text("Wissen für die KI")

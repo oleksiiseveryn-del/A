@@ -19,6 +19,7 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         ITSAppUsesNonExemptEncryption: false
+        NSCalendarsWriteOnlyAccessUsageDescription: OS trägt von der KI erkannte Termine auf Ihren Wunsch in den Kalender ein.
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false

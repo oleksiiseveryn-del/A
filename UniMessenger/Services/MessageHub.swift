@@ -12,6 +12,12 @@ final class MessageHub {
     var model: ClaudeClient.Model { didSet { UserDefaults.standard.set(model.rawValue, forKey: "ai.model") } }
     var autoTriage: Bool { didSet { UserDefaults.standard.set(autoTriage, forKey: "ai.autoTriage") } }
 
+    var tasks: [TaskItem] { didSet { Persistence.save(tasks, to: "tasks") } }
+    var templates: [ReplyTemplate] { didSet { Persistence.save(templates, to: "templates") } }
+    private(set) var briefing: Briefing? { didSet { Persistence.save(briefing, to: "briefing") } }
+    private(set) var isBriefingLoading = false
+    var hasOnboarded: Bool { didSet { UserDefaults.standard.set(hasOnboarded, forKey: "onboarded") } }
+
     private(set) var isRefreshing = false
     private(set) var isTriaging = false
     private(set) var accountErrors: [UUID: String] = [:]
@@ -28,11 +34,22 @@ final class MessageHub {
         model = UserDefaults.standard.string(forKey: "ai.model").flatMap(ClaudeClient.Model.init(rawValue:)) ?? .opus5
         autoTriage = UserDefaults.standard.object(forKey: "ai.autoTriage") as? Bool ?? true
         conversations = Persistence.load([Conversation].self, from: "conversations") ?? []
+        tasks = Persistence.load([TaskItem].self, from: "tasks") ?? []
+        templates = Persistence.load([ReplyTemplate].self, from: "templates") ?? ReplyTemplate.defaults
+        briefing = Persistence.load(Briefing.self, from: "briefing")
+        hasOnboarded = UserDefaults.standard.bool(forKey: "onboarded")
         rebuildConnectors()
     }
 
     var assistant: ReplyAssistant {
         ReplyAssistant(profile: profile, client: ClaudeClient(model: model))
+    }
+
+    var hasAPIKey: Bool { KeychainStore.get(KeychainStore.Key.anthropicAPIKey) != nil }
+    var openTaskCount: Int { tasks.filter { !$0.isDone }.count }
+
+    func conversation(id: String) -> Conversation? {
+        conversations.first { $0.id == id }
     }
 
     var totalUnread: Int { conversations.filter { !$0.isArchived }.reduce(0) { $0 + $1.unreadCount } }
@@ -193,6 +210,52 @@ final class MessageHub {
 
     func toggleArchive(_ conversationID: String) {
         update(conversationID) { $0.isArchived.toggle() }
+    }
+
+    func setNote(_ note: String, for conversationID: String) {
+        update(conversationID) { $0.note = note.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
+    // MARK: - Tasks
+
+    /// Returns false if an identical open task already exists.
+    @discardableResult
+    func addTask(text: String, due: String = "", conversationID: String = "") -> Bool {
+        let normalized = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty,
+              !tasks.contains(where: { !$0.isDone && $0.text.lowercased() == normalized.lowercased() }) else { return false }
+        tasks.insert(TaskItem(text: normalized, due: due, conversationID: conversationID,
+                              source: conversation(id: conversationID)?.title ?? ""), at: 0)
+        return true
+    }
+
+    func toggleTask(_ id: UUID) {
+        guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
+        tasks[index].isDone.toggle()
+        tasks[index].doneAt = tasks[index].isDone ? .now : nil
+    }
+
+    func deleteTask(_ id: UUID) {
+        tasks.removeAll { $0.id == id }
+    }
+
+    // MARK: - Briefing
+
+    var isBriefingStale: Bool {
+        guard let created = briefing?.created else { return true }
+        return Date.now.timeIntervalSince(created) > 2 * 3600
+    }
+
+    func loadBriefing() async {
+        let open = conversations.filter { !$0.isArchived && $0.lastMessage != nil }.prefix(30)
+        guard !open.isEmpty, !isBriefingLoading else { return }
+        isBriefingLoading = true
+        defer { isBriefingLoading = false }
+        do {
+            briefing = try await assistant.briefing(Array(open), openTasks: tasks.filter { !$0.isDone })
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     private func update(_ id: String, _ change: (inout Conversation) -> Void) {
