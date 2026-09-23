@@ -1,3 +1,4 @@
+[hidden] { display: none !important; }
 :root {
   --bg: #f2f2f7; --card: #ffffff; --card2: #e9e9ef; --text: #111; --muted: #6b6b73;
   --accent: #d32f2f; --accent-soft: #d32f2f1f; --border: #d8d8de; --danger: #d92d20;
@@ -178,3 +179,38 @@ body.in-chat #tabbar { display: none; }
 .ob-dots span.on { background: var(--accent); }
 .hint { display: flex; gap: 10px; align-items: center; }
 .hint span { flex: 1; }
+
+/* Attachments & emoji */
+.draft-wrap { flex: 1; position: relative; display: flex; }
+.draft-wrap textarea { padding-right: 40px; }
+.emoji-btn { position: absolute; right: 6px; bottom: 5px; font-size: 20px; width: 30px; height: 28px; }
+.composer .wand { width: 32px; }
+#btn-att { font-size: 26px; color: var(--accent); font-weight: 300; }
+#att-menu { left: 12px; }
+.emoji-panel { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; padding: 8px 10px; max-height: 190px; overflow-y: auto;
+  background: var(--bar); border-top: 1px solid var(--border); }
+.emoji-panel button { font-size: 26px; padding: 4px 0; border-radius: 8px; }
+.emoji-panel button:active { background: var(--card2); }
+.pending { display: flex; gap: 8px; overflow-x: auto; padding: 8px 12px 0; background: var(--bar); }
+.pending.busy { opacity: .55; }
+.pend { flex: none; display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 6px 6px 6px 6px; max-width: 240px; }
+.pend img { width: 44px; height: 44px; object-fit: cover; border-radius: 8px; }
+.pend-icon { font-size: 28px; width: 44px; text-align: center; }
+.pend-name { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 130px; }
+.pend-name small { color: var(--muted); }
+.att-img { display: block; padding: 0; margin: 2px -4px 4px; border-radius: 12px; overflow: hidden; max-width: 260px; }
+.att-img img { display: block; width: 100%; max-height: 320px; object-fit: cover; }
+.att-loading { display: block; padding: 30px 16px; font-size: 13px; opacity: .7; }
+.att-file { display: flex; gap: 10px; align-items: center; text-align: left; padding: 8px 10px; margin: 2px -2px 4px; border-radius: 12px;
+  background: color-mix(in srgb, currentColor 8%, transparent); max-width: 260px; }
+.att-file b { font-weight: 600; word-break: break-word; }
+.att-file small { opacity: .7; }
+.att-icon { font-size: 30px; }
+.viewer-img { width: 100%; max-height: 60dvh; object-fit: contain; border-radius: 12px; background: #000; }
+.viewer-file { text-align: center; font-size: 64px; padding: 20px 0; }
+.viewer-file div { font-size: 16px; }
+.composer { gap: 4px; padding-left: 8px; padding-right: 8px; }
+.draft-wrap { min-width: 0; }
+.draft-wrap textarea { min-width: 0; width: 100%; }
+.composer .wand { width: 30px; flex: none; }
+#app, #screen { overflow-x: hidden; }

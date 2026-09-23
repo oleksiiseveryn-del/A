@@ -47,8 +47,10 @@ struct ReplyAssistant {
     private func transcript(_ conversation: Conversation, limit: Int = 30) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "dd.MM. HH:mm"
-        let lines = conversation.messages.suffix(limit).map {
-            "[\(formatter.string(from: $0.date))] \($0.isOutgoing ? profile.ownerName + " (ich)" : $0.senderName): \($0.text)"
+        let lines = conversation.messages.suffix(limit).map { message in
+            let who = message.isOutgoing ? profile.ownerName + " (ich)" : message.senderName
+            let media = message.attachment.map { "[\($0.label)] " } ?? ""
+            return "[\(formatter.string(from: message.date))] \(who): \(media)\(message.text)"
         }
         let note = conversation.note.map { $0.isEmpty ? "" : "<contact_note>\($0)</contact_note>\n" } ?? ""
         return """
@@ -88,7 +90,7 @@ struct ReplyAssistant {
 
     // MARK: - Chat analysis
 
-    func analyze(_ conversation: Conversation) async throws -> ChatAnalysis {
+    func analyze(_ conversation: Conversation, media: [[String: Any]] = []) async throws -> ChatAnalysis {
         let user = """
         Aktuelles Datum: \(now).
         \(transcript(conversation, limit: 60))
@@ -99,6 +101,7 @@ struct ReplyAssistant {
         - appointments: Termine, Liefertermine, Fristen und Besichtigungen mit Datum. Relative Angaben („Freitag", „morgen") \
           in ein Datum umrechnen. Dauer schätzen (Standard 60 Minuten).
         Für conversation_id immer "\(conversation.id)" verwenden. Nichts erfinden, was nicht im Chat steht.
+        Beigefügte Fotos/PDFs stammen aus dem Chat: beschreibe im summary kurz, was darauf fachlich erkennbar ist.
         """
         let schema: [String: Any] = [
             "type": "object",
@@ -110,7 +113,8 @@ struct ReplyAssistant {
             "required": ["summary", "tasks", "appointments"],
             "additionalProperties": false,
         ]
-        return try await client.structured(ChatAnalysis.self, system: systemPrompt, user: user, schema: schema)
+        return try await client.structured(ChatAnalysis.self, system: systemPrompt, user: user, schema: schema,
+                                           maxTokens: 8000, media: media)
     }
 
     // MARK: - Daily briefing
@@ -168,7 +172,8 @@ struct ReplyAssistant {
     // MARK: - Reply suggestions
 
     func suggestReplies(for conversation: Conversation, tone: AssistantProfile.Tone,
-                        language: AssistantProfile.ReplyLanguage, instruction: String?) async throws -> [ReplySuggestion] {
+                        language: AssistantProfile.ReplyLanguage, instruction: String?,
+                        media: [[String: Any]] = []) async throws -> [ReplySuggestion] {
         var user = """
         \(transcript(conversation))
 
@@ -179,6 +184,9 @@ struct ReplyAssistant {
         """
         if let instruction, !instruction.isEmpty {
             user += "\nZusätzliche Vorgabe von \(profile.ownerName): \(instruction)"
+        }
+        if !media.isEmpty {
+            user += "\nDie beigefügten Fotos stammen aus dem Chat; beziehe dich konkret darauf, wenn es passt (z. B. erkennbarer Schaden)."
         }
         struct Output: Codable { let suggestions: [ReplySuggestion] }
         let schema: [String: Any] = [
@@ -197,7 +205,7 @@ struct ReplyAssistant {
             "required": ["suggestions"],
             "additionalProperties": false,
         ]
-        return try await client.structured(Output.self, system: systemPrompt, user: user, schema: schema).suggestions
+        return try await client.structured(Output.self, system: systemPrompt, user: user, schema: schema, media: media).suggestions
     }
 
     // MARK: - Rewrite / translate a draft

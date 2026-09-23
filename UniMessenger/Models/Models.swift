@@ -81,6 +81,62 @@ struct Message: Identifiable, Codable, Hashable {
     var text: String
     var date: Date
     var isOutgoing: Bool
+    var attachment: Attachment? = nil
+}
+
+/// Photo, video, voice message or document attached to a message.
+struct Attachment: Codable, Hashable {
+    enum Kind: String, Codable {
+        case image, video, audio, file
+    }
+
+    enum Source: Codable, Hashable {
+        case matrix(mxc: String)
+        case telegram(fileID: String)
+        case local(key: String)
+    }
+
+    var kind: Kind
+    var name: String
+    var mime: String
+    var size: Int
+    var source: Source
+
+    var cacheKey: String {
+        switch source {
+        case .matrix(let mxc): "matrix_" + mxc
+        case .telegram(let fileID): "telegram_" + fileID
+        case .local(let key): "local_" + key
+        }
+    }
+
+    var label: String {
+        switch kind {
+        case .image: "Foto"
+        case .video: "Video"
+        case .audio: "Sprachnachricht"
+        case .file: "Dokument" + (name.isEmpty ? "" : ": \(name)")
+        }
+    }
+
+    var symbol: String {
+        switch kind {
+        case .image: "photo"
+        case .video: "video"
+        case .audio: "waveform"
+        case .file:
+            if mime.contains("pdf") { "doc.richtext" }
+            else if mime.contains("sheet") || mime.contains("excel") || mime.contains("csv") { "tablecells" }
+            else { "doc" }
+        }
+    }
+
+    static func kind(for mime: String) -> Kind {
+        if mime.hasPrefix("image/") { return .image }
+        if mime.hasPrefix("video/") { return .video }
+        if mime.hasPrefix("audio/") { return .audio }
+        return .file
+    }
 }
 
 struct Conversation: Identifiable, Codable, Hashable {

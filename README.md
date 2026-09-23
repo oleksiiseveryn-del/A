@@ -15,6 +15,10 @@ oder übersetzt Ihre Entwürfe. Gesendet wird immer erst, wenn Sie auf „Senden
 | KI-Antworten | 3 Entwürfe pro Chat (direkte Antwort · Rückfrage · nächster Schritt/Termin), Tonfall wählbar (professionell, freundlich, kurz, förmlich), eigene Vorgabe möglich („Termin Do. 14 Uhr anbieten“) |
 | KI-Überarbeitung | Entwurf verbessern, kürzen, förmlicher/freundlicher, übersetzen (DE / EN / UK) |
 | KI-Triage | Jeder neue Chat bekommt Priorität (*Dringend / Normal / Niedrig*) und eine Ein-Satz-Zusammenfassung „was ist zu tun“ |
+| Fotos & Dokumente | Senden aus Kamera, Fotomediathek oder Dateien (PDF, Pläne, Excel …) mit Vorschau vor dem Senden; große Fotos werden automatisch verkleinert (schneller Versand). Empfangene Fotos direkt im Chat, Dokumente per Tipp öffnen, teilen oder sichern |
+| KI sieht Fotos | Die KI bezieht die letzten Fotos (Analyse: auch ein PDF) in Vorschläge und Zusammenfassung ein; „Foto von der KI beschreiben lassen“ liefert Befund, Dringlichkeit und nächste Schritte |
+| Emojis | Emoji-Leiste mit Baustellen-Emojis, zuletzt genutzte zuerst; empfangene Emojis werden normal angezeigt |
+| Schnell | Für die wichtigsten ungelesenen Chats bereitet die KI die Antwortvorschläge im Hintergrund vor – beim Öffnen sofort da |
 | Heute (Tagesbriefing) | KI-Lagebild über alle offenen Chats: was heute Priorität hat, wer heute eine Antwort braucht, neue Aufgaben und anstehende Termine – mit Kennzahlen *Ungelesen / Dringend / Aufgaben* |
 | Aufgaben & Termine | Pro Chat „Zusammenfassen, Aufgaben & Termine erkennen“ (relative Angaben wie „Freitag 7 Uhr“ werden in Datum umgerechnet); Aufgabenliste mit Fälligkeit und Sprung zum Chat; Termine mit einem Tipp in den iPhone-Kalender (mit Erinnerung 30 min vorher) |
 | Kontakt-Notizen | z. B. „EFH Wandsbek, Auftrag 2026-114“ – die KI berücksichtigt die Notiz bei jedem Vorschlag |

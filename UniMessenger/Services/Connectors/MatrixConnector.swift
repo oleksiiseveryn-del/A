@@ -136,6 +136,10 @@ final class MatrixConnector: MessengerConnector {
         }
     }
 
+    private static let mediaTypes: [String: Attachment.Kind] = [
+        "m.image": .image, "m.file": .file, "m.video": .video, "m.audio": .audio,
+    ]
+
     private func message(from event: [String: Any]) -> Message? {
         guard event["type"] as? String == "m.room.message",
               let content = event["content"] as? [String: Any],
@@ -144,8 +148,56 @@ final class MatrixConnector: MessengerConnector {
               let sender = event["sender"] as? String else { return nil }
         let timestamp = (event["origin_server_ts"] as? Double ?? 0) / 1000
         let isOutgoing = sender == userID
+        var text = body
+        var attachment: Attachment?
+        if let msgtype = content["msgtype"] as? String, let kind = Self.mediaTypes[msgtype],
+           let mxc = content["url"] as? String {
+            let info = content["info"] as? [String: Any] ?? [:]
+            let fileName = content["filename"] as? String
+            attachment = Attachment(kind: kind, name: fileName ?? body, mime: info["mimetype"] as? String ?? "",
+                                    size: info["size"] as? Int ?? 0, source: .matrix(mxc: mxc))
+            // With media, body is the file name unless a separate caption was sent.
+            text = fileName != nil && fileName != body ? body : ""
+        }
         return Message(id: id, senderName: isOutgoing ? "Ich" : displayName(for: sender),
-                       text: body, date: Date(timeIntervalSince1970: timestamp), isOutgoing: isOutgoing)
+                       text: text, date: Date(timeIntervalSince1970: timestamp), isOutgoing: isOutgoing,
+                       attachment: attachment)
+    }
+
+    func sendFile(_ data: Data, name: String, mime: String, to conversation: Conversation) async throws -> String {
+        var components = URLComponents(url: try baseURL.appendingPathComponent("_matrix/media/v3/upload"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "filename", value: name)]
+        var upload = URLRequest(url: components.url!)
+        upload.httpMethod = "POST"
+        upload.setValue("Bearer \(accessToken ?? "")", forHTTPHeaderField: "Authorization")
+        upload.setValue(mime, forHTTPHeaderField: "Content-Type")
+        upload.httpBody = data
+        let uploaded = try await HTTP.json(upload)
+        guard let contentURI = uploaded["content_uri"] as? String else { throw ConnectorError.invalidResponse }
+
+        let kind = Attachment.kind(for: mime)
+        let msgtype = ["image": "m.image", "video": "m.video", "audio": "m.audio"][kind.rawValue] ?? "m.file"
+        let content: [String: Any] = [
+            "msgtype": msgtype, "body": name, "filename": name, "url": contentURI,
+            "info": ["mimetype": mime, "size": data.count],
+        ]
+        let roomID = conversation.remoteID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? conversation.remoteID
+        let url = try endpoint("rooms/\(roomID)/send/m.room.message/\(UUID().uuidString)")
+        let response = try await HTTP.json(try HTTP.request(url, method: "PUT", bearer: accessToken, body: content))
+        return response["event_id"] as? String ?? UUID().uuidString
+    }
+
+    func download(_ attachment: Attachment) async throws -> Data {
+        guard case .matrix(let mxc) = attachment.source else { throw ConnectorError.invalidResponse }
+        let parts = mxc.replacingOccurrences(of: "mxc://", with: "").split(separator: "/", maxSplits: 1).map(String.init)
+        guard parts.count == 2 else { throw ConnectorError.invalidResponse }
+        // Authenticated media (Matrix 1.11) first, legacy endpoint as fallback.
+        for path in ["_matrix/client/v1/media/download/\(parts[0])/\(parts[1])", "_matrix/media/v3/download/\(parts[0])/\(parts[1])"] {
+            var request = URLRequest(url: try baseURL.appendingPathComponent(path))
+            request.setValue("Bearer \(accessToken ?? "")", forHTTPHeaderField: "Authorization")
+            if let data = try? await HTTP.data(request) { return data }
+        }
+        throw ConnectorError.notSupported("Datei konnte nicht geladen werden")
     }
 
     private func displayName(for userID: String) -> String {

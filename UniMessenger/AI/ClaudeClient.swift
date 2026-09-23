@@ -38,7 +38,8 @@ struct ClaudeClient {
 
     /// Sends one request and decodes the JSON the model returns under `schema`.
     func structured<T: Decodable>(_ type: T.Type, system: String, user: String,
-                                  schema: [String: Any], maxTokens: Int = 4000) async throws -> T {
+                                  schema: [String: Any], maxTokens: Int = 4000,
+                                  media: [[String: Any]] = []) async throws -> T {
         guard let apiKey = KeychainStore.get(KeychainStore.Key.anthropicAPIKey), !apiKey.isEmpty else {
             throw ClaudeError.missingAPIKey
         }
@@ -48,7 +49,7 @@ struct ClaudeClient {
             "max_tokens": maxTokens,
             // Stable system prompt first so it can be served from the prompt cache.
             "system": [["type": "text", "text": system, "cache_control": ["type": "ephemeral"]]],
-            "messages": [["role": "user", "content": user]],
+            "messages": [["role": "user", "content": media.isEmpty ? user as Any : (media + [["type": "text", "text": user]]) as Any]],
             "thinking": ["type": "adaptive"],
             "output_config": [
                 "effort": effort,

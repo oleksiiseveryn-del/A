@@ -45,6 +45,11 @@ final class DemoConnector: MessengerConnector {
         ]
     }
 
+    func sendFile(_ data: Data, name: String, mime: String, to conversation: Conversation) async throws -> String {
+        try await Task.sleep(for: .milliseconds(300))
+        return UUID().uuidString
+    }
+
     func send(text: String, to conversation: Conversation) async throws -> Message {
         try await Task.sleep(for: .milliseconds(300))
         return Message(id: UUID().uuidString, senderName: "Ich", text: text, date: .now, isOutgoing: true)

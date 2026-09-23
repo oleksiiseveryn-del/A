@@ -47,6 +47,86 @@ function toast(text) {
 }
 
 // ---------------------------------------------------------------------------
+// Files: photos and documents are kept in IndexedDB (localStorage is too small)
+// ---------------------------------------------------------------------------
+
+const files = {
+  db: null,
+  mem: new Map(),
+  open() {
+    if (this.db) return this.db;
+    this.db = new Promise((resolve) => {
+      try {
+        const req = indexedDB.open("os-files", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("files");
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      } catch { resolve(null); }
+    });
+    return this.db;
+  },
+  async get(key) {
+    if (this.mem.has(key)) return this.mem.get(key);
+    const db = await this.open();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const req = db.transaction("files").objectStore("files").get(key);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => resolve(null);
+      } catch { resolve(null); }
+    });
+  },
+  async put(key, blob) {
+    this.mem.set(key, blob);
+    const db = await this.open();
+    if (!db) return;
+    try { db.transaction("files", "readwrite").objectStore("files").put(blob, key); } catch { /* quota */ }
+  },
+};
+
+const objectURLs = new Map(); // attachment key -> object URL
+const attKey = (att) => att.src.type + ":" + (att.src.mxc || att.src.fileId || att.src.key);
+const kindFor = (mime = "") => mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video"
+  : mime.startsWith("audio/") ? "audio" : "file";
+const fileIcon = (att) => ({ image: "🖼", video: "🎬", audio: "🎤" }[att.kind]
+  || (/pdf/.test(att.mime) ? "📕" : /sheet|excel|csv/.test(att.mime) ? "📊" : /word|document/.test(att.mime) ? "📘" : /dwg|dxf|cad/i.test(att.name) ? "📐" : "📄"));
+function formatSize(bytes) {
+  if (!bytes) return "";
+  return bytes < 1024 * 1024 ? Math.max(1, Math.round(bytes / 1024)) + " KB" : (bytes / 1024 / 1024).toFixed(1).replace(".", ",") + " MB";
+}
+const attachmentLabel = (att) => att.kind === "image" ? "Foto" : att.kind === "video" ? "Video"
+  : att.kind === "audio" ? "Sprachnachricht" : "Dokument" + (att.name ? ": " + att.name : "");
+
+// Scales a photo down with a canvas; used before upload (speed) and for the AI (max 1024 px).
+async function downscale(blob, maxSide, quality = 0.85) {
+  const bitmap = await createImageBitmap(blob);
+  const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close?.();
+  return new Promise((resolve) => canvas.toBlob((b) => resolve(b || blob), "image/jpeg", quality));
+}
+
+async function prepareUpload(file) {
+  if (!file.type.startsWith("image/") || /gif|svg/.test(file.type) || file.size < 1.5 * 1024 * 1024) return file;
+  try {
+    const small = await downscale(file, 2560, 0.85);
+    const name = file.name.replace(/\.(heic|heif|png|webp|jpe?g)$/i, "") + ".jpg";
+    return new File([small], name, { type: "image/jpeg" });
+  } catch { return file; }
+}
+
+const blobToBase64 = (blob) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onload = () => resolve(String(reader.result).split(",")[1]);
+  reader.onerror = reject;
+  reader.readAsDataURL(blob);
+});
+
+// ---------------------------------------------------------------------------
 // Domain
 // ---------------------------------------------------------------------------
 
@@ -188,6 +268,11 @@ function demoConnector(account) {
       await new Promise((r) => setTimeout(r, 300));
       return { id: uuid(), senderName: "Ich", text, date: Date.now(), isOutgoing: true };
     },
+    async sendFile() {
+      await new Promise((r) => setTimeout(r, 300));
+      return uuid();
+    },
+    async download() { throw new Error("Datei nicht mehr verfügbar"); },
     async markRead() {},
   };
 }
@@ -198,11 +283,13 @@ function matrixConnector(account) {
   let token = null, userID = null;
   const names = {}, roomNames = {}, roomPlatforms = {};
   const sinceKey = "matrix.since." + account.id;
-  const base = () => {
+  const root = () => {
     let server = (account.serverURL || "").trim().replace(/\/+$/, "");
     if (!/^https?:\/\//.test(server)) server = "https://" + server;
-    return server + "/_matrix/client/v3/";
+    return server;
   };
+  const base = () => root() + "/_matrix/client/v3/";
+  const MEDIA = { "m.image": "image", "m.file": "file", "m.video": "video", "m.audio": "audio" };
   const enc = encodeURIComponent;
   const BRIDGE_PREFIXES = [["whatsapp", "whatsapp"], ["signal", "signal"], ["telegram", "telegram"],
     ["instagram", "instagram"], ["facebook", "facebook"], ["meta", "facebook"], ["gmessages", "sms"],
@@ -259,13 +346,23 @@ function matrixConnector(account) {
         [...stateEvents, ...timeline].forEach((e) => absorb(e, roomID));
         const messages = timeline
           .filter((e) => e.type === "m.room.message" && typeof e.content?.body === "string")
-          .map((e) => ({
-            id: e.event_id,
-            senderName: e.sender === userID ? "Ich" : displayName(e.sender),
-            text: e.content.body,
-            date: e.origin_server_ts || Date.now(),
-            isOutgoing: e.sender === userID,
-          }));
+          .map((e) => {
+            const kind = MEDIA[e.content.msgtype];
+            const attachment = kind && typeof e.content.url === "string" ? {
+              kind, name: e.content.filename || e.content.body, mime: e.content.info?.mimetype || "",
+              size: e.content.info?.size || 0, src: { type: "matrix", mxc: e.content.url },
+            } : null;
+            // With media, body is the file name unless a separate caption was sent.
+            const caption = attachment && e.content.filename && e.content.body !== e.content.filename ? e.content.body : "";
+            return {
+              id: e.event_id,
+              senderName: e.sender === userID ? "Ich" : displayName(e.sender),
+              text: attachment ? caption : e.content.body,
+              attachment,
+              date: e.origin_server_ts || Date.now(),
+              isOutgoing: e.sender === userID,
+            };
+          });
         const unread = room.unread_notifications?.notification_count || 0;
         if (!messages.length && !unread) continue;
         const heroes = room.summary?.["m.heroes"] || [];
@@ -282,6 +379,31 @@ function matrixConnector(account) {
       const res = await httpJSON(base() + `rooms/${enc(conversation.remoteID)}/send/m.room.message/${enc(uuid())}`,
         { method: "PUT", bearer: token, body: { msgtype: "m.text", body: text } });
       return { id: res.event_id || uuid(), senderName: "Ich", text, date: Date.now(), isOutgoing: true };
+    },
+    async sendFile(file, conversation) {
+      const up = await fetch(root() + "/_matrix/media/v3/upload?filename=" + enc(file.name), {
+        method: "POST", headers: { Authorization: "Bearer " + token, "Content-Type": file.type || "application/octet-stream" }, body: file,
+      });
+      if (!up.ok) throw new Error(`Upload fehlgeschlagen (${up.status})`);
+      const { content_uri } = await up.json();
+      const kind = kindFor(file.type);
+      const content = { msgtype: { image: "m.image", video: "m.video", audio: "m.audio" }[kind] || "m.file",
+        body: file.name, filename: file.name, url: content_uri, info: { mimetype: file.type, size: file.size } };
+      if (kind === "image") {
+        try { const bmp = await createImageBitmap(file); Object.assign(content.info, { w: bmp.width, h: bmp.height }); } catch { /* optional */ }
+      }
+      const res = await httpJSON(base() + `rooms/${enc(conversation.remoteID)}/send/m.room.message/${enc(uuid())}`,
+        { method: "PUT", bearer: token, body: content });
+      return res.event_id || uuid();
+    },
+    async download(att) {
+      const [server, mediaID] = att.src.mxc.replace("mxc://", "").split("/");
+      const paths = [`/_matrix/client/v1/media/download/${enc(server)}/${enc(mediaID)}`, `/_matrix/media/v3/download/${enc(server)}/${enc(mediaID)}`];
+      for (const path of paths) {
+        const res = await fetch(root() + path, { headers: { Authorization: "Bearer " + token } });
+        if (res.ok) return res.blob();
+      }
+      throw new Error("Datei konnte nicht geladen werden");
     },
     async markRead(conversation) {
       const last = [...conversation.messages].reverse().find((m) => !m.isOutgoing);
@@ -313,13 +435,22 @@ function telegramConnector(account) {
       for (const update of res.result || []) {
         store.set(offsetKey, update.update_id + 1);
         const msg = update.message;
-        const text = msg?.text ?? msg?.caption;
-        if (!msg || text == null) continue;
+        if (!msg) continue;
+        let attachment = null;
+        const tgFile = (f, kind, name, mime) => ({ kind, name, mime: mime || "", size: f.file_size || 0, src: { type: "telegram", fileId: f.file_id } });
+        if (msg.photo?.length) attachment = tgFile(msg.photo[msg.photo.length - 1], "image", "Foto.jpg", "image/jpeg");
+        else if (msg.document) attachment = tgFile(msg.document, kindFor(msg.document.mime_type), msg.document.file_name || "Dokument", msg.document.mime_type);
+        else if (msg.video) attachment = tgFile(msg.video, "video", msg.video.file_name || "Video.mp4", msg.video.mime_type);
+        else if (msg.voice) attachment = tgFile(msg.voice, "audio", "Sprachnachricht.ogg", msg.voice.mime_type);
+        else if (msg.audio) attachment = tgFile(msg.audio, "audio", msg.audio.file_name || "Audio", msg.audio.mime_type);
+        else if (msg.sticker) attachment = null;
+        const text = msg.text ?? msg.caption ?? (msg.sticker?.emoji || "");
+        if (!text && !attachment) continue;
         const sender = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ");
         const key = String(msg.chat.id);
         const title = msg.chat.title || sender || key;
         byChat[key] ??= { accountID: account.id, remoteID: key, platform: "telegram", title, unreadCount: 0, messages: [] };
-        byChat[key].messages.push({ id: `${key}-${msg.message_id}`, senderName: sender || title, text,
+        byChat[key].messages.push({ id: `${key}-${msg.message_id}`, senderName: sender || title, text, attachment,
           date: msg.date * 1000, isOutgoing: false });
         byChat[key].unreadCount += 1;
       }
@@ -330,6 +461,26 @@ function telegramConnector(account) {
         body: { chat_id: conversation.remoteID, text } });
       return { id: `${conversation.remoteID}-${res.result?.message_id ?? uuid()}`, senderName: "Ich", text,
         date: Date.now(), isOutgoing: true };
+    },
+    async sendFile(file, conversation) {
+      const asPhoto = kindFor(file.type) === "image" && !/gif|svg/.test(file.type) && file.size < 10 * 1024 * 1024;
+      const form = new FormData();
+      form.append("chat_id", conversation.remoteID);
+      form.append(asPhoto ? "photo" : "document", file, file.name);
+      let res;
+      try {
+        res = await fetch(url(asPhoto ? "sendPhoto" : "sendDocument"), { method: "POST", body: form });
+      } catch { throw new Error("Server nicht erreichbar – Internetverbindung prüfen."); }
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) throw new Error("Telegram: " + (data.description || res.status));
+      return `${conversation.remoteID}-${data.result.message_id}`;
+    },
+    async download(att) {
+      const info = await httpJSON(url("getFile") + "?file_id=" + encodeURIComponent(att.src.fileId));
+      if (!info.result?.file_path) throw new Error("Datei zu groß oder nicht verfügbar (Telegram-Limit 20 MB)");
+      const res = await fetch(`https://api.telegram.org/file/bot${token}/${info.result.file_path}`);
+      if (!res.ok) throw new Error("Datei konnte nicht geladen werden");
+      return res.blob();
     },
     async markRead() {},
   };
@@ -417,6 +568,45 @@ async function sendMessage(id, text) {
   save();
 }
 
+async function sendFile(id, original) {
+  const conversation = state.conversations.find((c) => convID(c) === id);
+  const account = state.accounts.find((a) => a.id === conversation?.accountID);
+  if (!conversation || !account?.enabled) throw new Error("Konto ist deaktiviert");
+  const file = await prepareUpload(original);
+  if (file.size > 50 * 1024 * 1024) throw new Error("Datei ist größer als 50 MB");
+  const entry = connectorFor(account);
+  if (!entry.connected) { await entry.connector.connect(); entry.connected = true; }
+  const messageID = await entry.connector.sendFile(file, conversation);
+  // Keep our own copy so the bubble shows instantly without downloading again.
+  const key = uuid();
+  await files.put("local:" + key, file);
+  conversation.messages.push({ id: messageID, senderName: "Ich", text: "", date: Date.now(), isOutgoing: true,
+    attachment: { kind: kindFor(file.type), name: file.name, mime: file.type, size: file.size, src: { type: "local", key } } });
+  Object.assign(conversation, { unreadCount: 0, priority: "low", aiSummary: null });
+  sortConversations();
+  save();
+}
+
+// Returns { blob, url } for an attachment, from cache or downloaded via its connector.
+async function loadAttachment(conversation, att) {
+  const key = attKey(att);
+  const cached = objectURLs.get(key);
+  if (cached) return cached;
+  let blob = await files.get(key);
+  if (!blob) {
+    if (att.src.type === "local") throw new Error("Datei ist auf diesem Gerät nicht mehr vorhanden");
+    const account = state.accounts.find((a) => a.id === conversation.accountID);
+    if (!account) throw new Error("Konto nicht gefunden");
+    const entry = connectorFor(account);
+    if (!entry.connected) { await entry.connector.connect(); entry.connected = true; }
+    blob = await entry.connector.download(att);
+    if (blob.size < 20 * 1024 * 1024) files.put(key, blob);
+  }
+  const result = { blob, url: URL.createObjectURL(blob) };
+  objectURLs.set(key, result);
+  return result;
+}
+
 function markRead(id) {
   const conversation = state.conversations.find((c) => convID(c) === id);
   if (!conversation) return;
@@ -431,7 +621,7 @@ function markRead(id) {
 // Claude (Messages API, called directly from the browser)
 // ---------------------------------------------------------------------------
 
-async function claudeJSON({ system, user, schema, maxTokens = 4000 }) {
+async function claudeJSON({ system, user, schema, maxTokens = 4000, media = [] }) {
   const apiKey = store.get("anthropicKey", null);
   if (!apiKey) {
     const err = new Error("Kein Anthropic API-Schlüssel hinterlegt (Einstellungen → KI-Assistent).");
@@ -448,7 +638,7 @@ async function claudeJSON({ system, user, schema, maxTokens = 4000 }) {
     max_tokens: maxTokens,
     // Stable system prompt first so repeated requests hit the prompt cache.
     system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-    messages: [{ role: "user", content: user }],
+    messages: [{ role: "user", content: media.length ? [...media, { type: "text", text: user }] : user }],
     thinking: { type: "adaptive" },
     output_config: { effort: "low", format: { type: "json_schema", schema } },
   };
@@ -490,9 +680,31 @@ ${p.signature}`;
   transcript(c, limit = 30) {
     const fmt = (ms) => new Date(ms).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
     const lines = c.messages.slice(-limit).map((m) =>
-      `[${fmt(m.date)}] ${m.isOutgoing ? state.profile.ownerName + " (ich)" : m.senderName}: ${m.text}`);
+      `[${fmt(m.date)}] ${m.isOutgoing ? state.profile.ownerName + " (ich)" : m.senderName}: ${m.attachment ? `[${attachmentLabel(m.attachment)}] ` : ""}${m.text}`);
     const note = c.note ? `<contact_note>${c.note}</contact_note>\n` : "";
     return `<conversation channel="${PLATFORMS[c.platform]?.name}" title="${c.title}">\n${note}${lines.join("\n")}\n</conversation>`;
+  },
+
+  // Recent photos (and optionally one PDF) as content blocks so the AI can see them.
+  async media(c, { images = 2, pdf = false } = {}) {
+    const blocks = [];
+    let pdfDone = !pdf;
+    for (const m of c.messages.slice(-12).reverse()) {
+      const att = m.attachment;
+      if (!att) continue;
+      try {
+        if (att.kind === "image" && blocks.filter((b) => b.type === "image").length < images) {
+          const { blob } = await loadAttachment(c, att);
+          const small = await downscale(blob, 1024, 0.8);
+          blocks.unshift({ type: "image", source: { type: "base64", media_type: "image/jpeg", data: await blobToBase64(small) } });
+        } else if (!pdfDone && /pdf/.test(att.mime) && att.size < 4 * 1024 * 1024) {
+          const { blob } = await loadAttachment(c, att);
+          blocks.unshift({ type: "document", source: { type: "base64", media_type: "application/pdf", data: await blobToBase64(blob) }, title: att.name });
+          pdfDone = true;
+        }
+      } catch { /* attachment unavailable – continue with text only */ }
+    }
+    return blocks;
   },
 
   languageRule(lang) {
@@ -509,7 +721,9 @@ Erstelle drei unterschiedliche Antwortentwürfe auf die letzte(n) eingehende(n) 
 Variante 1: direkte Antwort. Variante 2: Rückfrage/Klärung. Variante 3: Terminvorschlag oder nächster Schritt.
 Gib jeder Variante ein kurzes deutsches Label (max. 3 Wörter).`;
     if (instruction) user += `\nZusätzliche Vorgabe von ${state.profile.ownerName}: ${instruction}`;
-    const out = await claudeJSON({ system: this.system(), user, schema: {
+    const media = await this.media(c, { images: 2 });
+    if (media.length) user += `\nDie beigefügten Fotos stammen aus dem Chat; beziehe dich konkret darauf, wenn es passt (z. B. erkennbarer Schaden).`;
+    const out = await claudeJSON({ system: this.system(), user, media, schema: {
       type: "object",
       properties: { suggestions: { type: "array", items: {
         type: "object", properties: { label: { type: "string" }, text: { type: "string" } },
@@ -601,8 +815,10 @@ Analysiere diesen Chat für ${state.profile.ownerName}:
 - summary: 2–3 deutsche Sätze: worum geht es, was ist der Stand, was ist offen.
 - tasks: konkrete Aufgaben für ${state.profile.ownerName} (Imperativ, kurz), nur echte offene Punkte.
 - appointments: Termine, Liefertermine, Fristen und Besichtigungen mit Datum. Relative Angaben („Freitag", „morgen") in ein Datum umrechnen. Dauer schätzen (Standard 60 Minuten).
-Für conversation_id immer "${convID(c)}" verwenden. Nichts erfinden, was nicht im Chat steht.`;
-  return claudeJSON({ system: this.system(), user, schema: {
+Für conversation_id immer "${convID(c)}" verwenden. Nichts erfinden, was nicht im Chat steht.
+Beigefügte Fotos/PDFs stammen aus dem Chat: beschreibe im summary kurz, was darauf fachlich erkennbar ist (z. B. Schadensbild, Planstand).`;
+  const media = await this.media(c, { images: 3, pdf: true });
+  return claudeJSON({ system: this.system(), user, media, maxTokens: 8000, schema: {
     type: "object",
     properties: {
       summary: { type: "string" },
@@ -802,6 +1018,33 @@ function chatMenu() {
   });
 }
 
+// Suggestions are prepared in the background for unread chats, so opening a chat is instant.
+const sugCache = store.get("sugCache", {});
+let prefetching = false;
+function cachedSuggestions(c) {
+  const hit = sugCache[convID(c)];
+  return hit && hit.lastID === lastMsg(c)?.id ? hit.items : null;
+}
+function cacheSuggestions(c, items) {
+  sugCache[convID(c)] = { lastID: lastMsg(c)?.id, items };
+  for (const id of Object.keys(sugCache)) if (!state.conversations.some((x) => convID(x) === id)) delete sugCache[id];
+  store.set("sugCache", sugCache);
+}
+async function prefetchSuggestions() {
+  if (prefetching || !store.get("anthropicKey", null)) return;
+  const rank = { urgent: 0, normal: 1, low: 2 };
+  const todo = state.conversations
+    .filter((c) => !c.isArchived && c.unreadCount > 0 && lastMsg(c) && !lastMsg(c).isOutgoing && !cachedSuggestions(c))
+    .sort((a, b) => (rank[a.priority] ?? 1) - (rank[b.priority] ?? 1)).slice(0, 3);
+  prefetching = true;
+  try {
+    for (const c of todo) {
+      if (ui.chatID === convID(c)) continue;
+      try { cacheSuggestions(c, await assistant.suggest(c, state.profile.defaultTone, "")); } catch { break; }
+    }
+  } finally { prefetching = false; }
+}
+
 async function triage(ids) {
   const targets = state.conversations.filter((c) => !c.isArchived
     && (ids ? ids.includes(convID(c)) : c.unreadCount > 0)
@@ -820,6 +1063,7 @@ async function triage(ids) {
   } finally {
     state.triaging = false;
     view.update();
+    prefetchSuggestions();
   }
 }
 
@@ -860,7 +1104,7 @@ function visibleConversations() {
     if (ui.filter === "unread" && !c.unreadCount) return false;
     if (ui.filter === "urgent" && c.priority !== "urgent") return false;
     if (ui.platform && c.platform !== ui.platform) return false;
-    return !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => m.text.toLowerCase().includes(q));
+    return !q || c.title.toLowerCase().includes(q) || c.messages.some((m) => m.text.toLowerCase().includes(q) || (m.attachment?.name || "").toLowerCase().includes(q));
   });
 }
 
@@ -933,7 +1177,7 @@ function fillInbox() {
         </div>
         ${c.aiSummary ? `<div class="row-ai">${c.priority ? `<span class="tag ${c.priority}">${PRIORITY_LABEL[c.priority]}</span>` : ""}<span>${esc(c.aiSummary)}</span></div>` : ""}
         <div class="row-bottom">
-          <div class="row-preview">${last ? (last.isOutgoing ? "Ich: " : "") + esc(last.text) : ""}</div>
+          <div class="row-preview">${last ? (last.isOutgoing ? "Ich: " : "") + (last.attachment ? fileIcon(last.attachment) + " " + esc(last.text || attachmentLabel(last.attachment)) : esc(last.text)) : ""}</div>
           ${c.unreadCount ? `<span class="count">${c.unreadCount}</span>` : ""}
         </div>
         <div class="row-actions">
@@ -949,17 +1193,23 @@ function fillInbox() {
 
 // --- Chat ------------------------------------------------------------------
 
-const chatUI = { suggestions: [], thinking: false, sending: false, tone: null, instruction: "" };
+const chatUI = { suggestions: [], thinking: false, sending: false, tone: null, instruction: "", pending: [] };
+const EMOJIS = ["👍", "🙏", "✅", "👌", "😊", "🙂", "😀", "😅", "😉", "👋", "🤝", "💪", "👏", "🎉", "❤️", "🔥",
+  "⚠️", "❗", "❓", "⏰", "📅", "📍", "📞", "📧", "📷", "📄", "📐", "🏗️", "🏠", "🧱", "🔨", "🔧",
+  "🚧", "🚚", "💧", "⚡", "☀️", "🌧️", "❄️", "✍️", "💶", "🕐", "👷", "🦺", "🪜", "🛠️", "📦", "🔑"];
 
 function openChat(id) {
   ui.chatID = id;
-  Object.assign(chatUI, { suggestions: [], thinking: false, sending: false, tone: state.profile.defaultTone, instruction: "" });
+  chatUI.pending.forEach((p) => URL.revokeObjectURL(p.url));
+  Object.assign(chatUI, { suggestions: [], thinking: false, sending: false, tone: state.profile.defaultTone, instruction: "", pending: [] });
   document.body.classList.add("in-chat");
   history.pushState({ chat: id }, "");
   renderChat();
   markRead(id);
   const c = currentChat();
-  if (c && lastMsg(c) && !lastMsg(c).isOutgoing && store.get("anthropicKey", null)) generate();
+  const cached = c && cachedSuggestions(c);
+  if (cached) { chatUI.suggestions = cached; fillSuggestions(); }
+  else if (c && lastMsg(c) && !lastMsg(c).isOutgoing && store.get("anthropicKey", null)) generate();
 }
 
 function closeChat() {
@@ -996,10 +1246,24 @@ function renderChat() {
       </div>
       <div class="menu" id="menu" hidden>${Object.entries(assistant.REWRITES).map(([k, [label]]) => `<button data-rewrite="${k}">${label}</button>`).join("")}</div>
       <div class="menu" id="tpl-menu" hidden>${state.templates.map((t, i) => `<button data-tpl="${i}">${esc(t.title)}</button>`).join("") || `<button disabled>Keine Textbausteine</button>`}</div>
+      <div class="menu" id="att-menu" hidden>
+        <button data-pick="camera">📷 Kamera</button>
+        <button data-pick="photos">🖼 Fotos &amp; Videos</button>
+        <button data-pick="files">📄 Dokument (PDF, Plan, Excel …)</button>
+      </div>
+      <input type="file" id="pick-camera" accept="image/*" capture="environment" hidden>
+      <input type="file" id="pick-photos" accept="image/*,video/*" multiple hidden>
+      <input type="file" id="pick-files" multiple hidden>
+      <div class="emoji-panel" id="emoji-panel" hidden></div>
+      <div class="pending" id="pending" hidden></div>
       <div class="composer">
+        <button class="wand" id="btn-att" title="Foto oder Dokument anhängen">＋</button>
         <button class="wand" id="btn-tpl" title="Textbausteine">📋</button>
         <button class="wand" id="btn-wand" title="Entwurf mit KI überarbeiten">🪄</button>
-        <textarea id="draft" rows="1" placeholder="Nachricht an ${esc(p.name)}"></textarea>
+        <div class="draft-wrap">
+          <textarea id="draft" rows="1" placeholder="Nachricht an ${esc(p.name)}"></textarea>
+          <button class="emoji-btn" id="btn-emoji" title="Emoji">😊</button>
+        </div>
         <button class="send" id="btn-send" title="Senden">↑</button>
       </div>
     </div>`;
@@ -1007,7 +1271,7 @@ function renderChat() {
   const draft = $("#draft");
   const syncButtons = () => {
     const empty = !draft.value.trim();
-    $("#btn-send").disabled = empty || chatUI.sending;
+    $("#btn-send").disabled = (empty && !chatUI.pending.length) || chatUI.sending;
     $("#btn-wand").disabled = empty || chatUI.thinking;
   };
   const autosize = () => { draft.style.height = "auto"; draft.style.height = Math.min(draft.scrollHeight, 160) + "px"; syncButtons(); };
@@ -1025,8 +1289,49 @@ function renderChat() {
     autosize();
     draft.focus();
   });
-  $("#btn-wand").addEventListener("click", () => { const m = $("#menu"); m.hidden = !m.hidden; $("#tpl-menu").hidden = true; });
-  $("#btn-tpl").addEventListener("click", () => { const m = $("#tpl-menu"); m.hidden = !m.hidden; $("#menu").hidden = true; });
+  const menus = ["#menu", "#tpl-menu", "#att-menu", "#emoji-panel"];
+  const toggle = (sel) => menus.forEach((m) => { $(m).hidden = m === sel ? !$(m).hidden : true; });
+  $("#btn-wand").addEventListener("click", () => toggle("#menu"));
+  $("#btn-tpl").addEventListener("click", () => toggle("#tpl-menu"));
+  $("#btn-att").addEventListener("click", () => toggle("#att-menu"));
+  $("#btn-emoji").addEventListener("click", () => { fillEmojis(); toggle("#emoji-panel"); });
+  $("#emoji-panel").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-emoji]");
+    if (!b) return;
+    const emoji = b.dataset.emoji;
+    const start = draft.selectionStart ?? draft.value.length, end = draft.selectionEnd ?? start;
+    draft.value = draft.value.slice(0, start) + emoji + draft.value.slice(end);
+    draft.selectionStart = draft.selectionEnd = start + emoji.length;
+    const recent = [emoji, ...store.get("recentEmojis", []).filter((x) => x !== emoji)].slice(0, 8);
+    store.set("recentEmojis", recent);
+    autosize();
+  });
+  $("#att-menu").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-pick]");
+    if (!b) return;
+    $("#att-menu").hidden = true;
+    $("#pick-" + b.dataset.pick).click();
+  });
+  ["camera", "photos", "files"].forEach((k) => $("#pick-" + k).addEventListener("change", (e) => {
+    for (const file of e.target.files) {
+      chatUI.pending.push({ file, url: file.type.startsWith("image/") ? URL.createObjectURL(file) : null });
+    }
+    e.target.value = "";
+    fillPending();
+    syncButtons();
+  }));
+  $("#pending").addEventListener("click", (e) => {
+    const x = e.target.closest("[data-unpend]");
+    if (!x) return;
+    const [removed] = chatUI.pending.splice(+x.dataset.unpend, 1);
+    if (removed?.url) URL.revokeObjectURL(removed.url);
+    fillPending();
+    syncButtons();
+  });
+  $("#messages").addEventListener("click", (e) => {
+    const target = e.target.closest("[data-att-msg]");
+    if (target) openAttachment(target.dataset.attMsg);
+  });
   $("#tpl-menu").addEventListener("click", (e) => {
     const b = e.target.closest("[data-tpl]");
     if (!b) return;
@@ -1051,10 +1356,21 @@ function renderChat() {
   });
   $("#btn-send").addEventListener("click", async () => {
     const text = draft.value.trim();
-    if (!text) return;
+    if (!text && !chatUI.pending.length) return;
     chatUI.sending = true; syncButtons();
+    menus.forEach((m) => { $(m).hidden = true; });
     try {
-      await sendMessage(ui.chatID, text);
+      while (chatUI.pending.length) {
+        const item = chatUI.pending[0];
+        $("#pending").classList.add("busy");
+        await sendFile(ui.chatID, item.file);
+        chatUI.pending.shift();
+        if (item.url) URL.revokeObjectURL(item.url);
+        fillPending();
+        fillMessages(true);
+      }
+      $("#pending").classList.remove("busy");
+      if (text) await sendMessage(ui.chatID, text);
       draft.value = ""; autosize();
       chatUI.suggestions = []; chatUI.instruction = ""; $("#instr").value = "";
       fillSuggestions(); fillMessages(true);
@@ -1065,7 +1381,100 @@ function renderChat() {
   view.update = () => { fillMessages(); fillSuggestions(); };
   fillMessages();
   fillSuggestions();
+  fillPending();
   syncButtons();
+}
+
+function fillEmojis() {
+  const recent = store.get("recentEmojis", []);
+  const list = [...recent, ...EMOJIS.filter((e) => !recent.includes(e))];
+  $("#emoji-panel").innerHTML = list.map((e) => `<button data-emoji="${e}">${e}</button>`).join("");
+}
+
+function fillPending() {
+  const el = $("#pending");
+  if (!el) return;
+  el.hidden = !chatUI.pending.length;
+  el.innerHTML = chatUI.pending.map((p, i) => `<div class="pend">
+      ${p.url ? `<img src="${p.url}" alt="">` : `<span class="pend-icon">${fileIcon({ kind: kindFor(p.file.type), mime: p.file.type, name: p.file.name })}</span>`}
+      <span class="pend-name">${esc(p.file.name)}<br><small>${formatSize(p.file.size)}</small></span>
+      <button data-unpend="${i}" aria-label="entfernen">✕</button>
+    </div>`).join("");
+}
+
+function attachmentHTML(m) {
+  const att = m.attachment;
+  const cached = objectURLs.get(attKey(att));
+  if (att.kind === "image") {
+    return `<button class="att-img" data-att-msg="${esc(m.id)}">${cached
+      ? `<img src="${cached.url}" alt="Foto">` : `<span class="att-loading" data-att-load="${esc(m.id)}">🖼 Foto wird geladen …</span>`}</button>`;
+  }
+  return `<button class="att-file" data-att-msg="${esc(m.id)}"><span class="att-icon">${fileIcon(att)}</span>
+    <span><b>${esc(att.name || attachmentLabel(att))}</b><br><small>${esc([formatSize(att.size), att.mime.split("/")[1]?.toUpperCase()].filter(Boolean).join(" · "))}</small></span></button>`;
+}
+
+// Loads image thumbnails that are not yet cached, without blocking the chat.
+function hydrateAttachments(c) {
+  document.querySelectorAll("[data-att-load]").forEach(async (el) => {
+    const m = c.messages.find((x) => x.id === el.dataset.attLoad);
+    if (!m) return;
+    el.removeAttribute("data-att-load");
+    try {
+      const { url } = await loadAttachment(c, m.attachment);
+      const box = $("#messages");
+      const nearBottom = box && box.scrollHeight - box.scrollTop - box.clientHeight < 200;
+      const img = Object.assign(document.createElement("img"), { src: url, alt: "Foto" });
+      img.onload = () => { if (nearBottom && box) box.scrollTop = box.scrollHeight; };
+      el.replaceWith(img);
+    } catch (error) {
+      el.textContent = "🖼 " + error.message;
+    }
+  });
+}
+
+async function openAttachment(messageID) {
+  const c = currentChat();
+  const m = c?.messages.find((x) => x.id === messageID);
+  if (!m?.attachment) return;
+  const att = m.attachment;
+  let loaded;
+  try {
+    toast("⏳ Wird geöffnet …");
+    loaded = await loadAttachment(c, att);
+    $("#toast").hidden = true;
+  } catch (error) { return toast(error.message); }
+  const name = att.name || "Datei";
+  const sheet = openSheet(name, `
+    ${att.kind === "image" ? `<img class="viewer-img" src="${loaded.url}" alt="">`
+      : att.kind === "video" ? `<video class="viewer-img" src="${loaded.url}" controls playsinline></video>`
+      : att.kind === "audio" ? `<audio src="${loaded.url}" controls style="width:100%"></audio>`
+      : `<div class="viewer-file">${fileIcon(att)}<div>${esc(name)}</div><div class="muted">${formatSize(loaded.blob.size)}</div></div>`}
+    <button class="primary" id="att-open">${att.kind === "file" ? "Öffnen" : "Teilen / Sichern"}</button>
+    ${att.kind === "image" && store.get("anthropicKey", null) ? `<button class="sheet-btn" id="att-ai" style="margin-top:8px">✨ Foto von der KI beschreiben lassen</button><div id="att-ai-out"></div>` : ""}`);
+  $("#att-open", sheet).addEventListener("click", async () => {
+    const file = new File([loaded.blob], name, { type: att.mime || loaded.blob.type });
+    if (navigator.canShare?.({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === "AbortError") return; }
+    }
+    const a = Object.assign(document.createElement("a"), { href: loaded.url, download: name, target: "_blank", rel: "noopener" });
+    document.body.appendChild(a); a.click(); a.remove();
+  });
+  $("#att-ai", sheet)?.addEventListener("click", async (e) => {
+    e.target.disabled = true;
+    $("#att-ai-out", sheet).innerHTML = `<div class="thinking">⏳ Die KI sieht sich das Foto an …</div>`;
+    try {
+      const small = await downscale(loaded.blob, 1568, 0.85);
+      const out = await claudeJSON({ system: assistant.system(), maxTokens: 4000,
+        media: [{ type: "image", source: { type: "base64", media_type: "image/jpeg", data: await blobToBase64(small) } }],
+        user: `${assistant.transcript(c, 8)}\n\nBeschreibe das beigefügte Foto aus diesem Chat fachlich für ${state.profile.ownerName} (Bau): was ist zu sehen, mögliche Ursache/Mangel, Dringlichkeit und empfohlene nächste Schritte. Kurz und sachlich, keine Ferndiagnose als Tatsache ausgeben.`,
+        schema: { type: "object", properties: { description: { type: "string" }, urgency: { type: "string", enum: ["hoch", "mittel", "niedrig"] }, next_steps: { type: "array", items: { type: "string" } } },
+          required: ["description", "urgency", "next_steps"], additionalProperties: false } });
+      $("#att-ai-out", sheet).innerHTML = `<div class="card" style="margin:10px 0"><p>${esc(out.description)}</p>
+        <p><b>Dringlichkeit:</b> ${esc(out.urgency)}</p><ul>${out.next_steps.map((x) => `<li>${esc(x)}</li>`).join("")}</ul></div>`;
+    } catch (error) {
+      $("#att-ai-out", sheet).innerHTML = `<p class="err">${esc(error.message)}</p>`;
+    }
+  });
 }
 
 function fillMessages(forceBottom = false) {
@@ -1077,10 +1486,12 @@ function fillMessages(forceBottom = false) {
   box.innerHTML = c.messages.map((m) => `
     <div class="bubble ${m.isOutgoing ? "out" : ""}">
       ${m.isOutgoing ? "" : `<div class="who" style="color:${color}">${esc(m.senderName)}</div>`}
-      <div class="txt">${esc(m.text)}</div>
+      ${m.attachment ? attachmentHTML(m) : ""}
+      ${m.text ? `<div class="txt">${esc(m.text)}</div>` : ""}
       <div class="when">${clock(m.date)}</div>
     </div>`).join("");
   if (forceBottom || atBottom || !box.dataset.scrolled) { box.scrollTop = box.scrollHeight; box.dataset.scrolled = "1"; }
+  hydrateAttachments(c);
 }
 
 function fillSuggestions() {
@@ -1104,7 +1515,9 @@ async function generate() {
   chatUI.thinking = true;
   fillSuggestions();
   try {
-    const result = await assistant.suggest(c, chatUI.tone, chatUI.instruction.trim());
+    const instruction = chatUI.instruction.trim();
+    const result = await assistant.suggest(c, chatUI.tone, instruction);
+    if (!instruction && chatUI.tone === state.profile.defaultTone) cacheSuggestions(c, result);
     if (ui.chatID === convID(c)) chatUI.suggestions = result;
   } catch (error) {
     toast(error.message);

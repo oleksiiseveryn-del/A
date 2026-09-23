@@ -60,4 +60,38 @@ final class UniMessengerTests: XCTestCase {
         let conversation = try JSONDecoder().decode(Conversation.self, from: Data(legacy.utf8))
         XCTAssertNil(conversation.note)
     }
+
+    func testTelegramPhotoAndDocumentBecomeAttachments() throws {
+        let photo = try XCTUnwrap(TelegramBotConnector.attachment(in: [
+            "photo": [["file_id": "small", "file_size": 100], ["file_id": "large", "file_size": 90_000]],
+        ]))
+        XCTAssertEqual(photo.kind, .image)
+        XCTAssertEqual(photo.source, .telegram(fileID: "large"))
+
+        let pdf = try XCTUnwrap(TelegramBotConnector.attachment(in: [
+            "document": ["file_id": "doc", "file_name": "Plan Rev C.pdf", "mime_type": "application/pdf", "file_size": 2048],
+        ]))
+        XCTAssertEqual(pdf.kind, .file)
+        XCTAssertEqual(pdf.name, "Plan Rev C.pdf")
+        XCTAssertEqual(pdf.symbol, "doc.richtext")
+        XCTAssertNil(TelegramBotConnector.attachment(in: ["text": "Hallo"]))
+    }
+
+    func testAttachmentRoundTripsAndLegacyMessagesDecode() throws {
+        let message = Message(id: "1", senderName: "Ich", text: "", date: Date(timeIntervalSince1970: 0), isOutgoing: true,
+                              attachment: Attachment(kind: .image, name: "Keller.jpg", mime: "image/jpeg", size: 1234,
+                                                     source: .matrix(mxc: "mxc://example.org/abc")))
+        let decoded = try JSONDecoder().decode(Message.self, from: JSONEncoder().encode(message))
+        XCTAssertEqual(decoded, message)
+        XCTAssertEqual(decoded.attachment?.cacheKey, "matrix_mxc://example.org/abc")
+
+        let legacy = #"{"id":"2","senderName":"A","text":"Hi","date":0,"isOutgoing":false}"#
+        XCTAssertNil(try JSONDecoder().decode(Message.self, from: Data(legacy.utf8)).attachment)
+    }
+
+    func testMimeKinds() {
+        XCTAssertEqual(Attachment.kind(for: "image/heic"), .image)
+        XCTAssertEqual(Attachment.kind(for: "video/mp4"), .video)
+        XCTAssertEqual(Attachment.kind(for: "application/pdf"), .file)
+    }
 }

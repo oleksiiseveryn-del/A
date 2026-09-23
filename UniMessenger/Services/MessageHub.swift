@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 /// Central store: owns the connectors, merges their conversations into one
 /// inbox, persists state, and exposes AI helpers to the views.
@@ -26,6 +27,9 @@ final class MessageHub {
     @ObservationIgnored private var connectors: [UUID: MessengerConnector] = [:]
     @ObservationIgnored private var connected: Set<UUID> = []
     @ObservationIgnored private var pollTask: Task<Void, Never>?
+    /// Reply drafts prepared in the background, keyed by conversation and last message.
+    @ObservationIgnored private var suggestionCache: [String: (lastID: String, items: [ReplySuggestion])] = [:]
+    @ObservationIgnored private var isPrefetching = false
 
     init() {
         accounts = Persistence.load([Account].self, from: "accounts")
@@ -193,6 +197,121 @@ final class MessageHub {
         Persistence.save(conversations, to: "conversations")
     }
 
+    // MARK: - Photos & documents
+
+    func sendFile(_ original: Data, name: String, mime: String, in conversationID: String) async throws {
+        guard let index = conversations.firstIndex(where: { $0.id == conversationID }),
+              let connector = connectors[conversations[index].accountID] else {
+            throw ConnectorError.notSupported("Konto ist deaktiviert")
+        }
+        var data = original, fileName = name, type = mime
+        // Large photos are scaled down for a fast upload.
+        if Attachment.kind(for: mime) == .image, !mime.contains("gif"), original.count > 1_500_000,
+           let image = UIImage(data: original), let jpeg = Self.scaled(image, maxSide: 2560).jpegData(compressionQuality: 0.85) {
+            data = jpeg
+            type = "image/jpeg"
+            fileName = (name as NSString).deletingPathExtension + ".jpg"
+        }
+        guard data.count <= 50_000_000 else { throw ConnectorError.notSupported("Dateien über 50 MB") }
+        if !connected.contains(conversations[index].accountID) {
+            try await connector.connect()
+            connected.insert(conversations[index].accountID)
+        }
+        let messageID = try await connector.sendFile(data, name: fileName, mime: type, to: conversations[index])
+        let key = UUID().uuidString
+        FileStore.store(data, for: "local_" + key)
+        let message = Message(id: messageID, senderName: "Ich", text: "", date: .now, isOutgoing: true,
+                              attachment: Attachment(kind: Attachment.kind(for: type), name: fileName, mime: type,
+                                                     size: data.count, source: .local(key: key)))
+        guard let current = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+        conversations[current].messages.append(message)
+        conversations[current].unreadCount = 0
+        conversations[current].priority = .low
+        sort()
+        Persistence.save(conversations, to: "conversations")
+    }
+
+    /// Cached file content, downloaded through the conversation's connector if needed.
+    func loadAttachment(_ attachment: Attachment, in conversation: Conversation) async throws -> Data {
+        if let data = FileStore.data(for: attachment.cacheKey) { return data }
+        guard case .local = attachment.source else {
+            guard let connector = connectors[conversation.accountID] else { throw ConnectorError.notSupported("Konto ist deaktiviert") }
+            if !connected.contains(conversation.accountID) {
+                try await connector.connect()
+                connected.insert(conversation.accountID)
+            }
+            let data = try await connector.download(attachment)
+            FileStore.store(data, for: attachment.cacheKey)
+            return data
+        }
+        throw ConnectorError.notSupported("Datei ist auf diesem Gerät nicht mehr vorhanden")
+    }
+
+    nonisolated static func scaled(_ image: UIImage, maxSide: CGFloat) -> UIImage {
+        let scale = min(1, maxSide / max(image.size.width, image.size.height))
+        guard scale < 1 else { return image }
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { _ in image.draw(in: CGRect(origin: .zero, size: size)) }
+    }
+
+    /// Recent photos (and optionally one PDF) as Claude content blocks.
+    func mediaBlocks(for conversation: Conversation, images: Int, pdf: Bool) async -> [[String: Any]] {
+        var blocks: [[String: Any]] = []
+        var imageCount = 0, pdfDone = !pdf
+        for message in conversation.messages.suffix(12).reversed() {
+            guard let attachment = message.attachment else { continue }
+            if attachment.kind == .image, imageCount < images,
+               let data = try? await loadAttachment(attachment, in: conversation),
+               let image = UIImage(data: data),
+               let jpeg = Self.scaled(image, maxSide: 1024).jpegData(compressionQuality: 0.8) {
+                blocks.insert(["type": "image", "source": ["type": "base64", "media_type": "image/jpeg",
+                                                           "data": jpeg.base64EncodedString()]], at: 0)
+                imageCount += 1
+            } else if !pdfDone, attachment.mime.contains("pdf"), attachment.size < 4_000_000,
+                      let data = try? await loadAttachment(attachment, in: conversation) {
+                blocks.insert(["type": "document", "title": attachment.name,
+                               "source": ["type": "base64", "media_type": "application/pdf",
+                                          "data": data.base64EncodedString()]], at: 0)
+                pdfDone = true
+            }
+        }
+        return blocks
+    }
+
+    // MARK: - Reply suggestions (cached, prefetched)
+
+    func cachedSuggestions(for conversation: Conversation) -> [ReplySuggestion]? {
+        guard let hit = suggestionCache[conversation.id], hit.lastID == conversation.lastMessage?.id else { return nil }
+        return hit.items
+    }
+
+    func suggestions(for conversation: Conversation, tone: AssistantProfile.Tone, instruction: String) async throws -> [ReplySuggestion] {
+        let media = await mediaBlocks(for: conversation, images: 2, pdf: false)
+        let items = try await assistant.suggestReplies(for: conversation, tone: tone, language: profile.replyLanguage,
+                                                        instruction: instruction, media: media)
+        if instruction.isEmpty, tone == profile.defaultTone, let lastID = conversation.lastMessage?.id {
+            suggestionCache[conversation.id] = (lastID, items)
+        }
+        return items
+    }
+
+    /// Prepares drafts for the most important unread chats so opening them is instant.
+    func prefetchSuggestions() async {
+        guard hasAPIKey, !isPrefetching else { return }
+        isPrefetching = true
+        defer { isPrefetching = false }
+        let rank: [Priority: Int] = [.urgent: 0, .normal: 1, .low: 2]
+        let candidates = conversations
+            .filter { !$0.isArchived && $0.unreadCount > 0 && $0.lastMessage?.isOutgoing == false && cachedSuggestions(for: $0) == nil }
+            .sorted { rank[$0.priority ?? .normal, default: 1] < rank[$1.priority ?? .normal, default: 1] }
+            .prefix(3)
+        for conversation in candidates {
+            guard (try? await suggestions(for: conversation, tone: profile.defaultTone, instruction: "")) != nil else { break }
+        }
+    }
+
     func markRead(_ conversationID: String) {
         guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
         let conversation = conversations[index]
@@ -288,5 +407,6 @@ final class MessageHub {
         } catch {
             lastError = error.localizedDescription
         }
+        Task { await prefetchSuggestions() }
     }
 }
