@@ -146,4 +146,11 @@ final class UniMessengerTests: XCTestCase {
         let json = #"{"protocol":"Gesprächsnotiz","summary":"s","tasks":[],"appointments":[]}"#
         XCTAssertEqual(try JSONDecoder().decode(CallProtocol.self, from: Data(json.utf8)).text, "Gesprächsnotiz")
     }
+
+    func testMatrixServerOfUserID() {
+        XCTAssertEqual(MatrixConnector.server(of: "@oleksii:hsd-hamburg.de"), "hsd-hamburg.de")
+        XCTAssertEqual(MatrixConnector.server(of: "@whatsapp_49176:matrix.example.org:8448"), "matrix.example.org:8448")
+        XCTAssertEqual(MatrixConnector.server(of: "kein-matrix-name"), "")
+        XCTAssertEqual(BridgeInfo.all.first?.command, "login phone")
+    }
 }

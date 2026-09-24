@@ -96,6 +96,20 @@ final class MessageHub {
         }
     }
 
+    /// Starts the login with a bridge bot (WhatsApp, Signal, …) and returns the conversation ID of its chat.
+    func startBridge(_ bridge: BridgeInfo, accountID: UUID) async throws -> String {
+        guard let connector = connectors[accountID] as? MatrixConnector else {
+            throw ConnectorError.notSupported("Nur für aktive Matrix-Konten")
+        }
+        if !connected.contains(accountID) {
+            try await connector.connect()
+            connected.insert(accountID)
+        }
+        let roomID = try await connector.startBridge(bot: bridge.bot, command: bridge.command)
+        await refresh()
+        return "\(accountID)|\(roomID)"
+    }
+
     /// Forces a fresh login next time (e.g. after the user edits credentials).
     func resetConnection(for accountID: UUID) {
         connected.remove(accountID)

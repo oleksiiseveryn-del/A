@@ -86,8 +86,21 @@ struct AccountEditor: View {
     @Environment(\.dismiss) private var dismiss
     @State var account: Account
     @State private var secret = ""
+    @State private var pairing: BridgeInfo?
+    @State private var pairingMessage: String?
 
     private var isNew: Bool { !hub.accounts.contains { $0.id == account.id } }
+
+    private func pair(_ bridge: BridgeInfo) async {
+        pairing = bridge
+        defer { pairing = nil }
+        do {
+            _ = try await hub.startBridge(bridge, accountID: account.id)
+            pairingMessage = "✓ \(bridge.name): Der Chat mit dem Kopplungs-Bot ist jetzt im Posteingang – bitte den Anweisungen dort folgen."
+        } catch {
+            pairingMessage = "\(bridge.name): \(error.localizedDescription)"
+        }
+    }
 
     /// A stored device token belongs to one homeserver and user; changing either needs a fresh login.
     private var loginChanged: Bool {
@@ -114,6 +127,27 @@ struct AccountEditor: View {
                         Text("Matrix-Anmeldung")
                     } footer: {
                         Text("Das Passwort wird nur einmal zur Anmeldung verwendet; danach speichert die App ausschließlich ein Geräte-Token im Schlüsselbund.")
+                    }
+                    if !isNew {
+                        Section {
+                            ForEach(BridgeInfo.all) { bridge in
+                                Button {
+                                    Task { await pair(bridge) }
+                                } label: {
+                                    HStack {
+                                        PlatformBadge(platform: bridge.platform, size: 28)
+                                        Text(bridge.name).foregroundStyle(.primary)
+                                        Spacer()
+                                        if pairing == bridge { ProgressView() }
+                                    }
+                                }
+                                .disabled(pairing != nil)
+                            }
+                        } header: {
+                            Text("Messenger koppeln")
+                        } footer: {
+                            Text(pairingMessage ?? "Öffnet den Chat mit dem Kopplungs-Bot und startet die Anmeldung. WhatsApp: Sie erhalten einen 8-stelligen Code – in WhatsApp unter Einstellungen → Verknüpfte Geräte → Gerät hinzufügen → „Stattdessen mit Telefonnummer verknüpfen“ eingeben. Signal: QR-Code auf einem zweiten Gerät anzeigen und in Signal scannen. Danach erscheinen alle Chats automatisch im Posteingang.")
+                        }
                     }
                 case .telegramBot:
                     Section {

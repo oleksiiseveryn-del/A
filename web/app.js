@@ -246,6 +246,13 @@ const PLATFORMS = {
   matrix: { name: "Matrix", color: "#555", abbr: "[m]" },
   demo: { name: "Demo", color: "#8e44ad", abbr: "✦" },
 };
+// Bridge bots installed by server/install.sh (mautrix default names) and their login commands.
+const BRIDGES = [
+  { name: "WhatsApp", icon: "🟢", bot: "whatsappbot", command: "login phone" },
+  { name: "Signal", icon: "🔵", bot: "signalbot", command: "login" },
+  { name: "Instagram", icon: "📸", bot: "instagrambot", command: "login" },
+  { name: "Facebook Messenger", icon: "💬", bot: "messengerbot", command: "login" },
+];
 const PRIORITY_LABEL = { urgent: "Dringend", normal: "Normal", low: "Niedrig" };
 const ACCOUNT_KINDS = {
   matrix: "Matrix / Bridges (WhatsApp, Signal, Instagram …)",
@@ -440,6 +447,16 @@ function matrixConnector(account) {
         : `sync?timeout=0&filter=${enc(JSON.stringify({ room: { timeline: { limit: 30 } } }))}`;
       const sync = await httpJSON(base() + q, { bearer: token });
       if (sync.next_batch) store.set(sinceKey, sync.next_batch);
+      // Bridges invite the user into a new room for every WhatsApp/Signal/… chat.
+      // Invitations from the own server are accepted automatically; they show up in the next sync.
+      const ownServer = (userID || "").split(":").slice(1).join(":");
+      for (const [roomID, room] of Object.entries(sync.rooms?.invite || {})) {
+        const invite = (room.invite_state?.events || []).find((e) => e.type === "m.room.member" && e.state_key === userID);
+        const inviterServer = (invite?.sender || "").split(":").slice(1).join(":");
+        if (ownServer && inviterServer === ownServer) {
+          try { await httpJSON(base() + `join/${enc(roomID)}`, { method: "POST", bearer: token, body: {} }); } catch { /* retried on next sync */ }
+        }
+      }
       const result = [];
       for (const [roomID, room] of Object.entries(sync.rooms?.join || {})) {
         const stateEvents = room.state?.events || [];
@@ -480,6 +497,30 @@ function matrixConnector(account) {
       const res = await httpJSON(base() + `rooms/${enc(conversation.remoteID)}/send/m.room.message/${enc(uuid())}`,
         { method: "PUT", bearer: token, body: { msgtype: "m.text", body: text } });
       return { id: res.event_id || uuid(), senderName: "Ich", text, date: Date.now(), isOutgoing: true };
+    },
+    // Opens (or reuses) the direct chat with a bridge bot and sends the login command.
+    async startBridge(bot, command) {
+      const server = (userID || "").split(":").slice(1).join(":");
+      const botID = `@${bot}:${server}`;
+      const key = `bridgeRoom.${account.id}.${bot}`;
+      let roomID = store.get(key, null);
+      if (!roomID) {
+        const created = await httpJSON(base() + "createRoom", { method: "POST", bearer: token,
+          body: { is_direct: true, preset: "trusted_private_chat", invite: [botID] } });
+        roomID = created.room_id;
+        store.set(key, roomID);
+        // Wait until the bot has joined, otherwise it misses the command.
+        for (let i = 0; i < 15; i++) {
+          try {
+            const members = await httpJSON(base() + `rooms/${enc(roomID)}/joined_members`, { bearer: token });
+            if (members.joined?.[botID]) break;
+          } catch { /* not yet */ }
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+      }
+      await httpJSON(base() + `rooms/${enc(roomID)}/send/m.room.message/${enc(uuid())}`,
+        { method: "PUT", bearer: token, body: { msgtype: "m.text", body: command } });
+      return roomID;
     },
     async sendFile(file, conversation) {
       const up = await fetch(root() + "/_matrix/media/v3/upload?filename=" + enc(file.name), {
@@ -2276,7 +2317,10 @@ function renderAccountEditor() {
         <div class="field"><label>Benutzer</label><input id="f-user" autocapitalize="off" autocorrect="off" value="${esc(a.username)}"></div>
         <div class="field"><label>Passwort</label><input id="f-secret" type="password" placeholder="${a.isNew ? "Pflichtfeld" : "nur zum Ändern"}"></div>
       </div>
-      <div class="footer">Das Passwort wird nur einmal zur Anmeldung verwendet; danach speichert die App nur ein Geräte-Token.</div>`,
+      <div class="footer">Das Passwort wird nur einmal zur Anmeldung verwendet; danach speichert die App nur ein Geräte-Token.</div>
+      ${a.isNew ? "" : `<div class="section-title">Messenger koppeln</div>
+      <div class="group">${BRIDGES.map((b, i) => `<button class="btn-row" data-bridge="${i}">${b.icon} ${esc(b.name)}</button>`).join("")}</div>
+      <div class="footer">Öffnet den Chat mit dem Kopplungs-Bot und startet die Anmeldung. <b>WhatsApp:</b> Sie erhalten einen 8-stelligen Code – in WhatsApp unter Einstellungen → Verknüpfte Geräte → Gerät hinzufügen → „Stattdessen mit Telefonnummer verknüpfen“ eingeben. <b>Signal:</b> QR-Code mit einem zweiten Gerät anzeigen und in Signal scannen. Danach erscheinen alle Chats automatisch im Posteingang.</div>`}`,
     telegramBot: `
       <div class="section-title">Telegram</div>
       <div class="group">
@@ -2302,6 +2346,27 @@ function renderAccountEditor() {
     </div>`;
   const val = (id) => $(id)?.value.trim() ?? "";
   $("#btn-cancel").addEventListener("click", () => { ui.editing = null; renderAccounts(); });
+  screen.querySelectorAll("[data-bridge]").forEach((button) => button.addEventListener("click", async () => {
+    const bridge = BRIDGES[+button.dataset.bridge];
+    const account = state.accounts.find((x) => x.id === a.id);
+    if (!account) return;
+    button.disabled = true;
+    toast(`⏳ Verbinde mit ${bridge.name}-Bridge …`);
+    try {
+      const entry = connectorFor(account);
+      if (!entry.connected) { await entry.connector.connect(); entry.connected = true; }
+      const roomID = await entry.connector.startBridge(bridge.bot, bridge.command);
+      await refresh();
+      ui.editing = null;
+      ui.tab = "inbox";
+      render();
+      if (state.conversations.some((c) => convID(c) === `${account.id}|${roomID}`)) openChat(`${account.id}|${roomID}`);
+      toast(`${bridge.name}: Anweisungen des Bots im Chat folgen.`);
+    } catch (error) {
+      button.disabled = false;
+      toast(`${bridge.name}: ${error.message}`);
+    }
+  }));
   $("#btn-delete")?.addEventListener("click", () => {
     if (!confirm("Konto und alle zugehörigen Chats von diesem Gerät entfernen?")) return;
     state.accounts = state.accounts.filter((x) => x.id !== a.id);

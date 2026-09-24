@@ -282,3 +282,19 @@ extension Calendar {
         return calendar
     }
 }
+
+/// Bridge bots installed by server/install.sh (mautrix default names) and their login commands.
+struct BridgeInfo: Identifiable, Hashable {
+    var id: String { bot }
+    let name: String
+    let platform: Platform
+    let bot: String
+    let command: String
+
+    static let all: [BridgeInfo] = [
+        BridgeInfo(name: "WhatsApp", platform: .whatsapp, bot: "whatsappbot", command: "login phone"),
+        BridgeInfo(name: "Signal", platform: .signal, bot: "signalbot", command: "login"),
+        BridgeInfo(name: "Instagram", platform: .instagram, bot: "instagrambot", command: "login"),
+        BridgeInfo(name: "Facebook Messenger", platform: .facebook, bot: "messengerbot", command: "login"),
+    ]
+}

@@ -59,19 +59,41 @@ direkt zu lesen. Alle seriösen „Alles-in-einem“-Messenger lösen das über 
 
 Nicht möglich (technische Sperre von Apple): Zugriff auf **iMessage** ohne Mac-Relay.
 
-### Matrix-Server mit Bridges einrichten (einmalig, IT/Dienstleister)
+### Eigener Server mit einem Befehl (`server/install.sh`)
 
-1. Einen Linux-Server (z. B. Hetzner, Standort Deutschland – DSGVO) mit Docker bereitstellen.
-2. Matrix-Homeserver installieren, am einfachsten mit dem Ansible-Playbook
-   <https://github.com/spantaleev/matrix-docker-ansible-deploy> (Synapse oder Conduit).
-3. Im Playbook die gewünschten Bridges aktivieren, z. B.
-   `matrix_mautrix_whatsapp_enabled: true`, `matrix_mautrix_signal_enabled: true`,
-   `matrix_mautrix_meta_instagram_enabled: true`, `matrix_mautrix_gmessages_enabled: true`.
-4. Pro Messenger einmal koppeln (QR-Code in WhatsApp → *Verknüpfte Geräte* usw., Anleitung je
-   Bridge unter <https://docs.mau.fi/bridges/>).
-5. In OS: **Konten → Matrix / Bridges** → Homeserver-Adresse, Benutzername, Passwort.
+Das Skript richtet auf einem frischen Server alles ein: Matrix-Server (Synapse + PostgreSQL), HTTPS,
+Bridges für **WhatsApp, Signal, Instagram, Facebook Messenger** und einen eigenen **Jitsi-Videoserver**.
 
-Die App erkennt automatisch, aus welchem Messenger ein Chat kommt, und zeigt das passende Symbol.
+**1. Server mieten** (z. B. Hetzner Cloud, Standort Deutschland): Ubuntu 24.04, mindestens 2 vCPU / 4 GB RAM
+(ca. 5–10 €/Monat, aktuellen Preis beim Anbieter prüfen). Die IP-Adresse notieren.
+
+**2. Zwei DNS-Einträge** beim Domain-Anbieter (Beispiel Domain `hsd-hamburg.de`):
+
+| Typ | Name | Wert |
+|---|---|---|
+| A | `matrix` | IP-Adresse des Servers |
+| A | `jitsi` | IP-Adresse des Servers |
+
+**3. Installieren** – in der Server-Konsole des Anbieters (im Browser, auch am iPhone) als root:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/oleksiiseveryn-del/A/claude/unified-messenger-iphone-app-67g1uc/server/install.sh -o install.sh
+bash install.sh
+```
+
+Das Skript fragt nach Domain, Benutzername und Passwort, prüft die DNS-Einträge und installiert alles
+(10–20 Minuten). Am Ende zeigt es genau, was in OS einzutragen ist:
+
+- **OS → Konten → Matrix / Bridges:** Homeserver `matrix.hsd-hamburg.de`, Benutzername, Passwort
+- **OS → Einstellungen → Videoanrufe → Eigener Server:** `jitsi.hsd-hamburg.de`
+
+**4. Messenger koppeln:** OS → Konten → Matrix-Konto → **Messenger koppeln** → WhatsApp / Signal / …
+WhatsApp wird per 8-stelligem Code gekoppelt (WhatsApp → Verknüpfte Geräte → Gerät hinzufügen →
+„Stattdessen mit Telefonnummer verknüpfen“) – das funktioniert auf demselben iPhone. OS nimmt die
+Einladungen der Bridges automatisch an; alle Chats erscheinen im Posteingang.
+
+Update später: `bash install.sh` erneut ausführen (Passwörter und Daten bleiben erhalten).
+Grundlage: das gepflegte Projekt [matrix-docker-ansible-deploy](https://github.com/spantaleev/matrix-docker-ansible-deploy).
 
 ## Ohne Mac: zwei Wege aufs iPhone
 

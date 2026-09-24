@@ -75,6 +75,17 @@ final class MatrixConnector: MessengerConnector {
             UserDefaults.standard.set(next, forKey: sinceKey)
         }
 
+        // Bridges invite the user into a new room for every WhatsApp/Signal/… chat.
+        // Invitations from the own server are accepted; the rooms arrive with the next sync.
+        let invites = (sync["rooms"] as? [String: Any])?["invite"] as? [String: [String: Any]] ?? [:]
+        for (roomID, room) in invites {
+            let events = (room["invite_state"] as? [String: Any])?["events"] as? [[String: Any]] ?? []
+            let invite = events.first { $0["type"] as? String == "m.room.member" && $0["state_key"] as? String == userID }
+            guard let inviter = invite?["sender"] as? String, Self.server(of: inviter) == ownServer, !ownServer.isEmpty else { continue }
+            let encoded = roomID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? roomID
+            _ = try? await HTTP.json(try HTTP.request(try endpoint("join/\(encoded)"), method: "POST", bearer: accessToken, body: [:]))
+        }
+
         let joined = (sync["rooms"] as? [String: Any])?["join"] as? [String: [String: Any]] ?? [:]
         var result: [Conversation] = []
         for (roomID, room) in joined {
@@ -95,6 +106,37 @@ final class MatrixConnector: MessengerConnector {
                                        title: title, messages: messages, unreadCount: unread))
         }
         return result
+    }
+
+    private var ownServer: String { Self.server(of: userID ?? "") }
+
+    static func server(of matrixID: String) -> String {
+        matrixID.split(separator: ":", maxSplits: 1).dropFirst().first.map(String.init) ?? ""
+    }
+
+    /// Opens (or reuses) the direct chat with a bridge bot and sends its login command. Returns the room ID.
+    func startBridge(bot: String, command: String) async throws -> String {
+        let botID = "@\(bot):\(ownServer)"
+        let key = "bridgeRoom.\(account.id.uuidString).\(bot)"
+        var roomID = UserDefaults.standard.string(forKey: key)
+        if roomID == nil {
+            let created = try await HTTP.json(try HTTP.request(try endpoint("createRoom"), method: "POST", bearer: accessToken,
+                                                               body: ["is_direct": true, "preset": "trusted_private_chat", "invite": [botID]]))
+            guard let id = created["room_id"] as? String else { throw ConnectorError.invalidResponse }
+            roomID = id
+            UserDefaults.standard.set(id, forKey: key)
+            // Wait until the bot has joined, otherwise it misses the command.
+            let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+            for _ in 0..<15 {
+                let members = try? await HTTP.json(try HTTP.request(try endpoint("rooms/\(encoded)/joined_members"), bearer: accessToken))
+                if (members?["joined"] as? [String: Any])?[botID] != nil { break }
+                try await Task.sleep(for: .seconds(1))
+            }
+        }
+        guard let roomID else { throw ConnectorError.invalidResponse }
+        let conversation = Conversation(accountID: account.id, remoteID: roomID, platform: .matrix, title: bot, messages: [], unreadCount: 0)
+        _ = try await send(text: command, to: conversation)
+        return roomID
     }
 
     func send(text: String, to conversation: Conversation) async throws -> Message {
