@@ -44,9 +44,9 @@ struct SettingsView: View {
                     }
                     Toggle("Neue Chats automatisch priorisieren", isOn: $hub.autoTriage)
                 } header: {
-                    Text("Optional: vollautomatische KI (API-Schlüssel)")
+                    Text("Erweitert: vollautomatische KI (nur mit eigenem Anthropic-Konto)")
                 } footer: {
-                    Text("Den Schlüssel erhalten Sie unter console.anthropic.com. Chat-Inhalte werden nur für Vorschläge an die Claude API gesendet; nichts wird automatisch verschickt. Ohne Schlüssel: im Chat „KI über Claude-Abo“ tippen – der Chat wird kopiert und der OS KI-Assistent auf claude.ai geöffnet, der über Ihr Claude-Abo läuft.")
+                    Text("Nicht nötig mit Claude-Abo. Nur wer zusätzlich ein Anthropic-Entwicklerkonto (console.anthropic.com) hat, trägt hier einen Schlüssel ein – dann laufen Vorschläge, Tagesbriefing und Priorisierung automatisch.")
                 }
 
                 Section {

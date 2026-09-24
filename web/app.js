@@ -790,7 +790,7 @@ function markRead(id) {
 async function claudeJSON({ system, user, schema, maxTokens = 4000, media = [] }) {
   const apiKey = store.get("anthropicKey", null);
   if (!apiKey) {
-    const err = new Error("Kein Anthropic API-Schlüssel hinterlegt (Einstellungen → KI-Assistent).");
+    const err = new Error("KI über Ihr Claude-Abo: im Chat auf ✨ „KI über Claude-Abo“ tippen.");
     err.missingKey = true;
     throw err;
   }
@@ -2023,7 +2023,10 @@ async function handOff(text, task = "reply", what = "Chat") {
       <textarea class="note-input protocol" readonly>${esc(text)}</textarea>
       <a class="primary" style="text-align:center;text-decoration:none" href="${url}" target="_blank" rel="noopener">KI-Assistent öffnen</a>`);
   }
-  if (!win && copied) location.href = url;
+  if (!win && copied) {
+    openSheet("KI-Assistent öffnen", `<p class="muted">${esc(what)} ist kopiert. Assistent öffnen, ins Feld tippen und „Einfügen“ wählen.</p>
+      <a class="primary" style="text-align:center;text-decoration:none" href="${url}" target="_blank" rel="noopener">✨ KI-Assistent öffnen</a>`);
+  }
 }
 
 function openSubscriptionAssistant(c, task = "reply") {
@@ -2168,7 +2171,7 @@ function fillSuggestions() {
   if (chatUI.thinking) {
     el.innerHTML = `<div class="thinking">⏳ Die KI schreibt Entwürfe …</div>`;
   } else if (!store.get("anthropicKey", null)) {
-    el.innerHTML = `<div class="thinking">Ohne API-Schlüssel: <button class="pill" data-subscription>✨ KI über Claude-Abo</button></div>`;
+    el.innerHTML = `<button class="primary" data-subscription style="margin:4px 0 8px">✨ Antwortvorschläge über Claude-Abo</button>`;
   } else {
     el.innerHTML = chatUI.suggestions.length ? `<div class="sugs">${chatUI.suggestions.map((s, i) =>
       `<button class="sug" data-sug="${i}"><b>${esc(s.label)}</b><p>${esc(s.text)}</p></button>`).join("")}</div>` : "";
@@ -2180,6 +2183,10 @@ function fillSuggestions() {
 async function generate() {
   const c = currentChat();
   if (!c || chatUI.thinking) return;
+  if (!hasKey()) {
+    const instruction = chatUI.instruction.trim();
+    return handOff(chatAsText(c) + (instruction ? `\n\nVorgabe für die Antwort: ${instruction}` : ""), "reply");
+  }
   chatUI.thinking = true;
   fillSuggestions();
   try {
@@ -2471,7 +2478,8 @@ function renderSettings() {
       </div>
       <div class="footer">Im Chat ✨ „KI über Claude-Abo“ tippen: Der Chat wird kopiert und der Assistent geöffnet. Nutzung zählt auf Ihr Claude-Abo.</div>
 
-      <div class="section-title">Optional: vollautomatische KI (API-Schlüssel)</div>
+      <details class="advanced"${hasKey ? " open" : ""}>
+      <summary class="section-title">Erweitert: vollautomatische KI (nur mit eigenem Anthropic-Konto)</summary>
       <div class="group">
         ${hasKey
           ? `<div class="field"><label>API-Schlüssel</label><span style="flex:1;text-align:right" class="ok">hinterlegt ✓</span></div>
@@ -2481,7 +2489,8 @@ function renderSettings() {
         <div class="field"><label>Modell</label><select id="f-model">${opts(MODELS, state.model)}</select></div>
         <div class="field"><label>Auto-Priorität</label><span style="flex:1"></span><input id="f-triage" type="checkbox" ${state.autoTriage ? "checked" : ""}></div>
       </div>
-      <div class="footer">Schlüssel unter console.anthropic.com erstellen. Er bleibt nur in diesem Browser gespeichert. Chat-Inhalte gehen nur für Vorschläge an die Claude API; gesendet wird nie automatisch.<br><b>Ohne Schlüssel:</b> Im Chat ✨ „KI über Claude-Abo“ tippen – der Chat wird kopiert und der <a href="${SUBSCRIPTION_ASSISTANT}" target="_blank" rel="noopener">OS KI-Assistenten</a> auf claude.ai geöffnet, der über Ihr Claude-Abo läuft.</div>
+      <div class="footer">Nicht nötig mit Claude-Abo. Nur wer zusätzlich ein Anthropic-Entwicklerkonto (console.anthropic.com) hat, kann hier einen Schlüssel eintragen – dann laufen Vorschläge, Tagesbriefing und Priorisierung automatisch.</div>
+      </details>
 
       <div class="section-title">Videoanrufe</div>
       <div class="group">
@@ -2527,7 +2536,7 @@ function renderSettings() {
 
       <div class="section-title">Daten</div>
       <div class="group"><button class="btn-row danger" id="btn-reset">Alle Chats auf diesem Gerät löschen</button></div>
-      <div class="footer">OS · HSD Hamburg GmbH · Merckmannstraße 30 · 20539 Hamburg</div>
+      <div class="footer">OS · Version ${APP_VERSION} · HSD Hamburg GmbH · Merckmannstraße 30 · 20539 Hamburg</div>
     </div>`;
   screen.querySelectorAll("[data-p]").forEach((el) => el.addEventListener("input", () => {
     state.profile[el.dataset.p] = el.value;
@@ -2615,13 +2624,44 @@ if ("serviceWorker" in navigator) {
   navigator.serviceWorker.register("sw.js").catch(() => {});
 }
 
+// ---------------------------------------------------------------------------
+// Updates: compare with version.json (never cached) and offer a one-tap reload
+// ---------------------------------------------------------------------------
+
+const APP_VERSION = "2026.09.24-5";
+
+async function checkForUpdate() {
+  try {
+    const res = await fetch("version.json", { cache: "no-store" });
+    const { version } = await res.json();
+    if (version && version !== APP_VERSION && !$("#update-banner")) {
+      const bar = document.createElement("button");
+      bar.id = "update-banner";
+      bar.textContent = "⬆️ Neue Version von OS – tippen zum Aktualisieren";
+      bar.addEventListener("click", updateNow);
+      document.body.appendChild(bar);
+    }
+  } catch { /* offline */ }
+}
+
+async function updateNow() {
+  try {
+    for (const key of await caches.keys()) await caches.delete(key);
+    for (const reg of await navigator.serviceWorker?.getRegistrations?.() || []) await reg.unregister();
+  } catch { /* best effort */ }
+  location.reload();
+}
+
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") checkForUpdate(); });
+setTimeout(checkForUpdate, 1500);
+
 const isIOS = /iPhone|iPad|iPod/.test(navigator.userAgent);
 const isStandalone = window.navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
 
 function showOnboarding() {
   const steps = [
     { icon: "OS", title: "Willkommen bei OS", text: "Alle Messenger in einem Posteingang – WhatsApp, Telegram, Signal, Instagram, SMS und mehr. Die KI schreibt Antwortvorschläge, erkennt Dringendes und macht aus Chats Aufgaben und Termine. Gesendet wird nur, wenn Sie tippen." },
-    { icon: "✨", title: "KI nutzen", text: "Mit Ihrem Claude-Abo brauchen Sie hier nichts einzutragen – einfach „Weiter“. Die KI starten Sie im Chat über ✨ „KI über Claude-Abo“. Nur wer die KI vollautomatisch möchte, trägt optional einen API-Schlüssel von console.anthropic.com ein.", key: true },
+    { icon: "✨", title: "KI über Ihr Claude-Abo", text: "Die KI läuft über Ihr Claude-Abo – nichts einzurichten. Im Chat auf ✨ „KI über Claude-Abo“ tippen: OS kopiert den Chat und öffnet den OS KI-Assistenten. Dort „Einfügen“ tippen und die Antwort zurückkopieren." },
     { icon: "💬", title: "Messenger verbinden", text: "Zum Ausprobieren sind Beispiel-Chats aktiv. Unter „Konten“ verbinden Sie einen Telegram-Firmen-Bot oder Ihren Matrix-Server mit WhatsApp-, Signal- und Instagram-Bridges." },
   ];
   if (isIOS && !isStandalone) steps.push({ icon: "📲", title: "Auf den Home-Bildschirm", text: "Unten in Safari auf Teilen □↑ tippen und „Zum Home-Bildschirm“ wählen. Dann startet OS wie eine App im Vollbild und zeigt ungelesene Nachrichten am Symbol." });
@@ -2633,14 +2673,11 @@ function showOnboarding() {
     el.innerHTML = `<div class="ob-card">
       <div class="ob-icon ${s.icon === "OS" ? "brand" : ""}">${s.icon}</div>
       <h2>${esc(s.title)}</h2><p>${esc(s.text)}</p>
-      ${s.key ? `<input id="ob-key" class="search" type="password" placeholder="Optional: API-Schlüssel sk-ant-… (leer lassen bei Claude-Abo)" autocapitalize="off" autocorrect="off">` : ""}
       <div class="ob-dots">${steps.map((_, j) => `<span class="${j === i ? "on" : ""}"></span>`).join("")}</div>
       <button class="primary" id="ob-next">${i < steps.length - 1 ? "Weiter" : "Los geht's"}</button>
       ${i < steps.length - 1 ? `<button class="icon-btn" id="ob-skip">Überspringen</button>` : ""}
     </div>`;
     $("#ob-next", el).addEventListener("click", () => {
-      const key = $("#ob-key", el)?.value.trim();
-      if (key) store.set("anthropicKey", key);
       if (++i < steps.length) draw(); else finish();
     });
     $("#ob-skip", el)?.addEventListener("click", finish);

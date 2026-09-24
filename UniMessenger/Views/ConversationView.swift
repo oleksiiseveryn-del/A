@@ -549,6 +549,13 @@ struct ConversationView: View {
     // MARK: - Actions
 
     private func generate(_ conversation: Conversation) async {
+        guard hub.hasAPIKey else {
+            let extra = instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+            let text = SubscriptionHandOff.chatText(conversation, ownerName: hub.profile.ownerName)
+                + (extra.isEmpty ? "" : "\n\nVorgabe für die Antwort: \(extra)")
+            openURL(SubscriptionHandOff.prepare(text, task: .reply))
+            return
+        }
         isThinking = true
         defer { isThinking = false }
         do {

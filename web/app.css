@@ -261,3 +261,10 @@ body.in-chat .header .icon-btn { min-width: 34px; padding: 0 4px; }
 #call-frame iframe { border: 0; display: block; }
 .call-wait { color: #fff; text-align: center; font-size: 17px; line-height: 2; margin-top: 30vh; }
 .note-input.protocol { min-height: 260px; font-size: 14px; }
+
+/* Update banner & advanced settings */
+#update-banner { position: fixed; left: 12px; right: 12px; top: calc(env(safe-area-inset-top) + 8px); z-index: 50;
+  background: var(--accent); color: #fff; font-weight: 700; padding: 12px 14px; border-radius: 12px; box-shadow: 0 6px 20px #0004; }
+details.advanced > summary { cursor: pointer; list-style: none; }
+details.advanced > summary::after { content: " ▸"; }
+details.advanced[open] > summary::after { content: " ▾"; }

@@ -1,5 +1,5 @@
 // Offline shell cache. API calls (Matrix, Telegram, Claude) always go to the network.
-const CACHE = "os-v9";
+const CACHE = "os-v10";
 const SHELL = ["./", "index.html", "app.css", "app.js", "manifest.json",
   "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
@@ -20,8 +20,10 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (event.request.method !== "GET" || url.origin !== location.origin) return;
   // Network first so updates arrive immediately; cache as offline fallback.
+  if (url.pathname.endsWith("version.json")) return; // always straight from the network
+  // Network first and past the HTTP cache (revalidated), so a new version shows on the next start.
   event.respondWith(
-    fetch(event.request)
+    fetch(event.request, { cache: "no-cache" })
       .then((response) => {
         const copy = response.clone();
         caches.open(CACHE).then((cache) => cache.put(event.request, copy));

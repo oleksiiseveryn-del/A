@@ -24,7 +24,7 @@ struct ClaudeClient {
 
         var errorDescription: String? {
             switch self {
-            case .missingAPIKey: "Kein Anthropic API-Schlüssel hinterlegt (Einstellungen → KI-Assistent)."
+            case .missingAPIKey: "KI über Ihr Claude-Abo: im Chat auf „KI über Claude-Abo“ tippen."
             case .http(let code, let body): "KI-Fehler \(code): \(body.prefix(200))"
             case .refused: "Die KI hat diese Anfrage abgelehnt."
             case .truncated: "Die KI-Antwort wurde abgeschnitten."
