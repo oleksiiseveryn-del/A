@@ -36,7 +36,7 @@ struct SettingsView: View {
                 } header: {
                     Text("KI-Assistent (Claude)")
                 } footer: {
-                    Text("Den Schlüssel erhalten Sie unter console.anthropic.com. Chat-Inhalte werden nur für Vorschläge an die Claude API gesendet; nichts wird automatisch verschickt.")
+                    Text("Den Schlüssel erhalten Sie unter console.anthropic.com. Chat-Inhalte werden nur für Vorschläge an die Claude API gesendet; nichts wird automatisch verschickt. Ohne Schlüssel: im Chat „KI über Claude-Abo“ tippen – der Chat wird kopiert und der OS KI-Assistent auf claude.ai geöffnet, der über Ihr Claude-Abo läuft.")
                 }
 
                 Section {

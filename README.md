@@ -154,6 +154,17 @@ Kontrolle und DSGVO-Sicherheit einen eigenen Jitsi-Server betreiben – am einfa
 im Ansible-Playbook `jitsi_enabled: true` setzen (Anleitung im Playbook unter „Jitsi“). Danach in OS unter
 **Einstellungen → Videoanrufe → Server → Eigener Server** die Adresse eintragen (z. B. `video.hsd-hamburg.de`).
 
+### KI ohne API-Schlüssel – über Ihr Claude-Abo
+
+Wer ein Claude-Abo (Pro/Max) hat, kann die KI auch ohne API-Schlüssel nutzen: Im Chat auf
+**✨ „KI über Claude-Abo“** tippen. OS kopiert den Chat und öffnet den **OS KI-Assistenten** auf claude.ai
+(<https://claude.ai/artifact/8ca7DPy66ztKt5MrnoNy7U>). Dort ins Feld tippen → **Einfügen** → Aufgabe wählen
+(Antwortvorschläge, Aufgaben & Termine, Gesprächsnotiz, Entwurf verbessern, Foto prüfen) → Ergebnis mit
+**Kopieren** zurück in OS. Beim ersten Mal fragt claude.ai, ob die Seite Ihr Abo nutzen darf. Die Nutzung
+zählt auf Ihr Abo-Kontingent. Der Quelltext des Assistenten liegt in `artifact/os-ki-assistent.html`.
+
+Vollautomatisch (Vorschläge beim Öffnen, Tagesbriefing, Priorisierung) arbeitet OS nur mit API-Schlüssel.
+
 ### KI aktivieren
 
 1. API-Schlüssel unter <https://console.anthropic.com> erstellen.

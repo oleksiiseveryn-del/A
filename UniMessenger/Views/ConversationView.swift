@@ -107,6 +107,11 @@ struct ConversationView: View {
                             Label(conversation.note?.isEmpty == false ? "Notiz bearbeiten" : "Notiz zum Kontakt", systemImage: "note.text")
                         }
                         Button {
+                            openSubscriptionAssistant(conversation)
+                        } label: {
+                            Label("KI über Claude-Abo", systemImage: "sparkles")
+                        }
+                        Button {
                             showCallMenu = true
                         } label: {
                             Label("Video- oder Sprachanruf", systemImage: "video")
@@ -279,7 +284,15 @@ struct ConversationView: View {
                 .tint(dictationTarget == .instruction ? .red : .accentColor)
                 .accessibilityLabel("Vorgabe sprechen – die KI formuliert")
             }
-            if isThinking {
+            if !hub.hasAPIKey {
+                Button {
+                    openSubscriptionAssistant(conversation)
+                } label: {
+                    Label("KI über Claude-Abo (Chat kopieren & öffnen)", systemImage: "sparkles")
+                        .font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.bordered)
+            } else if isThinking {
                 HStack(spacing: 8) {
                     ProgressView()
                     Text("Entwürfe werden erstellt …").font(.caption).foregroundStyle(.secondary)
@@ -440,6 +453,26 @@ struct ConversationView: View {
             .padding(.top, 8)
         }
         .opacity(isSending ? 0.5 : 1)
+    }
+
+    // MARK: - AI via Claude subscription
+
+    /// Without an API key: copies the chat and opens the OS AI assistant on claude.ai,
+    /// which runs on the user's own Claude subscription.
+    static let subscriptionAssistant = URL(string: "https://claude.ai/artifact/8ca7DPy66ztKt5MrnoNy7U")!
+
+    private func openSubscriptionAssistant(_ conversation: Conversation) {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "de_DE")
+        formatter.dateFormat = "dd.MM. HH:mm"
+        let lines = conversation.messages.suffix(30).map { message in
+            let who = message.isOutgoing ? hub.profile.ownerName + " (ich)" : message.senderName
+            let media = message.attachment.map { "[\($0.label)] " } ?? ""
+            return "[\(formatter.string(from: message.date))] \(who): \(media)\(message.text)"
+        }
+        let note = conversation.note.map { $0.isEmpty ? "" : "\nNotiz: \($0)" } ?? ""
+        UIPasteboard.general.string = "Chat: \(conversation.title) (\(conversation.platform.displayName))\(note)\n" + lines.joined(separator: "\n")
+        openURL(Self.subscriptionAssistant)
     }
 
     // MARK: - Calls

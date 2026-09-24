@@ -1206,6 +1206,7 @@ function chatMenu() {
     <button class="sheet-btn" data-act="analyze">🔍 Zusammenfassen, Aufgaben & Termine erkennen</button>
     <button class="sheet-btn" data-act="note">📝 ${c.note ? "Notiz bearbeiten" : "Notiz zum Kontakt hinzufügen"}</button>
     <button class="sheet-btn" data-act="pin">📌 ${c.isPinned ? "Nicht mehr anheften" : "Oben anheften"}</button>
+    <button class="sheet-btn" data-act="subscription">✨ KI über Claude-Abo (Chat kopieren &amp; öffnen)</button>
     <button class="sheet-btn" data-act="call">📹 Video- oder Sprachanruf</button>
     <button class="sheet-btn" data-act="read">🔊 Offene Nachrichten vorlesen</button>
     <button class="sheet-btn" data-act="archive">🗄 ${c.isArchived ? "Aus dem Archiv holen" : "Archivieren"}</button>`,
@@ -1219,6 +1220,7 @@ function chatMenu() {
     if (act === "archive") { c.isArchived = !c.isArchived; save(); history.back(); }
     if (act === "read") readChat(c);
     if (act === "call") callMenu(c);
+    if (act === "subscription") openSubscriptionAssistant(c);
   });
 }
 
@@ -1843,6 +1845,7 @@ function renderChat() {
   $("#instr").addEventListener("keydown", (e) => { if (e.key === "Enter") generate(); });
   $("#btn-gen").addEventListener("click", generate);
   $("#sugs").addEventListener("click", (e) => {
+    if (e.target.closest("[data-subscription]")) return openSubscriptionAssistant(currentChat());
     const b = e.target.closest("[data-sug]");
     if (!b) return;
     draft.value = chatUI.suggestions[+b.dataset.sug].text;
@@ -1988,6 +1991,33 @@ function renderChat() {
   syncButtons();
 }
 
+// Without an API key: copy the chat and open the OS AI assistant on claude.ai,
+// which runs on the user's own Claude subscription.
+const SUBSCRIPTION_ASSISTANT = "https://claude.ai/artifact/8ca7DPy66ztKt5MrnoNy7U";
+
+function chatAsText(c) {
+  const fmt = (ms) => new Date(ms).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  const lines = c.messages.slice(-30).map((m) =>
+    `[${fmt(m.date)}] ${m.isOutgoing ? state.profile.ownerName + " (ich)" : m.senderName}: ${m.attachment ? "[" + attachmentLabel(m.attachment) + "] " : ""}${m.text}`);
+  return `Chat: ${c.title} (${PLATFORMS[c.platform]?.name || ""})${c.note ? "\nNotiz: " + c.note : ""}\n${lines.join("\n")}`;
+}
+
+async function openSubscriptionAssistant(c) {
+  const text = chatAsText(c);
+  // Open synchronously in the tap so Safari allows it, then copy.
+  const win = window.open(SUBSCRIPTION_ASSISTANT, "_blank");
+  if (win) win.opener = null;
+  let copied = false;
+  try { await navigator.clipboard.writeText(text); copied = true; } catch { /* clipboard blocked */ }
+  if (copied) toast("✅ Chat kopiert – im KI-Assistenten ins Feld tippen und „Einfügen“ wählen.");
+  else {
+    openSheet("Chat kopieren", `<p class="muted">Text markieren und kopieren, dann im KI-Assistenten einfügen.</p>
+      <textarea class="note-input protocol" readonly>${esc(text)}</textarea>
+      <a class="primary" style="text-align:center;text-decoration:none" href="${SUBSCRIPTION_ASSISTANT}" target="_blank" rel="noopener">KI-Assistent öffnen</a>`);
+  }
+  if (!win && copied) location.href = SUBSCRIPTION_ASSISTANT;
+}
+
 function fillEmojis() {
   const recent = store.get("recentEmojis", []);
   const list = [...recent, ...EMOJIS.filter((e) => !recent.includes(e))];
@@ -2114,7 +2144,7 @@ function fillSuggestions() {
   if (chatUI.thinking) {
     el.innerHTML = `<div class="thinking">⏳ Die KI schreibt Entwürfe …</div>`;
   } else if (!store.get("anthropicKey", null)) {
-    el.innerHTML = `<div class="thinking">Für Vorschläge API-Schlüssel unter Einstellungen hinterlegen.</div>`;
+    el.innerHTML = `<div class="thinking">Ohne API-Schlüssel: <button class="pill" data-subscription>✨ KI über Claude-Abo</button></div>`;
   } else {
     el.innerHTML = chatUI.suggestions.length ? `<div class="sugs">${chatUI.suggestions.map((s, i) =>
       `<button class="sug" data-sug="${i}"><b>${esc(s.label)}</b><p>${esc(s.text)}</p></button>`).join("")}</div>` : "";
@@ -2420,7 +2450,7 @@ function renderSettings() {
         <div class="field"><label>Modell</label><select id="f-model">${opts(MODELS, state.model)}</select></div>
         <div class="field"><label>Auto-Priorität</label><span style="flex:1"></span><input id="f-triage" type="checkbox" ${state.autoTriage ? "checked" : ""}></div>
       </div>
-      <div class="footer">Schlüssel unter console.anthropic.com erstellen. Er bleibt nur in diesem Browser gespeichert. Chat-Inhalte gehen nur für Vorschläge an die Claude API; gesendet wird nie automatisch.</div>
+      <div class="footer">Schlüssel unter console.anthropic.com erstellen. Er bleibt nur in diesem Browser gespeichert. Chat-Inhalte gehen nur für Vorschläge an die Claude API; gesendet wird nie automatisch.<br><b>Ohne Schlüssel:</b> Im Chat ✨ „KI über Claude-Abo“ tippen – der Chat wird kopiert und der <a href="${SUBSCRIPTION_ASSISTANT}" target="_blank" rel="noopener">OS KI-Assistenten</a> auf claude.ai geöffnet, der über Ihr Claude-Abo läuft.</div>
 
       <div class="section-title">Videoanrufe</div>
       <div class="group">
