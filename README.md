@@ -99,9 +99,9 @@ Grundlage: das gepflegte Projekt [matrix-docker-ansible-deploy](https://github.c
 
 ### Weg 1 – sofort: Web-App auf dem Home-Bildschirm (kostenlos)
 
-**Link zum Installieren (ohne jede Einstellung, direkt aus diesem Repository):**
+**Link zum Installieren:**
 
-**https://raw.githack.com/oleksiiseveryn-del/A/claude/unified-messenger-iphone-app-67g1uc/web/index.html**
+**https://oleksiiseveryn-del.github.io/A/**
 
 1. Den Link auf dem iPhone in **Safari** öffnen (nicht in der GitHub- oder Claude-App).
 2. Unten auf Teilen **□↑** tippen → **„Zum Home-Bildschirm“** → Name „OS“ → **Hinzufügen**.
@@ -110,10 +110,7 @@ Grundlage: das gepflegte Projekt [matrix-docker-ansible-deploy](https://github.c
 
 Neue Versionen kommen automatisch: Änderungen in diesem Branch sind nach wenigen Minuten in der App.
 
-> Hinweis: raw.githack.com ist ein kostenloser Auslieferungsdienst für öffentliche GitHub-Dateien. Alle
-> dort ausgelieferten Seiten teilen sich eine Web-Adresse; öffnen Sie in Safari daher keine fremden
-> raw.githack.com-Links. Dauerhaft professioneller ist eine eigene Adresse (z. B. `os.hsd-hamburg.de`)
-> oder GitHub Pages (Settings → Pages → Source „GitHub Actions“), sobald das freigeschaltet ist.
+> Die App wird über GitHub Pages aus diesem Branch veröffentlicht (Settings → Pages). Jede Änderung ist nach 1–2 Minuten live.
 
 ### Weg 2 – echte iPhone-App, gebaut auf einem Mac in der Cloud
 
