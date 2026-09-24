@@ -3,6 +3,7 @@ import SwiftUI
 struct InboxView: View {
     @Environment(MessageHub.self) private var hub
     @Environment(SpeechReader.self) private var reader
+    @Environment(\.openURL) private var openURL
     @State private var search = ""
     @State private var filter: Filter = .all
     @State private var platformFilter: Platform?
@@ -94,7 +95,12 @@ struct InboxView: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        Task { await hub.triage() }
+                        if hub.hasAPIKey {
+                            Task { await hub.triage() }
+                        } else {
+                            openURL(SubscriptionHandOff.prepare(
+                                SubscriptionHandOff.openChatsText(hub.conversations, ownerName: hub.profile.ownerName), task: .briefing))
+                        }
                     } label: {
                         Label("KI-Sortierung", systemImage: "wand.and.stars")
                     }

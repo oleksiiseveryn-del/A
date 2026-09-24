@@ -15,6 +15,16 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
+                    Link(destination: SubscriptionHandOff.assistant) {
+                        Label("OS KI-Assistent öffnen (kein Schlüssel nötig)", systemImage: "sparkles")
+                    }
+                } header: {
+                    Text("KI über Ihr Claude-Abo")
+                } footer: {
+                    Text("Im Chat „KI über Claude-Abo“ tippen: Der Chat wird kopiert und der Assistent auf claude.ai geöffnet. Die Nutzung zählt auf Ihr Claude-Abo.")
+                }
+
+                Section {
                     if hub.hasAPIKey {
                         LabeledContent("API-Schlüssel", value: "hinterlegt ✓")
                         Button("Schlüssel entfernen", role: .destructive) {
@@ -34,7 +44,7 @@ struct SettingsView: View {
                     }
                     Toggle("Neue Chats automatisch priorisieren", isOn: $hub.autoTriage)
                 } header: {
-                    Text("KI-Assistent (Claude)")
+                    Text("Optional: vollautomatische KI (API-Schlüssel)")
                 } footer: {
                     Text("Den Schlüssel erhalten Sie unter console.anthropic.com. Chat-Inhalte werden nur für Vorschläge an die Claude API gesendet; nichts wird automatisch verschickt. Ohne Schlüssel: im Chat „KI über Claude-Abo“ tippen – der Chat wird kopiert und der OS KI-Assistent auf claude.ai geöffnet, der über Ihr Claude-Abo läuft.")
                 }

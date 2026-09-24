@@ -97,7 +97,7 @@ struct ConversationView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button {
-                            if hub.hasAPIKey { showAnalysis = true } else { errorText = ClaudeClient.ClaudeError.missingAPIKey.localizedDescription }
+                            if hub.hasAPIKey { showAnalysis = true } else { openSubscriptionAssistant(conversation, task: .actions) }
                         } label: {
                             Label("Zusammenfassen, Aufgaben & Termine", systemImage: "doc.text.magnifyingglass")
                         }
@@ -358,7 +358,13 @@ struct ConversationView: View {
 
             Menu {
                 ForEach(ReplyAssistant.RewriteAction.allCases) { action in
-                    Button(action.label) { Task { await rewrite(action, conversation) } }
+                    Button(action.label) {
+                        if hub.hasAPIKey {
+                            Task { await rewrite(action, conversation) }
+                        } else {
+                            openURL(SubscriptionHandOff.prepare(draft, task: .rewrite))
+                        }
+                    }
                 }
                 Divider()
                 Button {
@@ -459,20 +465,8 @@ struct ConversationView: View {
 
     /// Without an API key: copies the chat and opens the OS AI assistant on claude.ai,
     /// which runs on the user's own Claude subscription.
-    static let subscriptionAssistant = URL(string: "https://claude.ai/artifact/8ca7DPy66ztKt5MrnoNy7U")!
-
-    private func openSubscriptionAssistant(_ conversation: Conversation) {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "de_DE")
-        formatter.dateFormat = "dd.MM. HH:mm"
-        let lines = conversation.messages.suffix(30).map { message in
-            let who = message.isOutgoing ? hub.profile.ownerName + " (ich)" : message.senderName
-            let media = message.attachment.map { "[\($0.label)] " } ?? ""
-            return "[\(formatter.string(from: message.date))] \(who): \(media)\(message.text)"
-        }
-        let note = conversation.note.map { $0.isEmpty ? "" : "\nNotiz: \($0)" } ?? ""
-        UIPasteboard.general.string = "Chat: \(conversation.title) (\(conversation.platform.displayName))\(note)\n" + lines.joined(separator: "\n")
-        openURL(Self.subscriptionAssistant)
+    private func openSubscriptionAssistant(_ conversation: Conversation, task: SubscriptionHandOff.Task = .reply) {
+        openURL(SubscriptionHandOff.prepare(SubscriptionHandOff.chatText(conversation, ownerName: hub.profile.ownerName), task: task))
     }
 
     // MARK: - Calls

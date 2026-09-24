@@ -4,6 +4,7 @@ struct TodayView: View {
     @Environment(MessageHub.self) private var hub
     @Environment(SpeechReader.self) private var reader
     @Binding var tab: AppTab
+    @Environment(\.openURL) private var openURL
     @State private var openChat: String?
 
     private var greeting: String {
@@ -30,8 +31,14 @@ struct TodayView: View {
 
                 if !hub.hasAPIKey {
                     Section {
-                        Text("Für das KI-Tagesbriefing bitte einen API-Schlüssel hinterlegen.")
-                        Button("Zu den Einstellungen") { tab = .settings }
+                        Button {
+                            openURL(SubscriptionHandOff.prepare(
+                                SubscriptionHandOff.openChatsText(hub.conversations, ownerName: hub.profile.ownerName), task: .briefing))
+                        } label: {
+                            Label("Tagesbriefing über Claude-Abo erstellen", systemImage: "sparkles")
+                        }
+                    } footer: {
+                        Text("Kopiert alle offenen Chats und öffnet den OS KI-Assistenten – dort ins Feld tippen und „Einfügen“ wählen.")
                     }
                 } else if hub.isBriefingLoading {
                     Section {

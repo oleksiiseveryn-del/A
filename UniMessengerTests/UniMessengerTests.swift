@@ -153,4 +153,15 @@ final class UniMessengerTests: XCTestCase {
         XCTAssertEqual(MatrixConnector.server(of: "kein-matrix-name"), "")
         XCTAssertEqual(BridgeInfo.all.first?.command, "login phone")
     }
+
+    func testSubscriptionHandOffAnchorsAndText() {
+        XCTAssertEqual(SubscriptionHandOff.url(for: .briefing).absoluteString, "https://claude.ai/artifact/8ca7DPy66ztKt5MrnoNy7U#briefing")
+        XCTAssertEqual(SubscriptionHandOff.url(for: .protocol_).fragment, "protocol")
+        let chat = Conversation(accountID: UUID(), remoteID: "r", platform: .whatsapp, title: "Hr. Petersen", messages: [
+            Message(id: "1", senderName: "Hr. Petersen", text: "Wasser im Keller", date: .now, isOutgoing: false),
+        ], unreadCount: 1)
+        let text = SubscriptionHandOff.openChatsText([chat], ownerName: "Oleksii Severyn")
+        XCTAssertTrue(text.contains("Chat: Hr. Petersen (WhatsApp)"))
+        XCTAssertTrue(text.contains("Hr. Petersen: Wasser im Keller"))
+    }
 }

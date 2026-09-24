@@ -15,8 +15,8 @@ struct OnboardingView: View {
     private let steps = [
         Step(symbol: nil, title: "Willkommen bei OS",
              text: "Alle Messenger in einem Posteingang – WhatsApp, Telegram, Signal, Instagram, SMS und mehr. Die KI schreibt Antwortvorschläge, erkennt Dringendes und macht aus Chats Aufgaben und Termine. Gesendet wird nur, wenn Sie tippen."),
-        Step(symbol: "sparkles", title: "KI aktivieren",
-             text: "Einen API-Schlüssel von console.anthropic.com einfügen (kann auch später unter Einstellungen erfolgen). Der Schlüssel liegt verschlüsselt im Schlüsselbund dieses iPhones."),
+        Step(symbol: "sparkles", title: "KI nutzen",
+             text: "Mit Ihrem Claude-Abo brauchen Sie hier nichts einzutragen – einfach „Weiter“. Die KI starten Sie im Chat über „KI über Claude-Abo“. Nur für die vollautomatische KI optional einen API-Schlüssel von console.anthropic.com eintragen."),
         Step(symbol: "bubble.left.and.bubble.right.fill", title: "Messenger verbinden",
              text: "Zum Ausprobieren sind Beispiel-Chats aktiv. Unter „Konten“ verbinden Sie einen Telegram-Firmen-Bot oder Ihren Matrix-Server mit WhatsApp-, Signal- und Instagram-Bridges."),
     ]
@@ -39,7 +39,7 @@ struct OnboardingView: View {
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
             if step == 1 {
-                SecureField("sk-ant-… (optional)", text: $apiKey)
+                SecureField("Optional: API-Schlüssel (leer lassen bei Claude-Abo)", text: $apiKey)
                     .textFieldStyle(.roundedBorder)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()

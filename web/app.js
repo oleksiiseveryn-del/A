@@ -1170,7 +1170,7 @@ function handleActionClick(e, data) {
 async function analyzeChat() {
   const c = currentChat();
   if (!c) return;
-  if (!store.get("anthropicKey", null)) return toast("Bitte zuerst API-Schlüssel in den Einstellungen hinterlegen.");
+  if (!hasKey()) return openSubscriptionAssistant(c, "actions");
   const sheet = openSheet("Zusammenfassung & Aktionen", `<div class="thinking">⏳ Die KI liest den Chat …</div>`);
   try {
     const data = await assistant.analyze(c);
@@ -1535,7 +1535,7 @@ function afterCall(c, minutes) {
   sheetCleanup = () => dictation.stop();
   $("#call-protocol", sheet).addEventListener("click", async (e) => {
     if (!notes.value.trim()) return toast("Bitte kurz Stichworte eingeben oder diktieren.");
-    if (!store.get("anthropicKey", null)) return toast("Bitte zuerst API-Schlüssel in den Einstellungen hinterlegen.");
+    if (!hasKey()) return handOff(`${chatAsText(c)}\n\nStichworte zum Gespräch (${minutes} Min.): ${notes.value.trim()}`, "protocol", "Chat mit Stichworten");
     dictation.stop();
     e.target.disabled = true;
     $("#call-result", sheet).innerHTML = `<div class="thinking">⏳ Die KI schreibt das Protokoll …</div>`;
@@ -1676,7 +1676,7 @@ function renderInbox() {
   $("#btn-refresh").addEventListener("click", () => refresh());
   $("#btn-readall").addEventListener("click", () => (reader.speaking ? reader.stop() : readAllNew()));
   $("#btn-triage").addEventListener("click", () => {
-    if (!store.get("anthropicKey", null)) return toast("Bitte zuerst API-Schlüssel in den Einstellungen hinterlegen.");
+    if (!hasKey()) return handOff(openChatsAsText(), "briefing", "Offene Chats");
     triage();
   });
   $("#chips").addEventListener("click", (e) => {
@@ -1951,6 +1951,10 @@ function renderChat() {
       return reader.speak([{ text: draft.value }]);
     }
     const b = e.target.closest("[data-rewrite]");
+    if (b && !hasKey()) {
+      $("#menu").hidden = true;
+      return handOff(draft.value.trim(), "rewrite", "Entwurf");
+    }
     if (!b) return;
     $("#menu").hidden = true;
     chatUI.thinking = true; fillSuggestions(); syncButtons();
@@ -2002,20 +2006,38 @@ function chatAsText(c) {
   return `Chat: ${c.title} (${PLATFORMS[c.platform]?.name || ""})${c.note ? "\nNotiz: " + c.note : ""}\n${lines.join("\n")}`;
 }
 
-async function openSubscriptionAssistant(c) {
-  const text = chatAsText(c);
-  // Open synchronously in the tap so Safari allows it, then copy.
-  const win = window.open(SUBSCRIPTION_ASSISTANT, "_blank");
+const hasKey = () => !!store.get("anthropicKey", null);
+
+// Copies `text` and opens the assistant with the task preselected (#reply, #actions, #protocol,
+// #rewrite, #photo, #briefing). Must run inside the tap so Safari allows the new window.
+async function handOff(text, task = "reply", what = "Chat") {
+  const url = `${SUBSCRIPTION_ASSISTANT}#${task}`;
+  const win = window.open(url, "_blank");
   if (win) win.opener = null;
-  let copied = false;
-  try { await navigator.clipboard.writeText(text); copied = true; } catch { /* clipboard blocked */ }
-  if (copied) toast("✅ Chat kopiert – im KI-Assistenten ins Feld tippen und „Einfügen“ wählen.");
-  else {
-    openSheet("Chat kopieren", `<p class="muted">Text markieren und kopieren, dann im KI-Assistenten einfügen.</p>
+  let copied = !text;
+  if (text) { try { await navigator.clipboard.writeText(text); copied = true; } catch { /* clipboard blocked */ } }
+  if (copied) {
+    if (text) toast(`✅ ${what} kopiert – im KI-Assistenten ins Feld tippen und „Einfügen“ wählen.`);
+  } else {
+    openSheet(`${what} kopieren`, `<p class="muted">Text markieren und kopieren, dann im KI-Assistenten einfügen.</p>
       <textarea class="note-input protocol" readonly>${esc(text)}</textarea>
-      <a class="primary" style="text-align:center;text-decoration:none" href="${SUBSCRIPTION_ASSISTANT}" target="_blank" rel="noopener">KI-Assistent öffnen</a>`);
+      <a class="primary" style="text-align:center;text-decoration:none" href="${url}" target="_blank" rel="noopener">KI-Assistent öffnen</a>`);
   }
-  if (!win && copied) location.href = SUBSCRIPTION_ASSISTANT;
+  if (!win && copied) location.href = url;
+}
+
+function openSubscriptionAssistant(c, task = "reply") {
+  return handOff(chatAsText(c), task);
+}
+
+// All open chats with unread or unanswered messages, for a briefing via the subscription.
+function openChatsAsText() {
+  const open = state.conversations.filter((c) => !c.isArchived && lastMsg(c) && (c.unreadCount > 0 || !lastMsg(c).isOutgoing)).slice(0, 12);
+  return open.map((c) => {
+    const fmt = (ms) => new Date(ms).toLocaleString("de-DE", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+    const lines = unanswered(c).slice(-5).map((m) => `  [${fmt(m.date)}] ${m.senderName}: ${m.attachment ? "[" + attachmentLabel(m.attachment) + "] " : ""}${m.text}`);
+    return `### ${c.title} (${PLATFORMS[c.platform]?.name || ""})${c.note ? " – Notiz: " + c.note : ""}\n${lines.join("\n")}`;
+  }).join("\n\n") || "Keine offenen Chats.";
 }
 
 function fillEmojis() {
@@ -2088,7 +2110,9 @@ async function openAttachment(messageID) {
       : att.kind === "audio" ? `<audio src="${loaded.url}" controls style="width:100%"></audio>`
       : `<div class="viewer-file">${fileIcon(att)}<div>${esc(name)}</div><div class="muted">${formatSize(loaded.blob.size)}</div></div>`}
     <button class="primary" id="att-open">${att.kind === "file" ? "Öffnen" : "Teilen / Sichern"}</button>
-    ${att.kind === "image" && store.get("anthropicKey", null) ? `<button class="sheet-btn" id="att-ai" style="margin-top:8px">✨ Foto von der KI beschreiben lassen</button><div id="att-ai-out"></div>` : ""}`);
+    ${att.kind === "image" && hasKey() ? `<button class="sheet-btn" id="att-ai" style="margin-top:8px">✨ Foto von der KI beschreiben lassen</button><div id="att-ai-out"></div>` : ""}
+    ${att.kind === "image" && !hasKey() ? `<button class="sheet-btn" id="att-sub" style="margin-top:8px">✨ Foto über Claude-Abo prüfen</button><p class="muted">Erst „Teilen / Sichern“ → „Bild sichern“, dann im KI-Assistenten „Foto hinzufügen“.</p>` : ""}`);
+  $("#att-sub", sheet)?.addEventListener("click", () => handOff("", "photo"));
   $("#att-open", sheet).addEventListener("click", async () => {
     const file = new File([loaded.blob], name, { type: att.mime || loaded.blob.type });
     if (navigator.canShare?.({ files: [file] })) {
@@ -2199,7 +2223,7 @@ function renderToday() {
     <div class="scroll" id="today"></div>`;
   $("#btn-readbrief").addEventListener("click", () => (reader.speaking ? reader.stop() : readBriefing()));
   $("#btn-brief").addEventListener("click", () => {
-    if (!store.get("anthropicKey", null)) return toast("Bitte zuerst API-Schlüssel in den Einstellungen hinterlegen.");
+    if (!hasKey()) return handOff(openChatsAsText(), "briefing", "Offene Chats");
     loadBriefing();
   });
   $("#today").addEventListener("click", (e) => {
@@ -2236,7 +2260,7 @@ function fillToday() {
     </div>`;
   if (state.briefingLoading) body += `<div class="card"><div class="thinking">⏳ Die KI erstellt Ihr Tagesbriefing …</div></div>`;
   if (!store.get("anthropicKey", null)) {
-    body += `<div class="card"><p>Für das KI-Tagesbriefing bitte einen API-Schlüssel hinterlegen.</p><button class="primary" data-goto="settings">Zu den Einstellungen</button></div>`;
+    body += `<div class="card"><div class="card-title">✨ Tagesbriefing über Ihr Claude-Abo</div><p class="muted">Kopiert alle offenen Chats und öffnet den KI-Assistenten – dort „Einfügen“ tippen.</p><button class="primary" id="brief-sub">Tagesbriefing erstellen</button></div>`;
   } else if (b) {
     body += `<div class="card"><div class="card-title">✨ Lagebild <span class="muted">· ${clock(b.created)} Uhr</span></div><p>${esc(b.summary)}</p></div>`;
     if (b.urgent.length) body += `<div class="card"><div class="card-title">🔴 Heute reagieren</div>${b.urgent.map((u) =>
@@ -2247,6 +2271,7 @@ function fillToday() {
   }
   el.innerHTML = body;
   $("#brief-now")?.addEventListener("click", loadBriefing);
+  $("#brief-sub")?.addEventListener("click", () => handOff(openChatsAsText(), "briefing", "Offene Chats"));
 }
 
 // --- Tasks -----------------------------------------------------------------
@@ -2440,7 +2465,13 @@ function renderSettings() {
   screen.innerHTML = `
     <div class="header"><h1>Einstellungen</h1></div>
     <div class="scroll form">
-      <div class="section-title">KI-Assistent (Claude)</div>
+      <div class="section-title">KI über Ihr Claude-Abo</div>
+      <div class="group">
+        <a class="btn-row" href="${SUBSCRIPTION_ASSISTANT}" target="_blank" rel="noopener" style="text-decoration:none">✨ OS KI-Assistent öffnen (kein Schlüssel nötig)</a>
+      </div>
+      <div class="footer">Im Chat ✨ „KI über Claude-Abo“ tippen: Der Chat wird kopiert und der Assistent geöffnet. Nutzung zählt auf Ihr Claude-Abo.</div>
+
+      <div class="section-title">Optional: vollautomatische KI (API-Schlüssel)</div>
       <div class="group">
         ${hasKey
           ? `<div class="field"><label>API-Schlüssel</label><span style="flex:1;text-align:right" class="ok">hinterlegt ✓</span></div>
@@ -2590,7 +2621,7 @@ const isStandalone = window.navigator.standalone === true || window.matchMedia("
 function showOnboarding() {
   const steps = [
     { icon: "OS", title: "Willkommen bei OS", text: "Alle Messenger in einem Posteingang – WhatsApp, Telegram, Signal, Instagram, SMS und mehr. Die KI schreibt Antwortvorschläge, erkennt Dringendes und macht aus Chats Aufgaben und Termine. Gesendet wird nur, wenn Sie tippen." },
-    { icon: "✨", title: "KI aktivieren", text: "Einen API-Schlüssel von console.anthropic.com einfügen (kann auch später unter Einstellungen erfolgen). Der Schlüssel bleibt nur auf diesem iPhone.", key: true },
+    { icon: "✨", title: "KI nutzen", text: "Mit Ihrem Claude-Abo brauchen Sie hier nichts einzutragen – einfach „Weiter“. Die KI starten Sie im Chat über ✨ „KI über Claude-Abo“. Nur wer die KI vollautomatisch möchte, trägt optional einen API-Schlüssel von console.anthropic.com ein.", key: true },
     { icon: "💬", title: "Messenger verbinden", text: "Zum Ausprobieren sind Beispiel-Chats aktiv. Unter „Konten“ verbinden Sie einen Telegram-Firmen-Bot oder Ihren Matrix-Server mit WhatsApp-, Signal- und Instagram-Bridges." },
   ];
   if (isIOS && !isStandalone) steps.push({ icon: "📲", title: "Auf den Home-Bildschirm", text: "Unten in Safari auf Teilen □↑ tippen und „Zum Home-Bildschirm“ wählen. Dann startet OS wie eine App im Vollbild und zeigt ungelesene Nachrichten am Symbol." });
@@ -2602,7 +2633,7 @@ function showOnboarding() {
     el.innerHTML = `<div class="ob-card">
       <div class="ob-icon ${s.icon === "OS" ? "brand" : ""}">${s.icon}</div>
       <h2>${esc(s.title)}</h2><p>${esc(s.text)}</p>
-      ${s.key ? `<input id="ob-key" class="search" type="password" placeholder="sk-ant-… (optional)" autocapitalize="off" autocorrect="off">` : ""}
+      ${s.key ? `<input id="ob-key" class="search" type="password" placeholder="Optional: API-Schlüssel sk-ant-… (leer lassen bei Claude-Abo)" autocapitalize="off" autocorrect="off">` : ""}
       <div class="ob-dots">${steps.map((_, j) => `<span class="${j === i ? "on" : ""}"></span>`).join("")}</div>
       <button class="primary" id="ob-next">${i < steps.length - 1 ? "Weiter" : "Los geht's"}</button>
       ${i < steps.length - 1 ? `<button class="icon-btn" id="ob-skip">Überspringen</button>` : ""}

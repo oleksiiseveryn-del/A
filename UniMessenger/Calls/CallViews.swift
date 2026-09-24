@@ -175,6 +175,7 @@ struct CallProtocolSheet: View {
     @State private var protocolText = ""
     @State private var isWorking = false
     @State private var errorText: String?
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         NavigationStack {
@@ -189,7 +190,14 @@ struct CallProtocolSheet: View {
                     }
                     .tint(dictation.isListening ? .red : .accentColor)
                     Button {
-                        Task { await create() }
+                        if hub.hasAPIKey {
+                            Task { await create() }
+                        } else {
+                            dictation.stop()
+                            let text = SubscriptionHandOff.chatText(conversation, ownerName: hub.profile.ownerName)
+                                + "\n\nStichworte zum Gespräch (\(minutes) Min.): \(notes)"
+                            openURL(SubscriptionHandOff.prepare(text, task: .protocol_))
+                        }
                     } label: {
                         HStack {
                             Label("Protokoll erstellen", systemImage: "sparkles")
