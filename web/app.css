@@ -269,3 +269,17 @@ body.in-chat .header .icon-btn { min-width: 34px; padding: 0 4px; }
 details.advanced > summary { cursor: pointer; list-style: none; }
 details.advanced > summary::after { content: " ▸"; }
 details.advanced[open] > summary::after { content: " ▾"; }
+
+/* Contacts & calls */
+.letter { position: sticky; top: 0; z-index: 1; padding: 4px 16px; font-size: 13px; font-weight: 700; color: var(--muted); background: var(--bg); }
+.call-quick { flex: none; align-self: center; width: 42px; height: 42px; border-radius: 50%; background: var(--accent-soft); font-size: 18px; }
+.contact-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; font-size: 19px; }
+.contact-head .avatar { width: 58px; height: 58px; font-size: 20px; }
+.qa-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+.qa { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 10px 4px; border-radius: 12px; background: var(--card); color: var(--accent); font-size: 12px; font-weight: 600; }
+.qa span { font-size: 22px; }
+.qa:disabled { opacity: .35; }
+.favs { display: flex; gap: 14px; overflow-x: auto; padding: 4px 16px 10px; }
+.fav { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--text); min-width: 56px; }
+.dial { font-size: 22px; text-align: center; margin-bottom: 8px; }
+#tabbar button span:not(.ico) { white-space: nowrap; font-size: 10px; }

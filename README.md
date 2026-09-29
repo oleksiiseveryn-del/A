@@ -61,6 +61,11 @@ direkt zu lesen. Alle seriösen „Alles-in-einem“-Messenger lösen das über 
 > jemanden zuerst anzuschreiben. Deshalb Kontakte über **✏️ im Posteingang** einladen (WhatsApp, SMS
 > oder E-Mail mit Bot-Link). Sobald der Kontakt „Starten“ tippt, erscheint der Chat in OS.
 > Chats löschen: im Posteingang **Löschen** oder im Chat über **⋯ → Chat löschen**.
+
+**Kontakte & Anrufe:** Unten in der Leiste gibt es **👥 Kontakte** (＋ hinzufügen, 📥 vom iPhone
+importieren über eine .vcf-Datei aus der App „Kontakte“, bearbeiten, löschen, in iPhone-Kontakte sichern)
+und **📞 Anrufe** (＋ neuer Anruf per Nummer oder Name, Telefon über das iPhone, Video- und Internetanrufe
+direkt in OS, Anrufliste mit Rückruf per Tipp). Konten und Einstellungen liegen unter **⚙️ Mehr**.
 | **Demo-Daten** | Beispiel-Chats aus dem Baualltag | keiner – zum Ausprobieren |
 
 Nicht möglich (technische Sperre von Apple): Zugriff auf **iMessage** ohne Mac-Relay.

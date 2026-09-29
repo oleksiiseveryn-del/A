@@ -292,6 +292,7 @@ const state = {
   conversations: store.get("conversations", []),
   deletedChats: store.get("deletedChats", {}), // convID -> time of deletion; older messages stay hidden
   contacts: store.get("contacts", []),
+  calls: store.get("calls", []),
   profile: { ...DEFAULT_PROFILE, ...store.get("profile", {}) },
   model: store.get("model", "claude-opus-5"),
   autoTriage: store.get("autoTriage", true),
@@ -1303,20 +1304,13 @@ function newChatSheet(prefill = {}) {
     if (needsPhone && !phone) return toast("Bitte eine gültige Telefonnummer eintippen.");
     if (act === "inv-mail" && !email) return toast("Bitte eine E-Mail-Adresse eintippen.");
     // Remember the contact for next time.
-    if (name || phone || email) {
-      const i = state.contacts.findIndex((k) => (phone && k.phone === phone) || (email && k.email === email));
-      const entry = { name, phone, email };
-      if (i >= 0) state.contacts[i] = { ...state.contacts[i], ...Object.fromEntries(Object.entries(entry).filter(([, v]) => v)) };
-      else state.contacts.unshift(entry);
-      state.contacts.sort((a, b) => (a.name || a.phone).localeCompare(b.name || b.phone, "de"));
-      save();
-    }
+    const contact = (name || phone || email) ? upsertContact({ name, phone, email }) : { name, phone };
     const digits = phone.replace("+", "");
     const text = inviteText(name);
     const go = (href) => { location.href = href; };
     if (act === "wa") go(`https://wa.me/${digits}`);
     if (act === "sms") go(`sms:${phone}`);
-    if (act === "tel") go(`tel:${phone}`);
+    if (act === "tel") phoneCall(contact);
     if (act === "inv-wa") go(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`);
     if (act === "inv-sms") go(`sms:${phone}&body=${encodeURIComponent(text)}`);
     if (act === "inv-mail") go(`mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent("Kontakt " + state.profile.company)}&body=${encodeURIComponent(text)}`);
@@ -1341,6 +1335,371 @@ function newChatSheet(prefill = {}) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Contacts & calls
+// ---------------------------------------------------------------------------
+
+const initials = (name) => (String(name || "?").replace(/^(Hr\.|Fr\.|Herr|Frau|Dr\.)\s+/i, "").split(/\s+/).filter(Boolean)
+  .slice(0, 2).map((w) => w[0]).join("") || "?").toUpperCase();
+const contactAvatar = (k) => `<div class="avatar" style="background:${k.color || "var(--accent)"}">${esc(initials(k.name || k.phone))}</div>`;
+// Display only: "+491715551234" -> "+49 171 5551234" (mobile) / "+49 40 1234567" (Hamburg).
+const fmtPhone = (p) => String(p || "").replace(/^\+49(1\d{2}|40|30|89|69|\d{3})(\d+)$/, "+49 $1 $2");
+const contactLabel = (k) => k.name || k.phone || k.email || "Ohne Namen";
+const sameText = (a, b) => String(a || "").trim().toLowerCase() === String(b || "").trim().toLowerCase();
+
+// Older builds stored contacts without ids.
+for (const k of state.contacts) k.id ??= uuid();
+
+function sortContacts() {
+  state.contacts.sort((a, b) => contactLabel(a).localeCompare(contactLabel(b), "de", { sensitivity: "base" }));
+}
+
+// Adds or merges (same phone or e-mail) and returns the stored contact.
+function upsertContact(data) {
+  const clean = { ...data, name: (data.name || "").trim(), company: (data.company || "").trim(), phone: normalizePhone(data.phone) || (data.phone || "").trim(),
+    email: (data.email || "").trim(), note: (data.note || "").trim() };
+  let k = clean.id && state.contacts.find((x) => x.id === clean.id);
+  if (k) Object.assign(k, clean); // edited in the form: take every field as typed
+  else {
+    k = state.contacts.find((x) => (clean.phone && x.phone === clean.phone) || (clean.email && sameText(x.email, clean.email)));
+    if (k) Object.assign(k, Object.fromEntries(Object.entries(clean).filter(([key, v]) => v && key !== "id")));
+    else { k = { ...clean, id: uuid() }; state.contacts.push(k); }
+  }
+  sortContacts();
+  save();
+  return k;
+}
+
+function deleteContact(k) {
+  if (!confirm(`Kontakt „${contactLabel(k)}“ löschen?`)) return false;
+  state.contacts = state.contacts.filter((x) => x.id !== k.id);
+  save();
+  toast("Kontakt gelöscht");
+  return true;
+}
+
+const chatForContact = (k) => state.conversations.find((c) => sameText(c.title, k.name))
+  || state.conversations.find((c) => k.name && c.title.toLowerCase().includes(k.name.toLowerCase()));
+
+// --- vCard (iPhone Kontakte → Teilen → .vcf) --------------------------------
+
+function parseVCards(text) {
+  const lines = text.replace(/\r\n/g, "\n").replace(/\n[ \t]/g, "").split("\n");
+  const unescape = (v) => v.replace(/\\n/gi, " ").replace(/\\([,;\\])/g, "$1").trim();
+  const cards = [];
+  let cur = null;
+  for (const line of lines) {
+    const i = line.indexOf(":");
+    if (i < 0) continue;
+    const head = line.slice(0, i).toUpperCase(), value = line.slice(i + 1);
+    const key = head.split(";")[0].split(".").pop();
+    if (key === "BEGIN") cur = {};
+    else if (key === "END" && cur) { if (cur.name || cur.phone || cur.email) cards.push(cur); cur = null; }
+    else if (!cur) continue;
+    else if (key === "FN") cur.name = unescape(value);
+    else if (key === "N" && !cur.name) cur.name = unescape(value.split(";").slice(0, 2).reverse().join(" "));
+    else if (key === "ORG") cur.company = unescape(value.split(";")[0]);
+    else if (key === "TEL" && (!cur.phone || /CELL|MOBILE|IPHONE/.test(head))) cur.phone = unescape(value).replace(/^tel:/i, "");
+    else if (key === "EMAIL" && !cur.email) cur.email = unescape(value);
+    else if (key === "NOTE") cur.note = unescape(value);
+  }
+  return cards;
+}
+
+function toVCard(k) {
+  const e = (v) => String(v || "").replace(/([,;\\])/g, "\\$1").replace(/\n/g, "\\n");
+  return ["BEGIN:VCARD", "VERSION:3.0", `FN:${e(contactLabel(k))}`, `N:${e(k.name)};;;;`,
+    k.company && `ORG:${e(k.company)}`, k.phone && `TEL;TYPE=CELL:${e(k.phone)}`, k.email && `EMAIL:${e(k.email)}`,
+    k.note && `NOTE:${e(k.note)}`, "END:VCARD"].filter(Boolean).join("\r\n");
+}
+
+async function shareFile(name, text, type) {
+  const file = new File([text], name, { type });
+  if (navigator.canShare?.({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(file);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+
+async function importContacts() {
+  // Contact Picker (where Safari offers it) – otherwise a .vcf file from the Kontakte app.
+  if (navigator.contacts?.select) {
+    try {
+      const picked = await navigator.contacts.select(["name", "tel", "email"], { multiple: true });
+      picked.forEach((p) => upsertContact({ name: p.name?.[0], phone: p.tel?.[0], email: p.email?.[0] }));
+      toast(`${picked.length} Kontakt(e) übernommen`);
+      return render();
+    } catch (e) { if (e.name === "AbortError") return; }
+  }
+  const input = document.createElement("input");
+  input.type = "file";
+  input.accept = ".vcf,text/vcard,text/x-vcard";
+  input.addEventListener("change", async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    const cards = parseVCards(await file.text());
+    if (!cards.length) return toast("Keine Kontakte in der Datei gefunden");
+    cards.forEach(upsertContact);
+    toast(`✓ ${cards.length} Kontakt(e) importiert`);
+    render();
+  });
+  input.click();
+}
+
+// --- Call log ----------------------------------------------------------------
+
+function logCall(entry) {
+  state.calls.unshift({ id: uuid(), at: Date.now(), minutes: 0, ...entry });
+  state.calls.length = Math.min(state.calls.length, 300);
+  store.set("calls", state.calls);
+  if (ui.tab === "calls" && !ui.chatID) view.update?.();
+}
+
+const CALL_KINDS = { phone: ["📞", "Telefon"], audio: ["🎧", "Sprachanruf (Internet)"], video: ["📹", "Videoanruf"], whatsapp: ["🟢", "WhatsApp"] };
+
+function phoneCall(k) {
+  const phone = normalizePhone(k.phone);
+  if (!phone) return toast("Keine Telefonnummer hinterlegt");
+  logCall({ kind: "phone", name: contactLabel(k), contactID: k.id, number: phone });
+  location.href = "tel:" + phone;
+}
+
+// Internet call with a contact: via the chat when there is one, otherwise the link goes out by WhatsApp/SMS/E-Mail.
+function internetCall(k, audioOnly) {
+  const c = chatForContact(k);
+  if (c) return startCall(c, { audioOnly });
+  const url = newRoomURL();
+  const text = `${audioOnly ? "📞 Anruf" : "📹 Videoanruf"} von ${state.profile.ownerName} (${state.profile.company}) – jetzt beitreten:\n${url}\nEinfach antippen, keine App und kein Konto nötig.`;
+  const phone = normalizePhone(k.phone), digits = phone.replace("+", "");
+  openSheet(`${audioOnly ? "Sprachanruf" : "Videoanruf"} · ${contactLabel(k)}`, `
+    <p class="muted">${esc(contactLabel(k))} bekommt einen Link – ein Tipp genügt, ohne App. Wie soll der Link gesendet werden?</p>
+    ${phone ? `<button class="sheet-btn" data-via="wa">🟢 Per WhatsApp senden &amp; Anruf starten</button>
+    <button class="sheet-btn" data-via="sms">💬 Per SMS senden &amp; Anruf starten</button>` : ""}
+    ${k.email ? `<button class="sheet-btn" data-via="mail">✉️ Per E-Mail senden &amp; Anruf starten</button>` : ""}
+    <button class="sheet-btn" data-via="share">🔗 Link teilen / kopieren &amp; Anruf starten</button>`,
+  async (e) => {
+    const via = e.target.closest("[data-via]")?.dataset.via;
+    if (!via) return;
+    closeSheet();
+    if (via === "wa") window.open(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`, "_blank", "noopener");
+    if (via === "sms") { const a = document.createElement("a"); a.href = `sms:${phone}&body=${encodeURIComponent(text)}`; a.click(); }
+    if (via === "mail") { const a = document.createElement("a"); a.href = `mailto:${encodeURIComponent(k.email)}?subject=${encodeURIComponent("Videoanruf " + state.profile.company)}&body=${encodeURIComponent(text)}`; a.click(); }
+    if (via === "share") {
+      try { await navigator.clipboard.writeText(text); toast("Link kopiert"); } catch { /* shown in call bar */ }
+    }
+    joinCall(url, { audioOnly, contact: k });
+  });
+}
+
+// --- Contact detail & editor --------------------------------------------------
+
+function contactSheet(k) {
+  const phone = normalizePhone(k.phone), digits = phone.replace("+", "");
+  const chat = chatForContact(k);
+  const recent = state.calls.filter((x) => x.contactID === k.id).slice(0, 5);
+  const act = (key, icon, label, on = true) => `<button class="qa" data-ka="${key}" ${on ? "" : "disabled"}><span>${icon}</span>${label}</button>`;
+  openSheet(contactLabel(k), `
+    <div class="contact-head">${contactAvatar(k)}<div><b>${esc(contactLabel(k))}</b>${k.company ? `<div class="muted">${esc(k.company)}</div>` : ""}</div></div>
+    <div class="qa-row">
+      ${act("tel", "📞", "Anrufen", !!phone)}${act("video", "📹", "Video")}${act("audio", "🎧", "Internet")}${act("chat", "💬", "Nachricht")}
+    </div>
+    <div class="group">
+      ${phone ? `<button class="btn-row" data-ka="tel">📞 ${esc(fmtPhone(phone))}</button>` : ""}
+      ${phone ? `<button class="btn-row" data-ka="wa">🟢 WhatsApp</button><button class="btn-row" data-ka="sms">💬 SMS</button>` : ""}
+      ${k.email ? `<button class="btn-row" data-ka="mail">✉️ ${esc(k.email)}</button>` : ""}
+      ${chat ? `<button class="btn-row" data-ka="open">📥 Chat in OS öffnen</button>` : ""}
+    </div>
+    ${k.note ? `<div class="sheet-sec">Notiz</div><p>${esc(k.note)}</p>` : ""}
+    ${recent.length ? `<div class="sheet-sec">Letzte Anrufe</div>${recent.map((x) => `<div class="muted">${CALL_KINDS[x.kind]?.[0] || "📞"} ${esc(timeLabel(x.at))}${x.minutes ? ` · ${x.minutes} Min.` : ""}</div>`).join("")}` : ""}
+    <div class="sheet-sec">Mehr</div>
+    <button class="sheet-btn" data-ka="invite">📨 Einladen (WhatsApp, SMS, E-Mail)</button>
+    <button class="sheet-btn" data-ka="edit">✏️ Kontakt bearbeiten</button>
+    <button class="sheet-btn" data-ka="vcf">📇 In iPhone-Kontakte sichern / teilen</button>
+    <button class="sheet-btn danger" data-ka="delete">🗑 Kontakt löschen</button>`,
+  (e) => {
+    const a = e.target.closest("[data-ka]")?.dataset.ka;
+    if (!a) return;
+    if (a === "tel") return phoneCall(k);
+    if (a === "video" || a === "audio") { closeSheet(); return internetCall(k, a === "audio"); }
+    if (a === "wa") { if (!digits) return toast("Keine Telefonnummer hinterlegt"); logCall({ kind: "whatsapp", name: contactLabel(k), contactID: k.id, number: phone }); return window.open(`https://wa.me/${digits}`, "_blank", "noopener"); }
+    if (a === "sms") { location.href = "sms:" + phone; return; }
+    if (a === "mail") { location.href = "mailto:" + k.email; return; }
+    if (a === "open" || (a === "chat" && chat)) { closeSheet(); ui.tab = "inbox"; render(); return openChat(convID(chat)); }
+    if (a === "chat" || a === "invite") return newChatSheet(k);
+    if (a === "edit") return contactEditor(k);
+    if (a === "vcf") return shareFile(`${contactLabel(k).replace(/[^\wäöüÄÖÜß .-]/g, "")}.vcf`, toVCard(k), "text/vcard");
+    if (a === "delete" && deleteContact(k)) { closeSheet(); render(); }
+  });
+}
+
+function contactEditor(k = {}) {
+  const isNew = !k.id;
+  const sheet = openSheet(isNew ? "Neuer Kontakt" : "Kontakt bearbeiten", `
+    <div class="group">
+      <div class="field"><label>Name</label><input id="ce-name" autocomplete="name" placeholder="Vor- und Nachname" value="${esc(k.name || "")}"></div>
+      <div class="field"><label>Firma</label><input id="ce-company" autocomplete="organization" placeholder="optional" value="${esc(k.company || "")}"></div>
+      <div class="field"><label>Telefon</label><input id="ce-phone" type="tel" inputmode="tel" autocomplete="tel" placeholder="0171 1234567" value="${esc(k.phone || "")}"></div>
+      <div class="field"><label>E-Mail</label><input id="ce-email" type="email" autocapitalize="off" autocomplete="email" placeholder="optional" value="${esc(k.email || "")}"></div>
+      <div class="field"><textarea id="ce-note" placeholder="Notiz, z. B. Bauvorhaben, Auftragsnummer, erreichbar vormittags">${esc(k.note || "")}</textarea></div>
+    </div>
+    <button class="primary" id="ce-save">Speichern</button>
+    ${isNew ? "" : `<button class="sheet-btn danger center" id="ce-delete">🗑 Kontakt löschen</button>`}`);
+  $("#ce-name", sheet).focus();
+  $("#ce-save", sheet).addEventListener("click", () => {
+    const data = { id: k.id, name: $("#ce-name", sheet).value, company: $("#ce-company", sheet).value,
+      phone: $("#ce-phone", sheet).value, email: $("#ce-email", sheet).value, note: $("#ce-note", sheet).value };
+    if (!data.name.trim() && !data.phone.trim() && !data.email.trim()) return toast("Bitte Name oder Telefonnummer eintippen.");
+    if (data.phone.trim() && !normalizePhone(data.phone)) return toast("Telefonnummer prüfen – z. B. 0171 1234567 oder +49 …");
+    const saved = upsertContact(data);
+    toast(isNew ? "✓ Kontakt gespeichert" : "✓ Änderungen gespeichert");
+    render();
+    contactSheet(saved);
+  });
+  $("#ce-delete", sheet)?.addEventListener("click", () => { if (deleteContact(k)) { closeSheet(); render(); } });
+}
+
+// Chat partners that are not saved as contacts yet.
+function contactSuggestions() {
+  return state.conversations.filter((c) => !c.isArchived && !c.title.startsWith("!") && !/bot$/i.test(c.title)
+    && !state.contacts.some((k) => sameText(k.name, c.title))).slice(0, 5);
+}
+
+function renderContacts() {
+  screen.innerHTML = `
+    <div class="header">
+      <div class="header-row">
+        <h1>Kontakte</h1>
+        <button class="icon-btn" id="btn-import" title="Vom iPhone importieren">📥</button>
+        <button class="icon-btn" id="btn-add-contact" title="Kontakt hinzufügen" style="font-size:26px">＋</button>
+      </div>
+      <input class="search" id="c-search" type="search" placeholder="Name, Firma, Nummer suchen" value="${esc(ui.contactSearch || "")}">
+    </div>
+    <div class="scroll" id="c-list"></div>`;
+  $("#btn-add-contact").addEventListener("click", () => contactEditor());
+  $("#btn-import").addEventListener("click", importContacts);
+  $("#c-search").addEventListener("input", (e) => { ui.contactSearch = e.target.value; fill(); });
+  $("#c-list").addEventListener("click", (e) => {
+    const quick = e.target.closest("[data-quick]");
+    const row = e.target.closest("[data-contact]");
+    const sug = e.target.closest("[data-suggest]");
+    if (sug) { const c = state.conversations.find((x) => convID(x) === sug.dataset.suggest); return contactEditor({ name: c?.title, note: c?.note }); }
+    if (e.target.closest("#c-add-big")) return contactEditor();
+    if (e.target.closest("#c-import-big")) return importContacts();
+    const k = state.contacts.find((x) => x.id === (quick || row)?.dataset[quick ? "quick" : "contact"]);
+    if (!k) return;
+    if (quick) { e.stopPropagation(); return phoneCall(k); }
+    contactSheet(k);
+  });
+  const fill = () => {
+    const q = (ui.contactSearch || "").trim().toLowerCase();
+    const qDigits = q.replace(/\D/g, "");
+    const list = state.contacts.filter((k) => !q || [k.name, k.company, k.email, k.note].some((v) => (v || "").toLowerCase().includes(q))
+      || (qDigits.length > 2 && (k.phone || "").replace(/\D/g, "").includes(qDigits.replace(/^0/, ""))));
+    let letter = "";
+    const rows = list.map((k) => {
+      const l = (contactLabel(k)[0] || "#").toUpperCase();
+      const head = l !== letter ? `<div class="letter">${esc((letter = l))}</div>` : "";
+      return `${head}<div class="row" data-contact="${esc(k.id)}" role="button">
+        ${contactAvatar(k)}
+        <div class="row-main"><div class="row-title">${esc(contactLabel(k))}</div>
+          <div class="row-preview">${esc([k.company, fmtPhone(k.phone)].filter(Boolean).join(" · ") || k.email || "")}</div></div>
+        ${k.phone ? `<button class="call-quick" data-quick="${esc(k.id)}" title="Anrufen">📞</button>` : ""}
+      </div>`;
+    }).join("");
+    const sugs = q ? [] : contactSuggestions();
+    $("#c-list").innerHTML = (state.contacts.length ? "" : `<div class="empty"><div class="big">👥</div><p>Noch keine Kontakte</p>
+        <button class="primary" id="c-add-big">＋ Kontakt hinzufügen</button>
+        <button class="sheet-btn center" id="c-import-big">📥 Vom iPhone importieren</button>
+        <p class="muted" style="font-size:13px">iPhone: App „Kontakte“ → Kontakt oder Liste → „Teilen“ → „In Dateien sichern“, dann hier 📥 tippen und die .vcf-Datei wählen.</p></div>`)
+      + (state.contacts.length && !list.length ? `<div class="empty"><p>Keine Treffer</p></div>` : rows)
+      + (sugs.length ? `<div class="section-title" style="padding:18px 16px 4px">✨ Aus Ihren Chats speichern</div>${sugs.map((c) => `<div class="row" data-suggest="${esc(convID(c))}" role="button">${avatar(c.platform)}<div class="row-main"><div class="row-title">${esc(c.title)}</div><div class="row-preview">Als Kontakt speichern</div></div><span class="pill" style="align-self:center">＋</span></div>`).join("")}` : "")
+      + (state.contacts.length ? `<div class="footer" style="text-align:center">${state.contacts.length} Kontakte</div>` : "");
+  };
+  view.update = fill;
+  fill();
+}
+
+function dialSheet() {
+  const sheet = openSheet("Neuer Anruf", `
+    <input class="search dial" id="dial-num" type="tel" inputmode="tel" placeholder="Nummer oder Name">
+    <div id="dial-hits"></div>
+    <button class="primary" id="dial-call">📞 Anrufen</button>
+    <button class="sheet-btn center" id="dial-video">📹 Videoanruf mit Link</button>`);
+  const input = $("#dial-num", sheet);
+  input.focus();
+  const hits = () => {
+    const q = input.value.trim().toLowerCase(), d = q.replace(/\D/g, "").replace(/^0/, "");
+    const found = q ? state.contacts.filter((k) => (k.name || "").toLowerCase().includes(q) || (d.length > 2 && (k.phone || "").replace(/\D/g, "").includes(d))).slice(0, 5) : [];
+    $("#dial-hits", sheet).innerHTML = found.map((k) => `<button class="sheet-btn" data-hit="${esc(k.id)}">${esc(contactLabel(k))} <span class="muted">${esc(fmtPhone(k.phone))}</span></button>`).join("");
+  };
+  input.addEventListener("input", hits);
+  sheet.addEventListener("click", (e) => {
+    const hit = e.target.closest("[data-hit]");
+    if (hit) { closeSheet(); contactSheet(state.contacts.find((k) => k.id === hit.dataset.hit)); }
+  });
+  const target = () => {
+    const v = input.value.trim();
+    const known = state.contacts.find((k) => sameText(k.name, v) || (normalizePhone(v) && k.phone === normalizePhone(v)));
+    return known || (normalizePhone(v) ? { name: "", phone: normalizePhone(v) } : null);
+  };
+  $("#dial-call", sheet).addEventListener("click", () => { const k = target(); if (!k) return toast("Bitte eine Nummer eintippen"); phoneCall(k); });
+  $("#dial-video", sheet).addEventListener("click", () => { const k = target(); if (!k) return toast("Bitte eine Nummer eintippen"); closeSheet(); internetCall(k, false); });
+}
+
+function renderCalls() {
+  screen.innerHTML = `
+    <div class="header">
+      <div class="header-row">
+        <h1>Anrufe</h1>
+        <button class="icon-btn" id="btn-clear-calls" title="Liste leeren">🗑</button>
+        <button class="icon-btn" id="btn-dial" title="Neuer Anruf" style="font-size:26px">＋</button>
+      </div>
+    </div>
+    <div class="scroll" id="call-list"></div>`;
+  $("#btn-dial").addEventListener("click", dialSheet);
+  $("#btn-clear-calls").addEventListener("click", () => {
+    if (!state.calls.length || !confirm("Anrufliste leeren?")) return;
+    state.calls = []; store.set("calls", state.calls); fill();
+  });
+  $("#call-list").addEventListener("click", (e) => {
+    if (e.target.closest("#call-new")) return dialSheet();
+    const del = e.target.closest("[data-del-call]");
+    if (del) { e.stopPropagation(); state.calls = state.calls.filter((x) => x.id !== del.dataset.delCall); store.set("calls", state.calls); return fill(); }
+    const qa = e.target.closest("[data-fav]");
+    if (qa) { const k = state.contacts.find((x) => x.id === qa.dataset.fav); return k && phoneCall(k); }
+    const row = e.target.closest("[data-call-id]");
+    if (!row) return;
+    const x = state.calls.find((y) => y.id === row.dataset.callId);
+    const k = state.contacts.find((y) => y.id === x?.contactID) || (x?.number ? { name: x.name, phone: x.number } : null);
+    const c = state.conversations.find((y) => convID(y) === x?.conversationID);
+    if (x?.kind === "phone" && k) return phoneCall(k);
+    if (c) return startCall(c, { audioOnly: x.kind === "audio" });
+    if (k) return k.id ? contactSheet(k) : phoneCall(k);
+  });
+  const fill = () => {
+    const favs = state.contacts.filter((k) => k.phone).map((k) => [k, state.calls.filter((x) => x.contactID === k.id).length])
+      .filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([k]) => k);
+    $("#call-list").innerHTML =
+      (favs.length ? `<div class="section-title" style="padding:12px 16px 4px">Häufig</div><div class="favs">${favs.map((k) => `<button class="fav" data-fav="${esc(k.id)}">${contactAvatar(k)}<span>${esc((k.name || k.phone).split(" ").slice(-1)[0])}</span></button>`).join("")}</div>` : "")
+      + (state.calls.length ? `<div class="section-title" style="padding:12px 16px 4px">Verlauf</div>` + state.calls.map((x) => {
+        const [icon, label] = CALL_KINDS[x.kind] || CALL_KINDS.phone;
+        return `<div class="row" data-call-id="${esc(x.id)}" role="button">
+          <div class="avatar" style="background:var(--card2);font-size:22px">${icon}</div>
+          <div class="row-main"><div class="row-top"><span class="row-title">${esc(x.name || x.number || "Unbekannt")}</span><span class="row-time">${esc(timeLabel(x.at))}</span></div>
+            <div class="row-preview">${esc(label)}${x.minutes ? ` · ${x.minutes} Min.` : ""}${x.number && x.name ? ` · ${esc(fmtPhone(x.number))}` : ""}</div></div>
+          <button class="call-quick" data-del-call="${esc(x.id)}" title="Aus Liste löschen" style="color:var(--muted)">✕</button>
+        </div>`;
+      }).join("") : `<div class="empty"><div class="big">📞</div><p>Noch keine Anrufe</p><button class="primary" id="call-new">＋ Neuer Anruf</button>
+        <p class="muted" style="font-size:13px">Telefonate laufen über das iPhone, Video- und Internetanrufe direkt in OS. Ein Tipp auf einen Eintrag ruft zurück.</p></div>`);
+  };
+  view.update = fill;
+  fill();
+}
+
 function chatMenu() {
   const c = currentChat();
   if (!c) return;
@@ -1350,6 +1709,7 @@ function chatMenu() {
     <button class="sheet-btn" data-act="pin">📌 ${c.isPinned ? "Nicht mehr anheften" : "Oben anheften"}</button>
     <button class="sheet-btn" data-act="subscription">✨ KI über Claude-Abo (Chat kopieren &amp; öffnen)</button>
     <button class="sheet-btn" data-act="call">📹 Video- oder Sprachanruf</button>
+    <button class="sheet-btn" data-act="contact">👤 ${state.contacts.some((k) => sameText(k.name, c.title)) ? "Kontakt anzeigen" : "Als Kontakt speichern"}</button>
     <button class="sheet-btn" data-act="read">🔊 Offene Nachrichten vorlesen</button>
     <button class="sheet-btn" data-act="archive">🗄 ${c.isArchived ? "Aus dem Archiv holen" : "Archivieren"}</button>
     <button class="sheet-btn danger" data-act="delete">🗑 Chat löschen</button>`,
@@ -1364,6 +1724,10 @@ function chatMenu() {
     if (act === "delete" && deleteChat(convID(c))) history.back();
     if (act === "read") readChat(c);
     if (act === "call") callMenu(c);
+    if (act === "contact") {
+      const k = state.contacts.find((x) => sameText(x.name, c.title));
+      k ? contactSheet(k) : contactEditor({ name: c.title, note: c.note });
+    }
     if (act === "subscription") openSubscriptionAssistant(c);
   });
 }
@@ -1527,16 +1891,17 @@ function loadJitsi(host) {
   return jitsiLoaders[host];
 }
 
-async function joinCall(link, { audioOnly = false, conversationID = null } = {}) {
+async function joinCall(link, { audioOnly = false, conversationID = null, contact = null } = {}) {
   const url = new URL(link);
   const c = state.conversations.find((x) => convID(x) === conversationID);
+  const who = c?.title || (contact && contactLabel(contact)) || "";
   reader.stop();
   dictation.stop();
   $("#call")?.remove();
   const overlay = document.createElement("div");
   overlay.id = "call";
   overlay.innerHTML = `<div class="call-bar">
-      <div class="call-info"><b>${esc(c?.title || "Videoanruf")}</b><span id="call-status">Verbinde …</span></div>
+      <div class="call-info"><b>${esc(who || "Videoanruf")}</b><span id="call-status">Verbinde …</span></div>
       <button class="call-btn" id="call-share" title="Link teilen">🔗</button>
       <button class="call-btn end" id="call-end" title="Auflegen">✕</button>
     </div>
@@ -1556,6 +1921,7 @@ async function joinCall(link, { audioOnly = false, conversationID = null } = {})
     try { api?.dispose(); } catch { /* already gone */ }
     overlay.remove();
     const minutes = joinedAt ? Math.max(1, Math.round((Date.now() - joinedAt) / 60000)) : 0;
+    logCall({ kind: audioOnly ? "audio" : "video", name: who || "Videoanruf", conversationID, contactID: contact?.id || null, minutes });
     if (c && joinedAt) afterCall(c, minutes);
   };
   $("#call-end", overlay).addEventListener("click", () => { try { api?.executeCommand("hangup"); } catch { /* ignore */ } finish(); });
@@ -1583,7 +1949,7 @@ async function joinCall(link, { audioOnly = false, conversationID = null } = {})
         startWithAudioMuted: false,
         startWithVideoMuted: audioOnly,
         startAudioOnly: audioOnly,
-        subject: c ? `${state.profile.company} · ${c.title}` : state.profile.company,
+        subject: who ? `${state.profile.company} · ${who}` : state.profile.company,
         // Quality: target resolution, direct peer-to-peer for 1:1, simulcast and
         // layer suspension so weak connections degrade gracefully instead of freezing.
         resolution: quality,
@@ -2485,7 +2851,7 @@ function fillTasks() {
 function renderAccounts() {
   if (ui.editing) return renderAccountEditor();
   screen.innerHTML = `
-    <div class="header"><h1>Konten</h1></div>
+    <div class="header"><div class="header-row"><button class="icon-btn" id="btn-more">‹ Mehr</button></div><h1>Konten</h1></div>
     <div class="scroll form">
       <div class="section-title">Verbundene Konten</div>
       <div class="group" id="acc-list"></div>
@@ -2501,6 +2867,7 @@ function renderAccounts() {
           : `<div class="${a.enabled ? "ok" : "muted"}">${a.enabled ? "Aktiv" : "Deaktiviert"}${a.kind === "telegramBot" && store.get(botNameKey(a.id), null) ? " · @" + esc(store.get(botNameKey(a.id), null)) : ""}</div>`}
       </button>`).join("") : `<div class="field muted">Noch keine Konten</div>`;
   };
+  $("#btn-more").addEventListener("click", () => { ui.tab = "settings"; render(); });
   $(".scroll", screen).addEventListener("click", (e) => {
     const add = e.target.closest("[data-add]");
     const edit = e.target.closest("[data-edit]");
@@ -2638,8 +3005,12 @@ function renderSettings() {
   const hasKey = !!store.get("anthropicKey", null);
   const opts = (map, current) => Object.entries(map).map(([k, v]) => `<option value="${k}" ${current === k ? "selected" : ""}>${esc(v)}</option>`).join("");
   screen.innerHTML = `
-    <div class="header"><h1>Einstellungen</h1></div>
+    <div class="header"><h1>Mehr</h1></div>
     <div class="scroll form">
+      <div class="section-title">Messenger</div>
+      <div class="group">
+        <button class="btn-row" id="go-accounts">👤 Konten &amp; Messenger verbinden${Object.keys(state.accountErrors).length ? ` <span class="err">· ${Object.keys(state.accountErrors).length} Problem(e)</span>` : ""}</button>
+      </div>
       <div class="section-title">KI über Ihr Claude-Abo</div>
       <div class="group">
         <a class="btn-row" href="${SUBSCRIPTION_ASSISTANT}" target="_blank" rel="noopener" style="text-decoration:none">✨ OS KI-Assistent öffnen (kein Schlüssel nötig)</a>
@@ -2706,6 +3077,7 @@ function renderSettings() {
       <div class="group"><button class="btn-row danger" id="btn-reset">Alle Chats auf diesem Gerät löschen</button></div>
       <div class="footer">OS · Version ${APP_VERSION} · HSD Hamburg GmbH · Merckmannstraße 30 · 20539 Hamburg</div>
     </div>`;
+  $("#go-accounts").addEventListener("click", () => { ui.tab = "accounts"; render(); });
   screen.querySelectorAll("[data-p]").forEach((el) => el.addEventListener("input", () => {
     state.profile[el.dataset.p] = el.value;
     save();
@@ -2756,10 +3128,13 @@ function renderSettings() {
 // ---------------------------------------------------------------------------
 
 function render() {
-  document.querySelectorAll("#tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === ui.tab));
+  const tab = ui.tab === "accounts" ? "settings" : ui.tab;
+  document.querySelectorAll("#tabbar button").forEach((b) => b.classList.toggle("active", b.dataset.tab === tab));
   closeSheet();
   if (ui.tab === "inbox") renderInbox();
   if (ui.tab === "today") renderToday();
+  if (ui.tab === "contacts") renderContacts();
+  if (ui.tab === "calls") renderCalls();
   if (ui.tab === "tasks") renderTasks();
   if (ui.tab === "accounts") renderAccounts();
   if (ui.tab === "settings") renderSettings();
@@ -2796,7 +3171,7 @@ if ("serviceWorker" in navigator) {
 // Updates: compare with version.json (never cached) and offer a one-tap reload
 // ---------------------------------------------------------------------------
 
-const APP_VERSION = "2026.09.29-1";
+const APP_VERSION = "2026.09.29-2";
 
 async function checkForUpdate() {
   try {
