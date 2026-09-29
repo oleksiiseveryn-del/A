@@ -290,6 +290,8 @@ const state = {
   briefingLoading: false,
   accounts: store.get("accounts", null) ?? [{ id: uuid(), kind: "demo", name: "Demo", enabled: true }],
   conversations: store.get("conversations", []),
+  deletedChats: store.get("deletedChats", {}), // convID -> time of deletion; older messages stay hidden
+  contacts: store.get("contacts", []),
   profile: { ...DEFAULT_PROFILE, ...store.get("profile", {}) },
   model: store.get("model", "claude-opus-5"),
   autoTriage: store.get("autoTriage", true),
@@ -307,6 +309,8 @@ const lastActivity = (c) => lastMsg(c)?.date ?? 0;
 function save() {
   store.set("accounts", state.accounts);
   store.set("conversations", state.conversations);
+  store.set("deletedChats", state.deletedChats);
+  store.set("contacts", state.contacts);
   store.set("profile", state.profile);
   store.set("tasks", state.tasks);
   store.set("templates", state.templates);
@@ -559,22 +563,48 @@ function matrixConnector(account) {
 }
 
 // Telegram Bot API: customers message the company bot, you answer here.
+// Accepts the bare token or the whole BotFather message and returns just the token.
+const cleanBotToken = (raw) => (String(raw || "").match(/\d{5,}:[A-Za-z0-9_-]{30,}/) || [String(raw || "").trim()])[0];
+const botNameKey = (accountID) => "telegram.bot." + accountID;
+const botLink = (accountID) => { const n = store.get(botNameKey(accountID), null); return n ? "https://t.me/" + n : null; };
+
 function telegramConnector(account) {
   let token = null;
   const offsetKey = "telegram.offset." + account.id;
   const url = (method) => `https://api.telegram.org/bot${token}/${method}`;
+  // Form-encoded POSTs are "simple" requests: api.telegram.org rejects the CORS preflight a JSON body would need.
+  async function call(method, params = {}) {
+    const body = params instanceof FormData ? params : new URLSearchParams(
+      Object.entries(params).map(([k, v]) => [k, typeof v === "object" ? JSON.stringify(v) : String(v)]));
+    let res;
+    try {
+      res = await fetch(url(method), { method: "POST", body });
+    } catch {
+      throw new Error("Telegram nicht erreichbar – Internetverbindung prüfen.");
+    }
+    const data = await res.json().catch(() => ({}));
+    if (data.ok) return data.result;
+    if (res.status === 401 || res.status === 404) throw new Error("Bot-Token ungültig – in @BotFather unter /mybots → Bot → „API Token“ neu kopieren.");
+    if (res.status === 409) {
+      // Another service registered a webhook; while it exists getUpdates is refused.
+      await fetch(url("deleteWebhook"), { method: "POST" }).catch(() => {});
+      throw new Error("Telegram: Webhook entfernt – gleich erneut aktualisieren.");
+    }
+    throw new Error("Telegram: " + (data.description || "Fehler " + res.status));
+  }
   return {
     async connect() {
-      token = store.get(secretKey(account.id), null);
+      token = cleanBotToken(store.get(secretKey(account.id), null));
       if (!token) throw new Error("Zugangsdaten fehlen: Telegram-Bot-Token");
-      const me = await httpJSON(url("getMe"));
-      if (!me.ok) throw new Error("Telegram-Token ungültig");
+      const me = await call("getMe");
+      store.set(botNameKey(account.id), me.username);
+      await call("deleteWebhook").catch(() => {});
+      return me;
     },
     async fetchUpdates() {
-      const res = await httpJSON(url("getUpdates"), { method: "POST",
-        body: { offset: store.get(offsetKey, 0), timeout: 0 } });
+      const updates = await call("getUpdates", { offset: store.get(offsetKey, 0), timeout: 0, allowed_updates: ["message"] });
       const byChat = {};
-      for (const update of res.result || []) {
+      for (const update of updates || []) {
         store.set(offsetKey, update.update_id + 1);
         const msg = update.message;
         if (!msg) continue;
@@ -585,8 +615,10 @@ function telegramConnector(account) {
         else if (msg.video) attachment = tgFile(msg.video, "video", msg.video.file_name || "Video.mp4", msg.video.mime_type);
         else if (msg.voice) attachment = tgFile(msg.voice, "audio", "Sprachnachricht.ogg", msg.voice.mime_type);
         else if (msg.audio) attachment = tgFile(msg.audio, "audio", msg.audio.file_name || "Audio", msg.audio.mime_type);
-        else if (msg.sticker) attachment = null;
-        const text = msg.text ?? msg.caption ?? (msg.sticker?.emoji || "");
+        let text = msg.text ?? msg.caption ?? (msg.sticker?.emoji || "");
+        if (/^\/start\b/.test(text)) text = "👋 hat den Chat mit Ihrem Firmen-Bot gestartet.";
+        else if (msg.contact) text = `📇 Kontakt: ${[msg.contact.first_name, msg.contact.last_name].filter(Boolean).join(" ")} ${msg.contact.phone_number || ""}`.trim();
+        else if (msg.location) text = `📍 Standort: https://maps.apple.com/?q=${msg.location.latitude},${msg.location.longitude}`;
         if (!text && !attachment) continue;
         const sender = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(" ");
         const key = String(msg.chat.id);
@@ -599,9 +631,8 @@ function telegramConnector(account) {
       return Object.values(byChat);
     },
     async send(text, conversation) {
-      const res = await httpJSON(url("sendMessage"), { method: "POST",
-        body: { chat_id: conversation.remoteID, text } });
-      return { id: `${conversation.remoteID}-${res.result?.message_id ?? uuid()}`, senderName: "Ich", text,
+      const result = await call("sendMessage", { chat_id: conversation.remoteID, text });
+      return { id: `${conversation.remoteID}-${result?.message_id ?? uuid()}`, senderName: "Ich", text,
         date: Date.now(), isOutgoing: true };
     },
     async sendFile(file, conversation) {
@@ -609,18 +640,13 @@ function telegramConnector(account) {
       const form = new FormData();
       form.append("chat_id", conversation.remoteID);
       form.append(asPhoto ? "photo" : "document", file, file.name);
-      let res;
-      try {
-        res = await fetch(url(asPhoto ? "sendPhoto" : "sendDocument"), { method: "POST", body: form });
-      } catch { throw new Error("Server nicht erreichbar – Internetverbindung prüfen."); }
-      const data = await res.json().catch(() => ({}));
-      if (!data.ok) throw new Error("Telegram: " + (data.description || res.status));
-      return `${conversation.remoteID}-${data.result.message_id}`;
+      const result = await call(asPhoto ? "sendPhoto" : "sendDocument", form);
+      return `${conversation.remoteID}-${result.message_id}`;
     },
     async download(att) {
-      const info = await httpJSON(url("getFile") + "?file_id=" + encodeURIComponent(att.src.fileId));
-      if (!info.result?.file_path) throw new Error("Datei zu groß oder nicht verfügbar (Telegram-Limit 20 MB)");
-      const res = await fetch(`https://api.telegram.org/file/bot${token}/${info.result.file_path}`);
+      const info = await call("getFile", { file_id: att.src.fileId }).catch(() => null);
+      if (!info?.file_path) throw new Error("Datei zu groß oder nicht verfügbar (Telegram-Limit 20 MB)");
+      const res = await fetch(`https://api.telegram.org/file/bot${token}/${info.file_path}`);
       if (!res.ok) throw new Error("Datei konnte nicht geladen werden");
       return res.blob();
     },
@@ -652,6 +678,14 @@ function resetConnection(accountID) {
 // Returns { changed, incoming }: whether anything stored changed / new incoming messages arrived.
 function merge(update) {
   const id = convID(update);
+  const deletedAt = state.deletedChats[id];
+  if (deletedAt) {
+    // A deleted chat only comes back when something new arrives after the deletion.
+    const newer = update.messages.filter((m) => m.date > deletedAt);
+    if (!newer.length) return { changed: false, incoming: false };
+    delete state.deletedChats[id];
+    update = { ...update, messages: newer, unreadCount: Math.min(update.unreadCount, newer.filter((m) => !m.isOutgoing).length) };
+  }
   const existing = state.conversations.find((c) => convID(c) === id);
   if (!existing) {
     state.conversations.push({ isPinned: false, isArchived: false, priority: null, aiSummary: null, ...update });
@@ -1199,6 +1233,114 @@ function editNote() {
   });
 }
 
+// Removes a chat from OS. It reappears only if the contact writes again.
+function deleteChat(id) {
+  const c = state.conversations.find((x) => convID(x) === id);
+  if (!c || !confirm(`Chat „${c.title}“ aus OS löschen?\n\nSchreibt der Kontakt erneut, erscheint der Chat wieder.`)) return false;
+  state.conversations = state.conversations.filter((x) => x !== c);
+  state.deletedChats[id] = Math.max(Date.now(), lastActivity(c));
+  save();
+  toast("Chat gelöscht");
+  return true;
+}
+
+// --- New chat / invite a contact ---------------------------------------------
+
+// "0171 123 45-67" -> "+491711234567"; keeps international numbers.
+function normalizePhone(raw) {
+  let p = String(raw || "").replace(/[^\d+]/g, "");
+  if (p.startsWith("00")) p = "+" + p.slice(2);
+  else if (p.startsWith("0")) p = "+49" + p.slice(1);
+  else if (p && !p.startsWith("+")) p = "+" + p;
+  return p.length >= 8 ? p : "";
+}
+
+function inviteText(name) {
+  const p = state.profile;
+  const bot = state.accounts.filter((a) => a.kind === "telegramBot" && a.enabled).map((a) => botLink(a.id)).find(Boolean);
+  const hello = name ? `Guten Tag ${name},` : "Guten Tag,";
+  const how = bot ? `\n\nSie erreichen uns ab sofort auch über Telegram: ${bot}\nLink öffnen und auf „Starten“ tippen – dann können Sie uns dort Nachrichten, Fotos und Dokumente schicken.` : "";
+  return `${hello}\n\nhier ist ${p.ownerName}, ${p.role} der ${p.company}. Bitte speichern Sie meine Nummer ${p.phone}.${how}\n\nMit freundlichen Grüßen\n${p.ownerName}\n${p.company}`;
+}
+
+function newChatSheet(prefill = {}) {
+  const matrix = state.accounts.find((a) => a.kind === "matrix" && a.enabled);
+  const telegram = state.accounts.find((a) => a.kind === "telegramBot" && a.enabled);
+  const bot = telegram && botLink(telegram.id);
+  const saved = state.contacts.map((k, i) => `<div class="action-item"><div><div>${esc(k.name || k.phone)}</div><div class="muted">${esc([k.phone, k.email].filter(Boolean).join(" · "))}</div></div>
+      <button class="pill" data-pick="${i}">Wählen</button><button class="pill" data-forget="${i}" title="Kontakt löschen">✕</button></div>`).join("");
+  const sheet = openSheet("Neuer Chat / Kontakt einladen", `
+    <div class="group">
+      <div class="field"><label>Name</label><input id="nc-name" autocomplete="name" placeholder="z. B. Hr. Petersen" value="${esc(prefill.name || "")}"></div>
+      <div class="field"><label>Telefon</label><input id="nc-phone" type="tel" autocomplete="tel" inputmode="tel" placeholder="0171 1234567" value="${esc(prefill.phone || "")}"></div>
+      <div class="field"><label>E-Mail</label><input id="nc-mail" type="email" autocomplete="email" autocapitalize="off" placeholder="optional" value="${esc(prefill.email || "")}"></div>
+    </div>
+    <div class="sheet-sec">Direkt schreiben</div>
+    ${matrix ? `<button class="sheet-btn" data-nc="bridge-wa">🟢 WhatsApp-Chat in OS starten</button>
+    <button class="sheet-btn" data-nc="bridge-signal">🔵 Signal-Chat in OS starten</button>` : ""}
+    <button class="sheet-btn" data-nc="wa">🟢 In WhatsApp öffnen</button>
+    <button class="sheet-btn" data-nc="sms">💬 SMS schreiben</button>
+    <button class="sheet-btn" data-nc="tel">📞 Anrufen</button>
+    <div class="sheet-sec">Einladen${bot ? " zum Telegram-Firmen-Bot" : ""}</div>
+    <button class="sheet-btn" data-nc="inv-wa">🟢 Einladung per WhatsApp</button>
+    <button class="sheet-btn" data-nc="inv-sms">💬 Einladung per SMS</button>
+    <button class="sheet-btn" data-nc="inv-mail">✉️ Einladung per E-Mail</button>
+    <button class="sheet-btn" data-nc="inv-share">📤 Einladung teilen / kopieren</button>
+    <div class="footer">${bot ? `Telegram erlaubt Bots nicht, jemanden zuerst anzuschreiben. Der Kontakt öffnet ${esc(bot)} und tippt „Starten“ – danach erscheint der Chat automatisch hier im Posteingang.`
+      : telegram ? "Der Telegram-Bot ist noch nicht verbunden – unter „Konten“ den Status prüfen." : "Tipp: Mit einem Telegram-Firmen-Bot (Konten → ＋ Telegram Bot) enthält die Einladung einen Link, über den Kunden Ihnen direkt in OS schreiben."}</div>
+    ${saved ? `<div class="sheet-sec">Gespeicherte Kontakte</div>${saved}` : ""}`,
+  async (e) => {
+    const pick = e.target.closest("[data-pick]");
+    const forget = e.target.closest("[data-forget]");
+    const act = e.target.closest("[data-nc]")?.dataset.nc;
+    if (pick) return newChatSheet(state.contacts[+pick.dataset.pick]);
+    if (forget) { state.contacts.splice(+forget.dataset.forget, 1); save(); return newChatSheet(); }
+    if (!act) return;
+    const name = $("#nc-name", sheet).value.trim();
+    const phone = normalizePhone($("#nc-phone", sheet).value);
+    const email = $("#nc-mail", sheet).value.trim();
+    const needsPhone = !["inv-mail", "inv-share"].includes(act);
+    if (needsPhone && !phone) return toast("Bitte eine gültige Telefonnummer eintippen.");
+    if (act === "inv-mail" && !email) return toast("Bitte eine E-Mail-Adresse eintippen.");
+    // Remember the contact for next time.
+    if (name || phone || email) {
+      const i = state.contacts.findIndex((k) => (phone && k.phone === phone) || (email && k.email === email));
+      const entry = { name, phone, email };
+      if (i >= 0) state.contacts[i] = { ...state.contacts[i], ...Object.fromEntries(Object.entries(entry).filter(([, v]) => v)) };
+      else state.contacts.unshift(entry);
+      state.contacts.sort((a, b) => (a.name || a.phone).localeCompare(b.name || b.phone, "de"));
+      save();
+    }
+    const digits = phone.replace("+", "");
+    const text = inviteText(name);
+    const go = (href) => { location.href = href; };
+    if (act === "wa") go(`https://wa.me/${digits}`);
+    if (act === "sms") go(`sms:${phone}`);
+    if (act === "tel") go(`tel:${phone}`);
+    if (act === "inv-wa") go(`https://wa.me/${digits}?text=${encodeURIComponent(text)}`);
+    if (act === "inv-sms") go(`sms:${phone}&body=${encodeURIComponent(text)}`);
+    if (act === "inv-mail") go(`mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent("Kontakt " + state.profile.company)}&body=${encodeURIComponent(text)}`);
+    if (act === "inv-share") {
+      if (navigator.share) { try { await navigator.share({ title: "Einladung", text }); return; } catch (err) { if (err.name === "AbortError") return; } }
+      try { await navigator.clipboard.writeText(text); toast("Einladung kopiert – im Messenger einfügen."); } catch { toast("Kopieren nicht möglich"); }
+    }
+    if (act === "bridge-wa" || act === "bridge-signal") {
+      const whats = act === "bridge-wa";
+      closeSheet();
+      toast(`⏳ Starte ${whats ? "WhatsApp" : "Signal"}-Chat mit ${name || phone} …`);
+      try {
+        const entry = connectorFor(matrix);
+        if (!entry.connected) { await entry.connector.connect(); entry.connected = true; }
+        await entry.connector.startBridge(whats ? "whatsappbot" : "signalbot", "pm " + phone);
+        setTimeout(refresh, 3000);
+        toast("Der Chat erscheint in wenigen Sekunden im Posteingang.");
+      } catch (error) {
+        toast(error.message);
+      }
+    }
+  });
+}
+
 function chatMenu() {
   const c = currentChat();
   if (!c) return;
@@ -1209,7 +1351,8 @@ function chatMenu() {
     <button class="sheet-btn" data-act="subscription">✨ KI über Claude-Abo (Chat kopieren &amp; öffnen)</button>
     <button class="sheet-btn" data-act="call">📹 Video- oder Sprachanruf</button>
     <button class="sheet-btn" data-act="read">🔊 Offene Nachrichten vorlesen</button>
-    <button class="sheet-btn" data-act="archive">🗄 ${c.isArchived ? "Aus dem Archiv holen" : "Archivieren"}</button>`,
+    <button class="sheet-btn" data-act="archive">🗄 ${c.isArchived ? "Aus dem Archiv holen" : "Archivieren"}</button>
+    <button class="sheet-btn danger" data-act="delete">🗑 Chat löschen</button>`,
   (e) => {
     const act = e.target.closest("[data-act]")?.dataset.act;
     if (!act) return;
@@ -1218,6 +1361,7 @@ function chatMenu() {
     if (act === "note") editNote();
     if (act === "pin") { c.isPinned = !c.isPinned; sortConversations(); save(); toast(c.isPinned ? "Angeheftet" : "Gelöst"); }
     if (act === "archive") { c.isArchived = !c.isArchived; save(); history.back(); }
+    if (act === "delete" && deleteChat(convID(c))) history.back();
     if (act === "read") readChat(c);
     if (act === "call") callMenu(c);
     if (act === "subscription") openSubscriptionAssistant(c);
@@ -1663,6 +1807,7 @@ function renderInbox() {
     <div class="header">
       <div class="header-row">
         <h1>Posteingang</h1>
+        <button class="icon-btn" id="btn-new" title="Neuer Chat / Kontakt einladen">✏️</button>
         <button class="icon-btn" id="btn-readall" title="Neue Nachrichten vorlesen">🔊</button>
         <button class="icon-btn" id="btn-refresh" title="Aktualisieren">⟳</button>
         <button class="icon-btn" id="btn-triage" title="KI-Sortierung">✨</button>
@@ -1674,6 +1819,7 @@ function renderInbox() {
     <div class="scroll" id="list"></div>`;
   $("#search").addEventListener("input", (e) => { ui.search = e.target.value; fillInbox(); });
   $("#btn-refresh").addEventListener("click", () => refresh());
+  $("#btn-new").addEventListener("click", () => newChatSheet());
   $("#btn-readall").addEventListener("click", () => (reader.speaking ? reader.stop() : readAllNew()));
   $("#btn-triage").addEventListener("click", () => {
     if (!hasKey()) return handOff(openChatsAsText(), "briefing", "Offene Chats");
@@ -1695,6 +1841,7 @@ function renderInbox() {
       if (action.dataset.action === "pin") { c.isPinned = !c.isPinned; sortConversations(); }
       if (action.dataset.action === "archive") c.isArchived = !c.isArchived;
       if (action.dataset.action === "read") markRead(action.dataset.id);
+      if (action.dataset.action === "delete") deleteChat(action.dataset.id);
       save();
       return fillInbox();
     }
@@ -1735,11 +1882,12 @@ function fillInbox() {
         <div class="row-actions">
           <button class="mini" data-action="pin" data-id="${esc(id)}">${c.isPinned ? "Lösen" : "Anheften"}</button>
           <button class="mini" data-action="archive" data-id="${esc(id)}">${c.isArchived ? "Zurückholen" : "Archivieren"}</button>
+          <button class="mini danger" data-action="delete" data-id="${esc(id)}">Löschen</button>
           ${c.unreadCount ? `<button class="mini" data-action="read" data-id="${esc(id)}">Gelesen</button>` : ""}
         </div>
       </div>
     </div>`;
-  }).join("") : `<div class="empty"><div class="big">📭</div><p>${ui.search ? "Keine Treffer" : "Keine Nachrichten"}</p><p>Verbinden Sie Messenger unter „Konten“.</p></div>`;
+  }).join("") : `<div class="empty"><div class="big">📭</div><p>${ui.search ? "Keine Treffer" : "Keine Nachrichten"}</p><p>Verbinden Sie Messenger unter „Konten“ oder laden Sie Kontakte über ✏️ ein.</p></div>`;
   updateBadge();
 }
 
@@ -2350,7 +2498,7 @@ function renderAccounts() {
       <button class="btn-row" data-edit="${esc(a.id)}" style="color:var(--text)">
         <div>${esc(a.name)} <span class="muted">· ${esc(ACCOUNT_KINDS[a.kind].split(" (")[0])}</span></div>
         ${state.accountErrors[a.id] ? `<div class="err">${esc(state.accountErrors[a.id])}</div>`
-          : `<div class="${a.enabled ? "ok" : "muted"}">${a.enabled ? "Aktiv" : "Deaktiviert"}</div>`}
+          : `<div class="${a.enabled ? "ok" : "muted"}">${a.enabled ? "Aktiv" : "Deaktiviert"}${a.kind === "telegramBot" && store.get(botNameKey(a.id), null) ? " · @" + esc(store.get(botNameKey(a.id), null)) : ""}</div>`}
       </button>`).join("") : `<div class="field muted">Noch keine Konten</div>`;
   };
   $(".scroll", screen).addEventListener("click", (e) => {
@@ -2388,7 +2536,9 @@ function renderAccountEditor() {
       <div class="group">
         <div class="field"><label>Bot-Token</label><input id="f-secret" type="password" autocapitalize="off" placeholder="${a.isNew ? "von @BotFather" : "nur zum Ändern"}"></div>
       </div>
-      <div class="footer">In Telegram @BotFather öffnen → /newbot → Token hier einfügen. Kunden schreiben dann Ihrem Firmen-Bot.</div>`,
+      <div class="footer">In Telegram <b>@BotFather</b> öffnen → /newbot → Namen vergeben → die ganze Antwort kopieren und hier einfügen (OS findet den Token selbst).<br><br><b>Wichtig:</b> Der Bot ist ein eigenes Firmen-Konto, nicht Ihr privates Telegram. Er sieht nur Nachrichten, die Kunden <i>an den Bot</i> schreiben – und Telegram erlaubt Bots nicht, jemanden zuerst anzuschreiben. Laden Sie Kontakte daher über ✏️ im Posteingang mit dem Bot-Link ein.</div>
+      ${!a.isNew && botLink(a.id) ? `<div class="section-title">Ihr Bot-Link für Kunden</div>
+      <div class="group"><button class="btn-row" id="btn-botlink">🔗 ${esc(botLink(a.id))} – kopieren</button></div>` : ""}`,
     demo: `<div class="footer" style="padding-top:18px">Beispiel-Chats aus dem Baualltag zum Ausprobieren der KI-Funktionen.</div>`,
   }[a.kind];
   screen.innerHTML = `
@@ -2408,6 +2558,9 @@ function renderAccountEditor() {
     </div>`;
   const val = (id) => $(id)?.value.trim() ?? "";
   $("#btn-cancel").addEventListener("click", () => { ui.editing = null; renderAccounts(); });
+  $("#btn-botlink")?.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(botLink(a.id)); toast("Link kopiert"); } catch { toast(botLink(a.id)); }
+  });
   screen.querySelectorAll("[data-bridge]").forEach((button) => button.addEventListener("click", async () => {
     const bridge = BRIDGES[+button.dataset.bridge];
     const account = state.accounts.find((x) => x.id === a.id);
@@ -2439,8 +2592,8 @@ function renderAccountEditor() {
     ui.editing = null;
     renderAccounts();
   });
-  $("#btn-save").addEventListener("click", () => {
-    const secret = val("#f-secret");
+  $("#btn-save").addEventListener("click", async () => {
+    const secret = a.kind === "telegramBot" ? cleanBotToken(val("#f-secret")) : val("#f-secret");
     const updated = { id: a.id, kind: a.kind, name: val("#f-name") || ACCOUNT_KINDS[a.kind],
       serverURL: val("#f-server"), username: val("#f-user"), enabled: $("#f-enabled").checked };
     if (a.kind === "matrix" && (!updated.serverURL || !updated.username)) return toast("Homeserver und Benutzer angeben.");
@@ -2458,6 +2611,21 @@ function renderAccountEditor() {
     save();
     ui.editing = null;
     renderAccounts();
+    if (a.kind === "telegramBot" && updated.enabled) {
+      // Test right away so a wrong token shows up now, not silently in the background.
+      toast("⏳ Prüfe Telegram-Bot …");
+      const entry = connectorFor(updated);
+      try {
+        const me = await entry.connector.connect();
+        entry.connected = true;
+        delete state.accountErrors[a.id];
+        toast(`✓ Verbunden mit @${me.username}`);
+      } catch (error) {
+        state.accountErrors[a.id] = error.message;
+        toast(error.message);
+      }
+      refresh();
+    }
     refresh();
   });
   view.update = () => {};
@@ -2628,7 +2796,7 @@ if ("serviceWorker" in navigator) {
 // Updates: compare with version.json (never cached) and offer a one-tap reload
 // ---------------------------------------------------------------------------
 
-const APP_VERSION = "2026.09.24-5";
+const APP_VERSION = "2026.09.29-1";
 
 async function checkForUpdate() {
   try {

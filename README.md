@@ -55,6 +55,12 @@ direkt zu lesen. Alle seriösen „Alles-in-einem“-Messenger lösen das über 
 |---|---|---|
 | **Matrix / Bridges** | WhatsApp, Signal, Telegram, Instagram, Facebook Messenger, Google Messages (SMS), LinkedIn, Slack … | eigener Server (einmalig einrichten, siehe unten) |
 | **Telegram Bot** | Kunden schreiben Ihrem Firmen-Bot | 2 Minuten: Bot bei @BotFather anlegen, Token eintragen |
+
+> **Telegram-Bot richtig nutzen:** Der Bot ist ein eigenes Firmen-Konto, nicht Ihr privates Telegram.
+> Er sieht nur Nachrichten, die Kunden **an den Bot** schreiben, und Telegram erlaubt Bots nicht,
+> jemanden zuerst anzuschreiben. Deshalb Kontakte über **✏️ im Posteingang** einladen (WhatsApp, SMS
+> oder E-Mail mit Bot-Link). Sobald der Kontakt „Starten“ tippt, erscheint der Chat in OS.
+> Chats löschen: im Posteingang **Löschen** oder im Chat über **⋯ → Chat löschen**.
 | **Demo-Daten** | Beispiel-Chats aus dem Baualltag | keiner – zum Ausprobieren |
 
 Nicht möglich (technische Sperre von Apple): Zugriff auf **iMessage** ohne Mac-Relay.

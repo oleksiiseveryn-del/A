@@ -92,6 +92,7 @@ input, textarea, select { font: inherit; color: var(--text); }
 .form { padding: 8px 0 24px; }
 .section-title { font-size: 13px; color: var(--muted); text-transform: uppercase; padding: 18px 20px 6px; }
 .group { background: var(--card); margin: 0 16px; border-radius: 12px; overflow: hidden; }
+.sheet .group { margin: 0; }
 .field { display: flex; align-items: center; gap: 10px; padding: 11px 14px; border-bottom: 1px solid var(--border); }
 .field:last-child { border-bottom: 0; }
 .field label { flex: none; width: 120px; color: var(--text); }
@@ -101,7 +102,7 @@ input, textarea, select { font: inherit; color: var(--text); }
 .footer { font-size: 13px; color: var(--muted); padding: 6px 20px 0; }
 .btn-row { display: block; width: 100%; text-align: left; padding: 12px 14px; color: var(--accent); border-bottom: 1px solid var(--border); }
 .btn-row:last-child { border-bottom: 0; }
-.btn-row.danger { color: var(--danger); }
+.btn-row.danger, .sheet-btn.danger, .mini.danger { color: var(--danger); }
 .err { color: var(--danger); font-size: 13px; }
 .ok { color: #2e9e4f; font-size: 13px; }
 .muted { color: var(--muted); font-size: 13px; }
